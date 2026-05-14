@@ -1,0 +1,13 @@
+---
+title: "CS Learning — Implementation Catalog"
+subtitle: "Top-5 Deep Dives + Catalog of 25"
+author: "Khalil Abdellah"
+date: "2026-05-13"
+language: en-US
+rights: "© 2026 Khalil Abdellah"
+description: |
+  A curated set of small build-them-yourself implementations grouped by
+  what they teach. Includes full deep-dives for the top five highest
+  signal-per-hour picks: arena allocator, open-addressed hash map, LRU
+  cache, TLV parser, and an NFA regex engine.
+...
