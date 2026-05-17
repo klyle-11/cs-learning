@@ -12,6 +12,18 @@ The **top-5 highest-signal-per-hour** picks are starred (★) and have full deep
 
 ---
 
+## 0. Prerequisites — if you're new to C
+
+If you've never written C before (or only touched it briefly), start here. It's the only entry on this list that is a *reference document* rather than a build-it-yourself project.
+
+| # | Topic | What it teaches | Effort | Lang |
+|---|-------|-----------------|--------|------|
+| 0.1 | **[C for the JavaScript developer (cheat sheet)](docs/00-c-fundamentals/c-for-js-developers.md)** | The whole language in one document: compile/link pipeline, types, pointers, arrays, strings, structs, heap memory, headers, the preprocessor, build tooling, memory bugs, idioms. Aimed at someone fluent in a managed language who has never opened a `.c` file. | 1 focused day to skim; a week of building to internalize | C |
+
+After this, jump straight to 1.1 (arena allocator) — it's the gentlest first project.
+
+---
+
 ## 1. Allocators & memory primitives
 
 This is where C separates from managed languages. A garbage-collected runtime hides the entire lifetime story; here, you write it.
@@ -84,6 +96,26 @@ Rust is ideal here — atomics with explicit memory ordering force you to *think
 | 5.3 | Lock-free stack with CAS | Small surface, deep lesson — including the ABA problem, which you will hit, and which is the thing senior engineers mean when they say "lock-free is hard." | 1 day | Rust |
 
 **Reading order tip**: 5.1 → 5.2 → 5.3. Strict difficulty ramp.
+
+---
+
+## 7. Standalone projects (multi-day builds)
+
+These are larger than the primitives above — each is a finished system you can run and demo. Where the earlier sections give you one mechanism in isolation, these put many mechanisms together. The format of each guide matches the deep-dives above: foundations, mental model, layered implementation, pitfalls, real-world context.
+
+| # | Topic | What it teaches | Effort | Lang |
+|---|-------|-----------------|--------|------|
+| 7.1 | **[Unix shell](docs/07-projects/01-unix-shell.md)** | `fork`/`exec`/`wait`, file-descriptor plumbing for pipes and redirection, signals, job control. The shell is the "hello world" of operating systems — once you write one, every line of every Dockerfile and CI pipeline reads differently. | 2–3 days | C |
+| 7.2 | **[Persistent key-value store](docs/07-projects/02-key-value-store.md)** | Log-structured storage, in-memory index, compaction, crash recovery. The simplest design behind Bitcask, RocksDB, LevelDB. You learn what "durable" actually costs. | 2–3 days | C |
+| 7.3 | **[`malloc` from scratch](docs/07-projects/03-malloc-from-scratch.md)** | `sbrk`/`mmap`, boundary tags, free-list management, coalescing, alignment, header overhead. The chapter of the operating system that runs in user space. | 2–4 days | C |
+| 7.4 | **[HTTP server from sockets](docs/07-projects/04-http-server-sockets.md)** | The full path from `socket()` to a parsed request to a written response. Headers, keep-alive, chunked encoding, the disasters of `read()` returning short. Covers the bonus web-server build. | 2–3 days | C |
+| 7.5 | **[Concurrent chat server with `epoll`](docs/07-projects/05-concurrent-chat-epoll.md)** | Non-blocking I/O, edge- vs. level-triggered, the readiness model, partial reads/writes, broadcasting to N clients without a thread per client. The C10K problem in your hands. | 3 days | C |
+| 7.6 | **[Redis-like in-memory server](docs/07-projects/06-redis-like-server.md)** | RESP protocol parsing, single-threaded event-loop architecture, expiration, basic persistence. After this, Redis stops being magic and starts being "a hash table behind an event loop." | 3–5 days | C |
+| 7.7 | **[SQLite-style database with B-tree](docs/07-projects/07-sqlite-clone-btree.md)** | Pager, page cache, B-tree splits and merges, a tiny SQL subset, REPL. The hardest project on this list in pure code complexity; the most satisfying when it works. | 1–2 weeks | C |
+| 7.8 | **[Git internals from scratch](docs/07-projects/08-git-internals.md)** | Content-addressed object store (blobs, trees, commits), zlib compression, refs, the index. After this, every `git` command makes sense. | 4–6 days | C |
+| 7.9 | **[Tiny OS kernel](docs/07-projects/09-tiny-os-kernel.md)** | Freestanding C, the boot path, the GDT/IDT, paging, VGA text output, basic interrupts. Running your own kernel under QEMU is one of the most permanently mind-changing things a programmer can do. | 1–3 weeks | C + asm |
+
+**Reading order tip**: 7.1 → 7.4 → 7.5 → 7.6 → 7.3 → 7.2 → 7.8 → 7.7 → 7.9. Shell teaches process model; the network sequence (7.4/7.5/7.6) teaches I/O architecture; `malloc` and the KV store teach storage; git and SQLite teach data structures at scale; the kernel teaches everything underneath all of it.
 
 ---
 
