@@ -64,7 +64,7 @@ struct Tls {
     // Read here rather than by mbedTLS, whose file functions are not built in on the board.
     std::string cert_pem, key_pem;
     if (!secure::slurp(cert_path, cert_pem) || !secure::slurp(key_path, key_pem)) { err = "cannot read the certificate or its key"; return false; }
-    int rc = mbedtls_x509_crt_parse(&chain, reinterpret_cast<const unsigned char *>(cert_pem.c_str()), cert_pem.size() + 1);
+    int rc = secure::parse_certs(&chain, cert_pem);
     if (!rc) rc = mbedtls_pk_parse_key(&key, reinterpret_cast<const unsigned char *>(key_pem.c_str()), key_pem.size() + 1, nullptr, 0, secure::rng_cb, nullptr);
     if (!rc) rc = mbedtls_ssl_config_defaults(&conf, MBEDTLS_SSL_IS_SERVER, MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT);
     if (rc) { err = secure::mbed_error(rc); return false; }

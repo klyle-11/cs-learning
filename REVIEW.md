@@ -10,7 +10,7 @@ The first pass said "not private today". That is no longer true: content cannot 
 
 What is left falls into three groups:
 
-1. **One serious new item: the hub's certificate authority.** To make HTTPS work, each device installs the hub's own authority. As built, that authority can vouch for *any* website, not just the hub, and on the board its key is readable by anyone with a USB cable. Finding 17. This should be fixed before the authority goes onto a phone that is also used for anything sensitive.
+1. **One serious new item, fixed the same day: the hub's certificate authority.** To make HTTPS work, each device installs the hub's own authority. As first built, that authority could vouch for *any* website, not just the hub. It is now limited to the hub's own names and home-network addresses, and its key is no longer kept (finding 17). What is left is on the devices: the old authority has to be removed from each one by hand.
 2. **Quiet data loss.** Several paths drop or overwrite data without saying so: a damaged notes file is replaced by an empty one, a copy that did not fit on the device is still shown as kept, storage that is full swallows unsent notes. Findings 19 to 21. None is likely on a laptop with 40 documents; all become likely on a phone that is nearly full or a board with little memory.
 3. **Work done too often, and too much held in memory**, which is what will decide whether the board is usable. Findings 32 to 39.
 
@@ -26,7 +26,7 @@ Ticked means fixed in both servers and the page, and covered by a test.
 | High | 5 foreign host name, 6 reading contacts the internet | done |
 | High | 7 copies on the phone in the clear | built, but **off until "protect…" is pressed** |
 | High | 8 the card in the clear | open: needs the decision under "Target design", layer 5 |
-| High | **17 the authority can vouch for any site** | **new, open** |
+| High | 17 the authority could vouch for any site | fixed; **the old authority must still be removed from each device**, and the board needs flash encryption |
 | Medium | 9, 10, 11, 13 | done (10 and 13 have new relatives: 24 and 21) |
 | Medium | 12 no limit on total storage | done in C++; **two gaps in Node (22)** |
 | Medium | **18 to 24** | **new, open** |
@@ -92,9 +92,10 @@ Ordered by how much damage each allows. Network security is included here.
 
 - [ ] **8. The card is stored in the clear.** Unchanged. The folder lock added today does not change this: it is a lock on the reader, not on the files (28).
 
-- [ ] **17. The hub's certificate authority can vouch for any website, and on the board its key is not protected.** *New. From reading the code.*
-The authority is made with no limit on which names it may sign for (`secure.hpp:294`; the only constraint is "may sign certificates", `:225`). A device that installs it will accept a certificate signed by it for any site at all. The trust page tells the user the opposite: "It lets this device recognise this hub and nothing else." The private key sits in the state folder: on a computer that is `~/.config/hub/ca-key.pem`, readable by the owner only; on the board it is the `state` partition of the flash, and the board's configuration turns on neither flash encryption nor secure boot (`esp32/sdkconfig.defaults`), so reading it takes a USB cable and one command. Whoever has that key and is on the same network as one of your devices can present themselves to it as any website, with no warning.
-*Fix:* give the authority name constraints, marked critical: the hub's own names, `.local`, `localhost`, and private address ranges only. Browsers then refuse anything else it signs. (Existing devices install the new authority once. Check on each kind of device that the constraint is honoured.) Turn on flash encryption on the board, or do not keep the authority's key on the board at all: make certificates on the computer and copy only the server's certificate and key. Correct the sentence on the trust page either way.
+- [x] **17. The hub's certificate authority could vouch for any website, and on the board its key was not protected.** *New in this pass, and fixed the same day. Confirmed by test.*
+The authority each device installs was made with no limit on which names it could sign for, and its private key was kept in the state folder. A device that trusted it would have accepted a certificate signed by it for any site at all, so whoever copied that key could have posed as any website to that device on a shared network. The trust page told the user the opposite.
+*Fixed* (`secure.hpp`, `ensure_certs`): certificates are now made as a chain of three. The authority's own key is used once, to sign an *issuer*, and is never written to disk. The issuer, whose key is kept, carries name constraints marked critical: names under `.local`, `localhost`, the machine's own host names, and the private address ranges. Server certificates are signed by the issuer. A state folder from the old layout is replaced on first start, and the old key deleted. *Tested:* with the kept key, certificates were forged for `example.com`, for a public address, and through a further authority; LibreSSL and Apple's own checker on this Mac refused all three, and accepted the same forgery under an authority without limits (the control). The server still serves HTTPS with the new chain.
+*Still to do:* **remove the old authority ("Hub local authority") from every device that installed it**; until then that device still trusts anything the old key signed, and the old key may survive in a backup. On the board, turn on flash encryption: the issuer's key is still readable over USB there, which now lets someone pose as the hub and nothing more. How the authority first reaches a device is still 23.
 
 ### Medium
 
@@ -168,6 +169,7 @@ The folder watcher keeps two complete lists of every file's path (`hub.cpp:702`)
 - The exception made for other hubs gives nothing away to ordinary websites: a request from another site is served only if it carries a token itself. The cookie and "this machine" count for nothing on such a request, and the comparison test checks exactly that.
 - Content from another hub never becomes a document in this hub's page: files arrive as pictures or media, pages as text shown in a frame that cannot run scripts.
 - The service worker keeps the page's own files and nothing else; documents, notes and tokens never pass through it.
+- The certificate authority can vouch for the hub and nothing else, and no key that could do more is stored (17).
 - Tokens come from the system's random source, are compared in constant time, and only their hashes are stored. No key, certificate or token is tracked in git.
 - The C++ request parser: size limits before allocation, refused chunked bodies.
 - Saves on the C++ side are atomic.
@@ -294,13 +296,13 @@ Five layers, each closing one way in.
 
 1. **Content cannot act.** Done.
 2. **The server knows who is asking.** Done. Open edges: 18, 26, 30.
-3. **The connection is encrypted.** Done, with the authority itself as the weak point: 17 and 23.
+3. **The connection is encrypted.** Done. The authority can now vouch for the hub only (17); how it first reaches a device is still 23.
 4. **The device copy is encrypted.** Built; off by default (7).
 5. **The board never holds readable data.** Still a decision. Its costs are unchanged: the board can no longer read titles or build the list, files must go in through a paired device, a lost passphrase loses the data, and the "assess my notes" workflow needs the key. The alternative remains encrypting on the board with a key in the chip's protected storage, which needs the same flash encryption that 17 asks for.
 
 ## Recommended order of work
 
-1. **The authority (17, 23).** Name constraints, flash encryption on the board, the trust page's wording. Before the authority is installed on any more devices.
+1. **What is left of the authority (17, 23).** Remove the old one from every device; flash encryption on the board; have the trust page say what the fingerprint check is for.
 2. **Quiet data loss (19, 20, 21).** Small, contained changes; each gets a regression in the comparison test or the browser suite.
 3. **Today's loose ends (25, 28, 29, 30).** An hour each.
 4. **The page's folder (18) and Node's storage gaps (22).**

@@ -27,7 +27,8 @@
   <p id="state" class="state">Checking how this page reached you…</p>
 
   <p>The hub encrypts everything it sends. To do that it shows your device a certificate, and your device has never met the hub, so the browser warns you. You fix that once per device by installing the hub's own <b>certificate authority</b>: a small file that says "certificates signed by this hub are genuine".</p>
-  <p><small>It lets this device recognise this hub and nothing else. It is public, not a secret; the matching private key never leaves the hub.</small></p>
+  <p><small>It can vouch for this hub only: the hub's own names, and addresses on a home network. It cannot vouch for a website, and browsers enforce that. It is public, not a secret. The authority's own private key was used once, when it was made, and is not kept anywhere.</small></p>
+  <p><small><b>Replacing an older one?</b> A hub set up before October 2026 used an authority called "Hub local authority", which had no such limit. If this device has it, remove it: on an iPhone or iPad, Settings → General → VPN &amp; Device Management → "Hub local authority" → Remove Profile; on a Mac, Keychain Access → search for "Hub local authority" → delete it. Then install the new one below.</small></p>
 
   <h2>1. Check it is the right hub</h2>
   <p>The hub printed a fingerprint when it started (the board shows it on its screen). It must match this one:</p>
@@ -40,8 +41,8 @@
   <div id="steps">
     <details data-os="ios"><summary>iPhone and iPad</summary><ol>
       <li>Download it in Safari and allow the profile.</li>
-      <li>Settings → General → VPN &amp; Device Management → the "Hub local authority" profile → Install.</li>
-      <li>Settings → General → About → Certificate Trust Settings → switch on "Hub local authority".</li>
+      <li>Settings → General → VPN &amp; Device Management → the "Hub authority (this hub only)" profile → Install.</li>
+      <li>Settings → General → About → Certificate Trust Settings → switch on "Hub authority (this hub only)".</li>
     </ol></details>
     <details data-os="android"><summary>Android</summary><ol>
       <li>Settings → Security (or "Security &amp; privacy") → More settings → Encryption &amp; credentials → Install a certificate → CA certificate.</li>
@@ -49,7 +50,7 @@
     </ol></details>
     <details data-os="mac"><summary>Mac</summary><ol>
       <li>Open the downloaded file; Keychain Access adds it to the login keychain.</li>
-      <li>In Keychain Access, double-click "Hub local authority" → Trust → "When using this certificate": Always Trust.</li>
+      <li>In Keychain Access, double-click "Hub authority (this hub only)" → Trust → "When using this certificate": Always Trust.</li>
       <li>Firefox keeps its own list: Settings → Privacy &amp; Security → Certificates → View Certificates → Authorities → Import.</li>
     </ol></details>
     <details data-os="windows"><summary>Windows</summary><ol>

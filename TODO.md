@@ -13,7 +13,7 @@ Done from the first pass:
 
 Now, in order:
 
-1. [ ] The certificate authority: name constraints so it can vouch for the hub only, flash encryption on the board, the trust page's wording (17, 23)
+1. [x] The certificate authority can vouch for the hub only (name constraints; its own key is never stored) (17). [ ] Remove the old "Hub local authority" from each device that has it; flash encryption on the board; the trust page should say what the fingerprint check is for (23)
 2. [ ] Quiet data loss: a damaged notes or settings file must not be overwritten; read the body before the list when a note is edited; check that a copy was really stored before marking it kept; do not drop a file from the outbox when its bytes are missing (19, 20, 21)
 3. [ ] Loose ends from the newest features: characters allowed in a hub's address; locked folders showing through in two lists; hidden and ignored files served by path; renew the pairing cookie (25, 28, 29, 30)
 4. [ ] The page's own folder must not be writable through the API; the storage limit's two gaps in Node (18, 22)

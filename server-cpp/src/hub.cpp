@@ -438,6 +438,22 @@ static bool tls_on = false;
 static Strings extra_hosts;
 static string bind_host = "127.0.0.1";
 
+#ifdef __APPLE__
+// The name other devices find this Mac by on the local network (the one in
+// System Settings > Sharing), which is often not its host name. Asked for once.
+static const string &mac_local_name() {
+  static const string name = [] {
+    string out;
+    if (FILE *f = ::popen("/usr/sbin/scutil --get LocalHostName 2>/dev/null", "r")) {
+      char buf[256] = {0};
+      if (std::fgets(buf, sizeof buf, f)) out = lower(trim(buf));
+      ::pclose(f);
+    }
+    return !out.empty() && out.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789-") == string::npos ? out + ".local" : string();
+  }();
+  return name;
+}
+#endif
 // Every name this machine answers to. A request naming any other host is
 // refused: that is what stops a website from pointing its own name at this
 // address and being treated as "the same site" (DNS rebinding).
@@ -452,6 +468,9 @@ static Strings host_names() {
     out.push_back(h);
     if (!ends_with(h, ".local") && h.find('.') == string::npos) out.push_back(h + ".local");
   }
+#ifdef __APPLE__
+  if (!mac_local_name().empty()) out.push_back(mac_local_name());
+#endif
   ifaddrs *list = nullptr;
   if (::getifaddrs(&list) == 0) {
     for (ifaddrs *i = list; i; i = i->ifa_next) {
@@ -1323,7 +1342,7 @@ int main(int argc, char **argv) {
 #endif
   string folder = ".", host = "127.0.0.1", www, forced;
   int port = 4321;
-  bool want_tls = false, insecure = false, make_cert = false;
+  bool want_tls = false, insecure = false, make_cert = false, new_authority = false;
   long long quota_mb = -1;
   const char *home = std::getenv("HOME"), *state_env = std::getenv("HUB_STATE");
   STATE = state_env ? state_env : string(home ? home : ".") + "/.config/hub";
@@ -1340,17 +1359,20 @@ int main(int argc, char **argv) {
     else if (a == "--insecure-http") insecure = true;
     else if (a == "--pair-local") pair_local = true;
     else if (a == "--make-cert") make_cert = true;
+    else if (a == "--new-authority") make_cert = new_authority = true;
     else if (a == "--help" || a == "-h") {
       std::printf("usage: hubd [folder] [--port 4321] [--host 127.0.0.1] [--www <folder>/hub] [--profile desktop|small|esp32]\n"
                   "            [--state <dir>] [--tls] [--insecure-http] [--pair-local] [--allow-host <name>] [--quota-mb <n>]\n"
-                  "       hubd --make-cert [--state <dir>] [--allow-host <name>]\n\n"
+                  "       hubd --make-cert [--state <dir>] [--allow-host <name>]\n"
+                  "       hubd --new-authority [--state <dir>] [--allow-host <name>]\n\n"
                   "  --state         where certificates and the list of paired devices are kept (default ~/.config/hub)\n"
                   "  --tls           serve HTTPS. Always on when --host is not this machine only\n"
                   "  --insecure-http serve the network without encryption anyway (not recommended)\n"
                   "  --pair-local    ask this machine's own browser to pair too\n"
                   "  --allow-host    another name this server may be reached by (repeatable)\n"
                   "  --quota-mb      most the folder may hold in total; 0 for no limit\n"
-                  "  --make-cert     make or renew the certificates, print how to trust them, and stop\n");
+                  "  --make-cert     make or renew the certificates, print how to trust them, and stop\n"
+                  "  --new-authority replace the authority devices install (each device then installs the new one once)\n");
       return 0;
     } else folder = a;
   }
@@ -1367,11 +1389,24 @@ int main(int argc, char **argv) {
     string err;
     Strings names;
     for (const string &n : host_names()) if (n.find(':') == string::npos) names.push_back(n);
-    if (!secure::ensure_certs(STATE, names, certs, err)) { std::fprintf(stderr, "certificates: %s\n", err.c_str()); return 1; }
+    if (!secure::ensure_certs(STATE, names, certs, err, new_authority)) { std::fprintf(stderr, "certificates: %s\n", err.c_str()); return 1; }
+    if (certs.new_authority) {
+      std::printf("A NEW AUTHORITY WAS MADE. It can vouch for this hub's names and home-network addresses only.\n"
+                  "  Every device that uses this hub must install it once (steps below, or the hub's /trust page).\n");
+      if (certs.replaced_open) std::printf("  It replaces an earlier authority that had no such limits. That one's key has been deleted here.\n"
+                                           "  REMOVE THE EARLIER ONE (\"Hub local authority\") from every device it was installed on:\n"
+                                           "    iPhone: Settings > General > VPN & Device Management > Hub local authority > Remove Profile\n"
+                                           "    Mac:    Keychain Access > search \"Hub local authority\" > delete it\n");
+    }
     if (certs.issued || make_cert) {
       std::printf("certificate %s for:", certs.issued ? "made" : "is current");
-      for (const string &n : names) std::printf(" %s", n.c_str());
+      for (const string &n : certs.covered) std::printf(" %s", n.c_str());
       std::printf("\n");
+    }
+    if (!certs.left_out.empty()) {
+      std::printf("not in the certificate (outside what the authority may vouch for):");
+      for (const string &n : certs.left_out) std::printf(" %s", n.c_str());
+      std::printf("\n  For a name of your own, pass it with --allow-host and make a new authority with --new-authority.\n");
     }
     std::printf("To trust this hub on a device, install its authority once: %s\n  (or open http://<this address>:%d/ on the device and follow the steps)\n  fingerprint (SHA-256) %s\n", certs.ca_path.c_str(), port, certs.ca_fingerprint.c_str());
     if (make_cert) return 0;

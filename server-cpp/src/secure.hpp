@@ -2,11 +2,20 @@
 // so the same code runs on the board): random bytes, SHA-256, and the hub's own
 // certificates.
 //
-// Certificates: the hub is its own small certificate authority. `ca.pem` is
-// installed once on each device; `cert.pem` is what the server presents, signed
-// by that authority, and is re-issued whenever the machine's addresses change
-// or it nears its end date. Devices keep trusting it because the authority
-// stays the same.
+// Certificates: the hub is its own small certificate authority, in two steps.
+//
+//   ca.pem      the authority a device installs, once. Its private key is used
+//               one time, to sign the issuer below, and is never written down.
+//   issuer.pem  the only thing the authority ever signed. It may vouch for this
+//               hub's own names and for addresses on a home network, and for
+//               nothing else: the certificate says so (name constraints), and
+//               every browser enforces it. Its key stays here (issuer-key.pem).
+//   cert.pem    what the server presents: signed by the issuer, re-issued
+//               whenever the machine's addresses change or it nears its end.
+//
+// So a device that trusts this authority trusts the hub and only the hub.
+// Whoever copies the state folder gets a key that can pretend to be the hub,
+// not one that can pretend to be a bank.
 #pragma once
 
 #include <mbedtls/ctr_drbg.h>
@@ -14,6 +23,7 @@
 #include <mbedtls/entropy.h>
 #include <mbedtls/error.h>
 #include <mbedtls/oid.h>
+#include <mbedtls/pem.h>
 #include <mbedtls/pk.h>
 #include <mbedtls/sha256.h>
 #include <mbedtls/x509_crt.h>
@@ -24,6 +34,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -152,6 +163,98 @@ inline string mbed_error(int code) {
   return buf;
 }
 
+// Read certificates from PEM text. mbedTLS does not check name constraints
+// itself and so refuses a certificate that carries them; the hub only reads
+// its own certificates here (to present them, and to read their dates and
+// fingerprints), so that one extension is let through.
+inline int allow_name_constraints(void *, mbedtls_x509_crt const *, mbedtls_x509_buf const *oid, int, const unsigned char *, const unsigned char *) {
+  return oid->len == MBEDTLS_OID_SIZE(MBEDTLS_OID_NAME_CONSTRAINTS) && std::memcmp(oid->p, MBEDTLS_OID_NAME_CONSTRAINTS, oid->len) == 0 ? 0 : -1;
+}
+inline int parse_certs(mbedtls_x509_crt *out, const string &pem) {
+  static const char *begin = "-----BEGIN CERTIFICATE-----", *end = "-----END CERTIFICATE-----";
+  const char *at = pem.c_str();
+  int found = 0;
+  while ((at = std::strstr(at, begin)) != nullptr) {
+    mbedtls_pem_context ctx;
+    mbedtls_pem_init(&ctx);
+    size_t used = 0, len = 0;
+    int rc = mbedtls_pem_read_buffer(&ctx, begin, end, reinterpret_cast<const unsigned char *>(at), nullptr, 0, &used);
+    if (rc == 0) {
+      const unsigned char *der = mbedtls_pem_get_buffer(&ctx, &len);
+      rc = mbedtls_x509_crt_parse_der_with_ext_cb(out, der, len, 1, allow_name_constraints, nullptr);
+    }
+    mbedtls_pem_free(&ctx);
+    if (rc != 0) return rc;
+    found++;
+    at += used ? used : 1;
+  }
+  return found ? 0 : MBEDTLS_ERR_X509_INVALID_FORMAT;
+}
+
+// ---- what the hub's authority may vouch for ---------------------------------------------
+// Names: anything under ".local", "localhost", and this machine's own names.
+// Addresses: the ranges set aside for private networks, which no website has.
+struct Net { unsigned char addr[4]; int bits; };
+static const Net HOME_NETS[] = {{{127, 0, 0, 0}, 8}, {{10, 0, 0, 0}, 8}, {{172, 16, 0, 0}, 12}, {{192, 168, 0, 0}, 16}, {{169, 254, 0, 0}, 16}, {{100, 64, 0, 0}, 10}};
+
+inline bool home_address(const string &name) {
+  in_addr ip{};
+  if (::inet_pton(AF_INET, name.c_str(), &ip) != 1) return false;
+  const uint32_t a = ntohl(ip.s_addr);
+  for (const Net &n : HOME_NETS) {
+    const uint32_t base = static_cast<uint32_t>(n.addr[0]) << 24 | static_cast<uint32_t>(n.addr[1]) << 16 | static_cast<uint32_t>(n.addr[2]) << 8 | n.addr[3];
+    const uint32_t mask = ~uint32_t{0} << (32 - n.bits);
+    if ((a & mask) == base) return true;
+  }
+  return false;
+}
+inline bool is_address(const string &name) { in_addr ip{}; return ::inet_pton(AF_INET, name.c_str(), &ip) == 1; }
+// Whether `name` is `zone` itself or a name under it.
+inline bool under(const string &name, const string &zone) {
+  return name == zone || (name.size() > zone.size() && name.compare(name.size() - zone.size(), zone.size(), zone) == 0 && name[name.size() - zone.size() - 1] == '.');
+}
+// The name zones an authority made for these names is limited to.
+inline std::vector<string> zones_for(const std::vector<string> &names) {
+  std::vector<string> zones = {"local", "localhost"};
+  for (const string &n : names) {
+    if (is_address(n) || n.find(':') != string::npos) continue;
+    if (!std::any_of(zones.begin(), zones.end(), [&](const string &z) { return under(n, z); })) zones.push_back(n);
+  }
+  return zones;
+}
+inline bool in_scope(const string &name, const std::vector<string> &zones) {
+  if (is_address(name)) return home_address(name);
+  return std::any_of(zones.begin(), zones.end(), [&](const string &z) { return under(name, z); });
+}
+
+// The "name constraints" extension, written out by hand (mbedTLS has no call
+// for it). In DER every value is a tag, a length, then the contents:
+//   NameConstraints  ::= SEQUENCE { permittedSubtrees [0] SEQUENCE OF GeneralSubtree }
+//   GeneralSubtree   ::= SEQUENCE { base GeneralName }
+//   GeneralName      ::= dNSName [2] text  |  iPAddress [7] address then mask
+inline std::vector<unsigned char> der(unsigned char tag, const std::vector<unsigned char> &body) {
+  std::vector<unsigned char> out{tag};
+  if (body.size() < 128) out.push_back(static_cast<unsigned char>(body.size()));
+  else if (body.size() < 256) { out.push_back(0x81); out.push_back(static_cast<unsigned char>(body.size())); }
+  else { out.push_back(0x82); out.push_back(static_cast<unsigned char>(body.size() >> 8)); out.push_back(static_cast<unsigned char>(body.size() & 0xff)); }
+  out.insert(out.end(), body.begin(), body.end());
+  return out;
+}
+inline std::vector<unsigned char> name_constraints(const std::vector<string> &zones) {
+  std::vector<unsigned char> subtrees;
+  auto add = [&](unsigned char tag, const std::vector<unsigned char> &base) {
+    const std::vector<unsigned char> tree = der(0x30, der(tag, base));
+    subtrees.insert(subtrees.end(), tree.begin(), tree.end());
+  };
+  for (const string &z : zones) add(0x82, std::vector<unsigned char>(z.begin(), z.end()));
+  for (const Net &n : HOME_NETS) {
+    const uint32_t mask = ~uint32_t{0} << (32 - n.bits);
+    add(0x87, {n.addr[0], n.addr[1], n.addr[2], n.addr[3],
+               static_cast<unsigned char>(mask >> 24), static_cast<unsigned char>(mask >> 16 & 0xff), static_cast<unsigned char>(mask >> 8 & 0xff), static_cast<unsigned char>(mask & 0xff)});
+  }
+  return der(0x30, der(0xA0, subtrees));
+}
+
 struct Key { // an owned key pair
   mbedtls_pk_context pk;
   Key() { mbedtls_pk_init(&pk); }
@@ -181,9 +284,12 @@ inline string cert_time(std::time_t t) { // YYYYMMDDhhmmss, UTC
 }
 
 // Write one certificate. `names` (host names and IPv4 addresses) go in as
-// subject alternative names, which is what browsers check.
-inline string write_cert(Key &subject, Key &issuer, const string &subject_name, const string &issuer_name, bool is_ca, int days,
-                         const std::vector<string> &names, string &err) {
+// subject alternative names, which is what browsers check. `signs` is how
+// many further authorities may hang below this one (-1: it is not an
+// authority at all); `limits` is the name-constraints extension, if any.
+inline string write_cert(Key &subject, Key &issuer, const string &subject_name, const string &issuer_name, int signs, int days,
+                         const std::vector<string> &names, const std::vector<unsigned char> &limits, string &err) {
+  const bool is_ca = signs >= 0;
   mbedtls_x509write_cert crt;
   mbedtls_x509write_crt_init(&crt);
   unsigned char serial[16];
@@ -222,12 +328,14 @@ inline string write_cert(Key &subject, Key &issuer, const string &subject_name, 
   if (!rc) rc = mbedtls_x509write_crt_set_issuer_name(&crt, issuer_name.c_str());
   if (!rc) rc = mbedtls_x509write_crt_set_serial_raw(&crt, serial, sizeof serial);
   if (!rc) rc = mbedtls_x509write_crt_set_validity(&crt, from.c_str(), to.c_str());
-  if (!rc) rc = mbedtls_x509write_crt_set_basic_constraints(&crt, is_ca ? 1 : 0, is_ca ? 0 : -1);
+  if (!rc) rc = mbedtls_x509write_crt_set_basic_constraints(&crt, is_ca ? 1 : 0, signs);
   if (!rc) rc = mbedtls_x509write_crt_set_subject_key_identifier(&crt);
   if (!rc) rc = mbedtls_x509write_crt_set_authority_key_identifier(&crt);
   if (!rc) rc = mbedtls_x509write_crt_set_key_usage(&crt, is_ca ? MBEDTLS_X509_KU_KEY_CERT_SIGN | MBEDTLS_X509_KU_CRL_SIGN : MBEDTLS_X509_KU_DIGITAL_SIGNATURE);
   if (!rc && !is_ca) rc = mbedtls_x509write_crt_set_ext_key_usage(&crt, &server_auth);
   if (!rc && !names.empty()) rc = mbedtls_x509write_crt_set_subject_alternative_name(&crt, sans.data());
+  // Critical: a program that does not understand the limits must refuse the certificate, not ignore them.
+  if (!rc && !limits.empty()) rc = mbedtls_x509write_crt_set_extension(&crt, MBEDTLS_OID_NAME_CONSTRAINTS, MBEDTLS_OID_SIZE(MBEDTLS_OID_NAME_CONSTRAINTS), 1, limits.data(), limits.size());
   unsigned char buf[4096];
   if (!rc) rc = mbedtls_x509write_crt_pem(&crt, buf, sizeof buf, rng_cb, nullptr);
   mbedtls_x509write_crt_free(&crt);
@@ -240,7 +348,7 @@ inline string fingerprint(const string &pem) {
   mbedtls_x509_crt crt;
   mbedtls_x509_crt_init(&crt);
   string out;
-  if (mbedtls_x509_crt_parse(&crt, reinterpret_cast<const unsigned char *>(pem.c_str()), pem.size() + 1) == 0) {
+  if (parse_certs(&crt, pem) == 0) {
     unsigned char sum[32];
     mbedtls_sha256(crt.raw.p, crt.raw.len, sum, 0);
     static const char d[] = "0123456789ABCDEF";
@@ -254,7 +362,7 @@ inline long days_left(const string &pem) {
   mbedtls_x509_crt crt;
   mbedtls_x509_crt_init(&crt);
   long days = -1;
-  if (mbedtls_x509_crt_parse(&crt, reinterpret_cast<const unsigned char *>(pem.c_str()), pem.size() + 1) == 0) {
+  if (parse_certs(&crt, pem) == 0) {
     std::tm tm{};
     tm.tm_year = crt.valid_to.year - 1900;
     tm.tm_mon = crt.valid_to.mon - 1;
@@ -271,44 +379,69 @@ struct Certs {
   string cert_path, key_path, ca_path; // what the server presents, its key, and the authority to install on devices
   string ca_fingerprint;
   bool issued = false;                 // a new server certificate was written this time
+  bool new_authority = false;          // a new authority was made: every device installs it once
+  bool replaced_open = false;          // ...in place of an older one that could vouch for any site
+  std::vector<string> covered, left_out; // names in the certificate, and names it may not carry
 };
 
 // Make sure `dir` holds an authority and a server certificate that covers
 // `names` and has at least a month left. Creates or re-issues what is missing.
 // The server certificate lasts 820 days: Apple devices refuse longer ones.
-inline bool ensure_certs(const string &dir, std::vector<string> names, Certs &out, string &err) {
+// `renew` makes a new authority even if there is a good one.
+inline bool ensure_certs(const string &dir, std::vector<string> names, Certs &out, string &err, bool renew = false) {
   std::sort(names.begin(), names.end());
   names.erase(std::unique(names.begin(), names.end()), names.end());
   out.cert_path = dir + "/cert.pem";
   out.key_path = dir + "/key.pem";
   out.ca_path = dir + "/ca.pem";
-  const string ca_key_path = dir + "/ca-key.pem", names_path = dir + "/cert.names";
-  const char *ca_name = "CN=Hub local authority,O=Hub";
+  const string issuer_path = dir + "/issuer.pem", issuer_key_path = dir + "/issuer-key.pem", zones_path = dir + "/issuer.zones";
+  const string old_key_path = dir + "/ca-key.pem", names_path = dir + "/cert.names";
+  const char *ca_name = "CN=Hub authority (this hub only),O=Hub", *issuer_name = "CN=Hub issuer,O=Hub";
 
-  Key ca_key;
-  string ca_pem, ca_key_pem;
-  if (slurp(out.ca_path, ca_pem) && slurp(ca_key_path, ca_key_pem)) {
-    if (!ca_key.load(ca_key_pem)) { err = "cannot read " + ca_key_path; return false; }
+  Key issuer_key;
+  string ca_pem, issuer_pem, issuer_key_pem, zone_text;
+  std::vector<string> zones;
+  const bool have = !renew && slurp(out.ca_path, ca_pem) && slurp(issuer_path, issuer_pem) && slurp(issuer_key_path, issuer_key_pem) && slurp(zones_path, zone_text);
+  if (have) {
+    if (!issuer_key.load(issuer_key_pem)) { err = "cannot read " + issuer_key_path; return false; }
+    std::istringstream lines(zone_text);
+    for (string z; std::getline(lines, z);) if (!z.empty()) zones.push_back(z);
   } else {
-    if (!ca_key.generate()) { err = "could not make a key"; return false; }
-    ca_pem = write_cert(ca_key, ca_key, ca_name, ca_name, true, 3650, {}, err);
+    // A new authority. Its key lives in memory for the next few lines only.
+    struct stat st;
+    out.replaced_open = ::stat(old_key_path.c_str(), &st) == 0;
+    zones = zones_for(names);
+    const std::vector<unsigned char> limits = name_constraints(zones);
+    Key ca_key;
+    if (!ca_key.generate() || !issuer_key.generate()) { err = "could not make a key"; return false; }
+    ca_pem = write_cert(ca_key, ca_key, ca_name, ca_name, 1, 3650, {}, limits, err);
     if (ca_pem.empty()) return false;
-    if (!spit(ca_key_path, ca_key.pem(), 0600) || !spit(out.ca_path, ca_pem, 0644)) { err = "cannot write to " + dir; return false; }
-    ::unlink(out.cert_path.c_str()); // anything signed by an older authority is void
+    issuer_pem = write_cert(issuer_key, ca_key, issuer_name, ca_name, 0, 3649, {}, limits, err);
+    if (issuer_pem.empty()) return false;
+    for (const string &z : zones) zone_text += z + "\n";
+    if (!spit(issuer_key_path, issuer_key.pem(), 0600) || !spit(issuer_path, issuer_pem, 0644) || !spit(zones_path, zone_text, 0644) || !spit(out.ca_path, ca_pem, 0644)) { err = "cannot write to " + dir; return false; }
+    // Earlier versions kept the authority's own key, and that authority had no
+    // limits. Neither it nor anything it signed may be used again.
+    ::unlink(old_key_path.c_str());
+    ::unlink(out.cert_path.c_str());
+    out.new_authority = true;
   }
   out.ca_fingerprint = fingerprint(ca_pem);
 
-  string want, have, cert_pem, key_pem;
-  for (const string &n : names) want += n + "\n";
-  bool keep = slurp(names_path, have) && have == want && slurp(out.cert_path, cert_pem) && slurp(out.key_path, key_pem) && days_left(cert_pem) > 30;
+  // Only names the issuer may vouch for go into the certificate: one name
+  // outside its limits would make browsers refuse the whole certificate.
+  for (const string &n : names) (in_scope(n, zones) ? out.covered : out.left_out).push_back(n);
+  string want, have_names, cert_pem, key_pem;
+  for (const string &n : out.covered) want += n + "\n";
+  bool keep = slurp(names_path, have_names) && have_names == want && slurp(out.cert_path, cert_pem) && slurp(out.key_path, key_pem) && days_left(cert_pem) > 30;
   if (keep) return true;
 
   Key key;
   if (!key.generate()) { err = "could not make a key"; return false; }
-  cert_pem = write_cert(key, ca_key, "CN=Hub,O=Hub", ca_name, false, 820, names, err);
+  cert_pem = write_cert(key, issuer_key, "CN=Hub,O=Hub", issuer_name, -1, 820, out.covered, {}, err);
   if (cert_pem.empty()) return false;
-  // The file holds the server's certificate followed by the authority's, which is the order TLS sends them in.
-  if (!spit(out.key_path, key.pem(), 0600) || !spit(out.cert_path, cert_pem + ca_pem, 0644) || !spit(names_path, want, 0644)) { err = "cannot write to " + dir; return false; }
+  // The file holds the server's certificate followed by the issuer's, which is the order TLS sends them in.
+  if (!spit(out.key_path, key.pem(), 0600) || !spit(out.cert_path, cert_pem + issuer_pem, 0644) || !spit(names_path, want, 0644)) { err = "cannot write to " + dir; return false; }
   out.issued = true;
   return true;
 }
