@@ -8,15 +8,17 @@
 - [ ] Markdown and HTML keep working as now
 
 **Highlighting**
-- [ ] Select text → a tiny flyout menu appears at the selection: highlight / annotate
-- [ ] Choose a highlight colour in the flyout; the choice sticks until changed
-- [ ] Highlight types: each type has its own colour and a name the user can set (e.g. "definition", "question", "don't understand yet")
-- [ ] Highlights are saved and persist across sessions, in every format
+- [x] Select text → a tiny flyout menu appears at the selection: highlight / annotate (markdown and code files)
+- [x] Choose a highlight colour in the flyout; the choice sticks until changed
+- [x] Highlight types: each type has its own colour and a name the user can set (e.g. "definition", "question", "don't understand yet")
+- [x] Highlights are saved and persist across sessions — markdown and code files
+- [ ] Same for HTML, EPUB and PDF
 
 **Annotating**
-- [ ] The existing bottom text input stays where it is and is also the annotation input
-- [ ] When text is selected or an existing highlight is active, an indicator in or above the input shows which highlight is being annotated
-- [ ] A highlight can exist with no annotation; an annotation can be added to it later
+- [x] The existing bottom text input stays where it is and is also the annotation input
+- [x] When text is selected or an existing highlight is active, an indicator above the input shows which highlight is being annotated
+- [x] A highlight can exist with no annotation; an annotation can be added to it later
+- [ ] Remove a highlight type (types can be added, renamed and recoloured, not deleted)
 
 **Mobile**
 - [ ] Input sits in the lower quarter of the screen
@@ -27,7 +29,18 @@
 
 **Open questions**
 - How to anchor a highlight in EPUB and PDF so it survives re-opening (today's notes anchor by quoted text plus heading, which only suits markdown)
-- Whether today's `notes/notes.json` entries become one kind of highlight, or stay separate
+- (Settled for markdown: a highlight is a note with a quote, a type and no text yet; same file, `notes/notes.json`)
+
+## Accessibility (autism / ADHD study aid)
+
+- [x] Sidebar can be tucked away; returns on hovering or clicking the left edge
+- [x] Reading focus mode (fades everything but the block being read), roomy text, text size, progress bar
+- [x] Thick keyboard focus outline; file rows and tabs reachable with Tab and Enter
+- [ ] Keyboard shortcuts (toggle sidebar, focus mode, next/previous heading)
+- [ ] Check every theme's contrast; Eva and Triple-M muted text has not been measured
+- [ ] Screen-reader pass (labels on grips, live region when a note is saved)
+- [ ] Dyslexia-friendly font option; line-by-line reading ruler
+- [ ] Session aids: "where I stopped" bookmark per document, optional timer
 
 ## Project structure
 

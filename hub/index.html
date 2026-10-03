@@ -18,21 +18,84 @@
     --accent: #8c2f1b;
     --mark: #fbeeb0;
     --reply: #eef3ea;
+    --field: #fff;
+    --quote: #3b382f;
+    --c-kw: #8c2f1b; --c-str: #2f6f4f; --c-com: #8a8473; --c-num: #a05a00; --c-fn: #1f4e8c; --c-type: #6b3fa0;
+  }
+  /* Themes. Each one only redefines the colour tokens above. */
+  :root[data-theme="selenized"] { /* Selenized Light */
+    --paper: #fbf3db; --shade: #ece3cc; --ink: #3a4d53; --muted: #53676d; --rule: #d5cdb6;
+    --accent: #0072d4; --mark: #f1dc9a; --reply: #e6ebcb; --field: #fffaea; --quote: #53676d;
+    --c-kw: #8762c6; --c-str: #009c8f; --c-com: #909995; --c-num: #c25d1e; --c-fn: #0072d4; --c-type: #ad8900;
+  }
+  :root[data-theme="eva"] { /* Eva Dark */
+    color-scheme: dark;
+    --paper: #282c34; --shade: #21252b; --ink: #b7c5d3; --muted: #8391a2; --rule: #3b414d;
+    --accent: #cf68e1; --mark: #e4bf7f; --reply: #2c3a3a; --field: #1e2228; --quote: #a3b1c0;
+    --c-kw: #cf68e1; --c-str: #98c379; --c-com: #6b7686; --c-num: #ff9070; --c-fn: #6495ee; --c-type: #e4bf7f;
+  }
+  :root[data-theme="triple-m"] {
+    color-scheme: dark;
+    --paper: #1d163e; --shade: #271e54; --ink: #fffffc; --muted: #b3abd8; --rule: #3e3372;
+    --accent: #ff8fc7; --mark: #ffd166; --reply: #2a2563; --field: #150f31; --quote: #dcd7f2;
+    --c-kw: #ff8fc7; --c-str: #9be7c4; --c-com: #8d84b8; --c-num: #ffd166; --c-fn: #8ec5ff; --c-type: #c9a7ff;
   }
   :root[data-font="sans"] { --body: var(--sans); --head: var(--serif); }
 
   * { box-sizing: border-box; }
   html, body { height: 100%; }
-  body { margin: 0; overflow: hidden; background: var(--paper); color: var(--ink); font: 18px/1.65 var(--body); }
+  body { margin: 0; overflow: hidden; background: var(--paper); color: var(--ink); font: var(--fs, 18px)/1.65 var(--body); }
+
+  /* Keyboard focus is always obvious. */
+  :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+  [role="button"] { cursor: pointer; }
+
+  /* Roomier text: more space between lines, words and paragraphs. */
+  body.roomy .md { line-height: 1.95; letter-spacing: .015em; word-spacing: .08em; }
+  body.roomy .md p, body.roomy .md li { margin-bottom: 1.3em; }
+
+  /* Reading focus: everything but the block being read is faded. */
+  body.focus .md > * { opacity: .3; }
+  body.focus .md > .here, body.focus .md > .editFront { opacity: 1; }
+  body.focus .md > .here { box-shadow: -12px 0 0 0 var(--paper), -16px 0 0 0 var(--accent); }
+  @media (prefers-reduced-motion: no-preference) { body.focus .md > * { transition: opacity .12s; } }
   a { color: var(--accent); }
   button, textarea { font: inherit; color: inherit; }
+  #theme { font: 13px var(--head); color: inherit; background: var(--paper); border: 1px solid var(--rule); padding: 1px 4px; margin: 0 4px 8px 0; }
   button { background: none; border: 1px solid var(--rule); padding: 1px 8px; cursor: pointer; font: 13px var(--head); }
 
-  #app { display: grid; grid-template-columns: 250px minmax(0, 1fr) 300px; height: 100vh; }
-  body.no-notes #app { grid-template-columns: 250px minmax(0, 1fr); }
-  body.no-notes #notes { display: none; }
+  #app { display: grid; grid-template-columns: 250px minmax(0, 1fr) auto; height: 100vh; }
+
+  /* right column: the second document (when split) stacked with the notes */
+  #right { position: relative; width: var(--right-w, 300px); display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--rule); }
+  #right.notes-top { flex-direction: column-reverse; }
+  body.no-right #right { display: none; }
+  #rightGrip { position: absolute; left: -4px; top: 0; bottom: 0; width: 7px; cursor: col-resize; z-index: 3; }
+  #rightDoc { flex: 1 1 0; min-height: 0; display: flex; }
+  #hGrip { flex: 0 0 7px; cursor: row-resize; border-top: 1px solid var(--rule); }
+  #right.notes-top #hGrip { border-top: 0; border-bottom: 1px solid var(--rule); }
+  #rightGrip:hover, #hGrip:hover { background: var(--rule); }
+  #right.no-doc #rightDoc, #right.no-doc #hGrip, #right.no-notes #hGrip, #right.no-notes #notes { display: none; }
+  .dragging { user-select: none; }
 
   /* sidebar: title, file browser, outline of the active document */
+  /* sidebar tucked away: it slides back when the left edge is hovered or focused */
+  body.side-closed #app { grid-template-columns: minmax(0, 1fr) auto; }
+  body.side-closed #side { position: fixed; z-index: 6; left: 0; top: 0; bottom: 0; width: 264px; background: var(--paper); box-shadow: 4px 0 16px rgba(0, 0, 0, .18); transform: translateX(-105%); }
+  body.side-closed.side-peek #side, body.side-closed #side:focus-within { transform: none; }
+  #sideEdge { display: none; position: fixed; z-index: 5; left: 0; top: 0; bottom: 0; width: 14px; padding: 0; border: 0; border-right: 1px solid var(--rule); background: var(--shade); color: var(--muted); font-size: 11px; }
+  body.side-closed #sideEdge { display: block; }
+  body.side-closed #work { padding-left: 14px; }
+  @media (prefers-reduced-motion: no-preference) { body.side-closed #side { transition: transform .12s; } }
+  #workspace { font: 13px var(--head); color: inherit; background: var(--paper); border: 1px solid var(--rule); padding: 1px 4px; max-width: 100%; }
+  #wsRow { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 10px 8px 0; }
+  #upload { margin: 0 10px 8px 0; padding: 8px; border: 1px solid var(--rule); background: var(--shade); font-size: 13px; }
+  #upload[hidden] { display: none; }
+  #upload p { margin: 0 0 6px; }
+  #upload button { display: block; width: 100%; margin-top: 4px; text-align: left; padding: 4px 8px; background: var(--paper); }
+  #sideTools { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 10px 8px 0; }
+  #sideTools button, #sideTools select { margin: 0 !important; }
+  #sideTools button[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
   #side { display: flex; flex-direction: column; min-height: 0; padding: 14px 0 0 14px; font: 14px/1.4 var(--head); border-right: 1px solid var(--rule); }
   #hubTitle { font-size: 17px; font-weight: 700; margin: 0 14px 8px 0; padding: 2px 4px; margin-left: -4px; cursor: text; }
   #hubTitle:hover, #hubTitle:focus { outline: 1px dashed var(--rule); }
@@ -57,12 +120,15 @@
   #work { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
   #panes { flex: 1; display: flex; min-height: 0; }
   .pane { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
-  .divider { flex: 0 0 7px; cursor: col-resize; border-left: 1px solid var(--rule); }
-  .divider:hover, .dragging .divider { background: var(--rule); }
+  /* how far through the document the reader is */
+  .progress { flex: none; height: 3px; background: var(--shade); }
+  .progress i { display: block; height: 100%; width: 0; background: var(--accent); }
+  .pane.active .tabs { box-shadow: inset 0 3px 0 var(--accent); }
   .dragging iframe { pointer-events: none; }
   .tabs { display: flex; align-items: stretch; background: var(--shade); border-bottom: 1px solid var(--rule); font: 13px var(--head); overflow-x: auto; flex: none; }
   .tab { display: flex; align-items: center; gap: 8px; padding: 7px 8px 6px 12px; border-right: 1px solid var(--rule); border-top: 2px solid transparent; cursor: pointer; color: var(--muted); white-space: nowrap; }
   .tab span { max-width: 190px; overflow: hidden; text-overflow: ellipsis; }
+  .tab.preview span { font-style: italic; }
   .tab.active { background: var(--paper); color: var(--ink); }
   .pane.active .tab.active { border-top-color: var(--accent); }
   .tab button, .tabs > button { border: 0; padding: 0 4px; color: var(--muted); }
@@ -74,28 +140,52 @@
   .empty { color: var(--muted); font: 14px var(--head); padding: 24px 32px; }
 
   /* a rendered document */
-  .md { max-width: 720px; margin: 0 auto; padding: 16px 0 120px; }
+  .md { max-width: 40em; margin: 0 auto; padding: 16px 0 120px; }
   .md h1, .md h2, .md h3, .md h4 { font-family: var(--head); line-height: 1.25; scroll-margin-top: 12px; }
   .md h1 { font-size: 1.7em; margin-top: 1.6em; border-bottom: 1px solid var(--rule); padding-bottom: .2em; }
   .md h2 { font-size: 1.25em; margin-top: 1.8em; }
-  .md blockquote { margin: 1em 0; padding: 0 1em; border-left: 3px solid var(--rule); color: #3b382f; }
+  .md blockquote { margin: 1em 0; padding: 0 1em; border-left: 3px solid var(--rule); color: var(--quote); }
   .md pre { background: var(--shade); padding: 12px; overflow-x: auto; font-size: 14px; line-height: 1.45; }
   .md code { font-family: Menlo, Consolas, monospace; font-size: .86em; }
+  /* code colours, by token; the values come from the theme */
+  .hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-meta .hljs-keyword { color: var(--c-kw); }
+  .hljs-string, .hljs-regexp, .hljs-char, .hljs-meta .hljs-string { color: var(--c-str); }
+  .hljs-comment, .hljs-quote { color: var(--c-com); font-style: italic; }
+  .hljs-number, .hljs-symbol, .hljs-meta, .hljs-attr, .hljs-variable { color: var(--c-num); }
+  .hljs-title, .hljs-section, .hljs-name { color: var(--c-fn); }
+  .hljs-type, .hljs-built_in, .hljs-class .hljs-title { color: var(--c-type); }
   .md table { border-collapse: collapse; font-size: .92em; }
   .md td, .md th { border: 1px solid var(--rule); padding: 6px 10px; vertical-align: top; }
   .md img { max-width: 100%; }
   .md hr { border: 0; border-top: 1px solid var(--rule); margin: 2em 0; }
   .md summary { cursor: pointer; color: var(--accent); font: 14px var(--head); }
-  mark { background: var(--mark); cursor: pointer; }
+  mark { background: var(--mark); color: #1d1b16; cursor: pointer; }
   mark.flash, .note.flash { outline: 2px solid var(--accent); }
+  .note.on { background: var(--shade); }
+  /* highlight flyout and type legend */
+  #flyout { position: fixed; z-index: 5; display: flex; gap: 7px; align-items: center; padding: 6px 8px; background: var(--field); border: 1px solid var(--rule); box-shadow: 0 2px 8px rgba(0, 0, 0, .14); }
+  #flyout[hidden] { display: none; }
+  #flyout button:not(.sw) { border: 0; padding: 0 2px; color: var(--accent); font-size: 12px; }
+  .sw { display: inline-block; width: 18px; height: 18px; border-radius: 50%; border: 1px solid rgba(0, 0, 0, .25); padding: 0; flex: none; vertical-align: -3px; }
+  .sw.cur { outline: 2px solid var(--ink); outline-offset: 1px; }
+  mark.on { box-shadow: 0 0 0 2px var(--accent); }
+  #types { margin-bottom: 16px; }
+  .type { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+  .type input { width: 20px; height: 20px; padding: 0; border: 0; background: none; cursor: pointer; flex: none; }
+  .type span { flex: 1; padding: 1px 3px; cursor: text; }
+  .type span:hover, .type span:focus { outline: 1px dashed var(--rule); }
+  .type.cur span { font-weight: 600; }
+  #types > button { margin-top: 6px; border: 0; padding: 0; color: var(--accent); font-size: 12px; }
   .editFront { float: right; margin-top: 8px; }
   .frontEditor { max-width: 720px; margin: 0 auto; padding: 16px 0; }
-  .frontEditor textarea { width: 100%; min-height: 55vh; padding: 12px; border: 1px solid var(--rule); background: #fff; font: 14px/1.5 Menlo, Consolas, monospace; }
+  .frontEditor textarea { width: 100%; min-height: 55vh; padding: 12px; border: 1px solid var(--rule); background: var(--field); font: 14px/1.5 Menlo, Consolas, monospace; }
   .frontEditor button { margin: 8px 8px 0 0; padding: 4px 12px; }
   .frontEditor p { font: 13px var(--head); color: var(--muted); }
 
   /* notes: a separate layer beside the documents */
-  #notes { min-height: 0; overflow-y: auto; padding: 14px; border-left: 1px solid var(--rule); font: 14px/1.4 var(--head); }
+  #notes { flex: 0 0 var(--notes-h, 40%); min-height: 0; overflow-y: auto; padding: 14px; font: 14px/1.4 var(--head); }
+  #right.no-doc #notes { flex: 1 1 0; }
+  #notes .flip { float: right; border: 0; padding: 0; color: var(--accent); font-size: 12px; }
   #notes h4 { margin: 0 0 10px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 400; }
   #notes .empty { padding: 0; }
   .note { border-top: 1px solid var(--rule); padding: 10px 0; }
@@ -112,20 +202,23 @@
   #context { font: 13px var(--head); color: var(--muted); margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #context b { color: var(--ink); font-weight: 600; }
   #context button { border: 0; padding: 0 4px; color: var(--accent); }
-  #input { display: block; width: 100%; height: 56px; resize: vertical; padding: 8px 10px; border: 1px solid var(--rule); background: #fff; font: 16px/1.4 var(--body); }
+  #input { display: block; width: 100%; height: 56px; resize: vertical; padding: 8px 10px; border: 1px solid var(--rule); background: var(--field); font: 16px/1.4 var(--body); }
 </style>
 </head>
 <body>
 <div id="app">
-  <nav id="side">
+  <button id="sideEdge" aria-label="Show sidebar" title="Sidebar (hover to peek, click to keep open)">›</button>
+  <nav id="side" aria-label="Files and outline">
     <h1 id="hubTitle" contenteditable="plaintext-only" spellcheck="false" title="Click to rename"></h1>
-    <div id="sideTools"><button id="fontToggle"></button><button id="notesToggle"></button></div>
+    <div id="sideTools"><select id="theme" title="Theme"><option value="plain">Plain</option><option value="selenized">Selenized Light</option><option value="eva">Eva Dark</option><option value="triple-m">Triple-M</option></select><button id="fontToggle"></button><button id="notesToggle"></button><button id="sideToggle" title="Tuck the sidebar away; it returns when you hover the left edge"></button><button id="focusToggle" title="Fade everything except the paragraph you are reading">reading focus</button><button id="roomyToggle" title="More space between lines and words">roomy text</button><button id="smaller" aria-label="Smaller text" title="Smaller text">A−</button><button id="bigger" aria-label="Larger text" title="Larger text">A+</button></div>
+    <div id="wsRow"><select id="workspace" title="Workspace" hidden></select><button id="uploadBtn" title="Bring a folder from your computer into the hub">upload a folder…</button><input id="folderInput" type="file" webkitdirectory multiple hidden></div>
+    <div id="upload" hidden role="status"></div>
     <div class="label">Files</div>
     <div id="tree"></div>
     <div class="label">Outline</div>
     <div id="toc"></div>
   </nav>
-  <div id="work">
+  <div id="work" role="main">
     <div id="panes"></div>
     <form id="composer">
       <div class="inner">
@@ -134,18 +227,26 @@
       </div>
     </form>
   </div>
-  <aside id="notes"></aside>
+  <div id="right">
+    <div id="rightGrip" title="Drag to resize"></div>
+    <div id="rightDoc"></div>
+    <div id="hGrip" title="Drag to resize"></div>
+    <aside id="notes"></aside>
+  </div>
 </div>
+<div id="flyout" hidden></div>
 
 <script src="/vendor/marked.js"></script>
+<script src="/vendor/highlight.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const panesEl = $('panes'), treeEl = $('tree'), tocEl = $('toc'), notesEl = $('notes'), input = $('input'), titleEl = $('hubTitle');
 
-let docs = [], config = { title: '' }, notes = [], pendingQuote = '', editing = false;
+let docs = [], config = { title: '' }, notes = [], pendingQuote = '', pendingHead = null, activeHl = null, editing = false;
 // Layout: one or two panes, each with its open tabs. Saved per folder.
-let state = { panes: [{ tabs: [], active: null }], active: 0, split: 42, notesOpen: true, closed: [] };
+// Pane 0 is the main reader; pane 1, when present, sits in the right column above or below the notes.
+let state = { panes: [{ tabs: [], active: null, preview: null }], active: 0, notesOpen: true, sideOpen: true, notesW: 300, notesH: 40, notesTop: false, closed: [] };
 const views = [];            // DOM for each pane: { root, tabsEl, body, scroller, article, frame, heads, cur }
 const scrollMem = new Map(); // "pane:path" -> scrollTop
 
@@ -160,6 +261,10 @@ const save = () => store.set('layout:' + config.root, state);
 const docOf = (path) => docs.find((d) => d.path === path);
 const isHtml = (path) => /\.html?$/.test(path);
 const activeDoc = () => state.panes[state.active]?.active || null;
+const types = () => config.highlights || [];
+const typeOf = (id) => types().find((t) => t.id === id) || types()[0];
+const curType = () => typeOf(store.get('hlType'));   // the colour in use until changed
+const hlNote = () => notes.find((n) => n.id === activeHl) || null;
 const resolve = (base, rel) => decodeURIComponent(new URL(rel, 'http://x/' + base).pathname.slice(1));
 
 // ---- font switcher, notes panel toggle ------------------------------------
@@ -171,11 +276,101 @@ function setFont(f) {
 $('fontToggle').onclick = () => setFont(document.documentElement.dataset.font === 'serif' ? 'sans' : 'serif');
 setFont(store.get('font') || 'serif');
 
+function setTheme(t) {
+  document.documentElement.dataset.theme = t;
+  $('theme').value = t;
+  store.set('theme', t);
+}
+$('theme').onchange = () => setTheme($('theme').value);
+setTheme(store.get('theme') || 'plain');
+
+// Reading aids: text size, roomier spacing, and a focus mode that fades
+// everything except the block being read.
+const view = { fs: 18, roomy: false, focus: false, ...(store.get('view') || {}) };
+function applyView() {
+  document.documentElement.style.setProperty('--fs', view.fs + 'px');
+  document.body.classList.toggle('roomy', view.roomy);
+  document.body.classList.toggle('focus', view.focus);
+  $('roomyToggle').setAttribute('aria-pressed', view.roomy);
+  $('focusToggle').setAttribute('aria-pressed', view.focus);
+  store.set('view', view);
+}
+$('roomyToggle').onclick = () => { view.roomy = !view.roomy; applyView(); };
+$('focusToggle').onclick = () => { view.focus = !view.focus; applyView(); };
+$('smaller').onclick = () => { view.fs = Math.max(14, view.fs - 1); applyView(); };
+$('bigger').onclick = () => { view.fs = Math.min(28, view.fs + 1); applyView(); };
+applyView();
+
+// The block being read: under the pointer, or at the reading line after a scroll.
+function setHere(pane, node) {
+  const v = views[pane];
+  while (node && node.parentElement !== v.article) node = node.parentElement;
+  if (!node || node === v.here || node.classList.contains('editFront')) return;
+  v.here?.classList.remove('here');
+  v.here = node;
+  node.classList.add('here');
+}
+
+// Sidebar: open, or tucked away and shown while the left edge is hovered.
+function setSideOpen(open) {
+  state.sideOpen = open;
+  document.body.classList.toggle('side-closed', !open);
+  document.body.classList.remove('side-peek');
+  if (!open) document.activeElement?.blur();
+  $('sideToggle').textContent = open ? 'hide sidebar' : 'keep sidebar open';
+}
+$('sideToggle').onclick = () => { setSideOpen(!state.sideOpen); save(); };
+$('sideEdge').onclick = () => { setSideOpen(true); save(); };
+$('sideEdge').addEventListener('mouseenter', () => document.body.classList.add('side-peek'));
+$('side').addEventListener('mouseleave', () => document.body.classList.remove('side-peek'));
+
+// Rows and tabs act as buttons from the keyboard too.
+document.addEventListener('keydown', (e) => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches?.('[role="button"]')) { e.preventDefault(); e.target.click(); }
+});
+
 function setNotesOpen(open) {
   state.notesOpen = open;
-  document.body.classList.toggle('no-notes', !open);
   $('notesToggle').textContent = open ? 'hide notes' : 'show notes';
+  applyLayout();
 }
+// Size and arrange the right column from the saved layout.
+function applyLayout() {
+  const split = state.panes.length > 1, r = $('right');
+  document.body.classList.toggle('no-right', !split && !state.notesOpen);
+  r.classList.toggle('no-doc', !split);
+  r.classList.toggle('no-notes', !state.notesOpen);
+  r.classList.toggle('notes-top', state.notesTop);
+  // One width for the column, whether or not it holds a document.
+  const w = Math.max(240, Math.min(state.notesW, innerWidth * 0.6));
+  r.style.setProperty('--right-w', Math.round(w) + 'px');
+  r.style.setProperty('--notes-h', state.notesH + '%');
+}
+window.addEventListener('resize', applyLayout);
+function dragGrip(grip, onMove) {
+  grip.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    grip.setPointerCapture(e.pointerId);
+    document.body.classList.add('dragging');
+    const move = (ev) => { onMove(ev); applyLayout(); };
+    const up = () => {
+      document.body.classList.remove('dragging');
+      grip.removeEventListener('pointermove', move);
+      grip.removeEventListener('pointerup', up);
+      save();
+    };
+    grip.addEventListener('pointermove', move);
+    grip.addEventListener('pointerup', up);
+  });
+}
+dragGrip($('rightGrip'), (ev) => {
+  state.notesW = Math.round(Math.max(240, Math.min(innerWidth - ev.clientX, innerWidth * 0.6)));
+});
+dragGrip($('hGrip'), (ev) => {
+  const b = $('right').getBoundingClientRect();
+  const f = state.notesTop ? (ev.clientY - b.top) / b.height : (b.bottom - ev.clientY) / b.height;
+  state.notesH = Math.round(Math.max(15, Math.min(85, f * 100)));
+});
 $('notesToggle').onclick = () => { setNotesOpen(!state.notesOpen); save(); };
 
 // ---- title (FRONTPAGE.md heading, or hub.json) -----------------------------
@@ -199,6 +394,66 @@ titleEl.addEventListener('blur', async () => {
   titleEl.textContent = config.title;
   setTabTitle();
 });
+
+// ---- workspaces and folder upload ---------------------------------------------
+async function loadWorkspaces() {
+  const list = await api('/api/workspaces'), sel = $('workspace');
+  sel.innerHTML = '';
+  for (const w of list) sel.append(new Option((w.home ? '' : '↳ ') + w.name, w.root, w.current, w.current));
+  sel.hidden = list.length < 2;
+  sel.onchange = async () => { await api('/api/workspace', 'POST', { root: sel.value }); location.href = '/'; };
+}
+$('uploadBtn').onclick = () => $('folderInput').click();
+$('folderInput').onchange = (e) => {
+  const files = [...e.target.files].map((file) => ({ rel: file.webkitRelativePath || file.name, file }));
+  e.target.value = '';
+  if (files.length) offerUpload(files);
+};
+
+// After a folder is picked: say what was found, and ask where it should go.
+function offerUpload(files) {
+  const box = $('upload'), folder = files[0].rel.split('/')[0];
+  const ok = files.filter(({ rel, file }) => !rel.split('/').some((x) => x.startsWith('.') || x === 'node_modules') && file.size <= 50 * 1024 * 1024);
+  box.hidden = false;
+  box.replaceChildren(el('p', '', `“${folder}”: ${ok.length} file${ok.length === 1 ? '' : 's'}` + (ok.length < files.length ? ` (${files.length - ok.length} hidden or oversized files left out)` : '')));
+  const add = el('button', '', `Add to this workspace, as the folder “${folder}”`);
+  add.onclick = () => runUpload(ok, null, folder);
+  const fresh = el('button', '', 'Open as its own workspace, in place of this one');
+  fresh.title = 'Nothing is deleted: the current workspace stays on disk and in the workspace menu';
+  fresh.onclick = () => runUpload(ok, folder, folder);
+  const cancel = el('button', '', 'Cancel');
+  cancel.onclick = () => { box.hidden = true; };
+  box.append(add, fresh, cancel);
+  add.focus();
+}
+
+// Send the files one at a time. `workspace` set: they become a workspace of
+// their own (the top folder name is dropped); otherwise they join this one.
+async function runUpload(files, workspace, folder) {
+  const box = $('upload'), line = el('p');
+  box.replaceChildren(line);
+  let saved = 0, skipped = 0, failed = 0, root = '';
+  for (const [i, { rel, file }] of files.entries()) {
+    line.textContent = `Uploading ${i + 1} of ${files.length}…`;
+    const path = workspace ? rel.split('/').slice(1).join('/') : rel;
+    const q = '?path=' + encodeURIComponent(path) + (workspace ? '&workspace=' + encodeURIComponent(workspace) : '');
+    try {
+      const r = await (await fetch('/api/upload' + q, { method: 'POST', body: file })).json();
+      if (r.saved) { saved++; root = r.root; } else if (r.skipped) skipped++; else failed++;
+    } catch { failed++; }
+  }
+  line.textContent = `${saved} added` + (skipped ? `, ${skipped} already here and left alone` : '') + (failed ? `, ${failed} failed` : '') + '.';
+  const done = el('button', '', 'OK');
+  done.onclick = () => { box.hidden = true; };
+  box.append(done);
+  if (workspace && root) {
+    await api('/api/workspace', 'POST', { root });
+    location.href = '/';
+  } else {
+    await loadDocs();
+    done.focus();
+  }
+}
 
 // ---- file browser -----------------------------------------------------------
 async function loadDocs() { docs = await api('/api/docs'); renderTree(); }
@@ -237,6 +492,8 @@ function renderTree() {
 
 function fileRow(d, label) {
   const row = el('div', 'file');
+  row.tabIndex = 0;
+  row.setAttribute('role', 'button');
   row.dataset.path = d.path;
   row.title = d.title;
   if (state.panes.some((p) => p.tabs.includes(d.path))) row.classList.add('open');
@@ -249,21 +506,38 @@ function fileRow(d, label) {
   side.onclick = (e) => { e.stopPropagation(); openDoc(d.path, { side: true }); };
   row.append(side);
   row.onclick = (e) => openDoc(d.path, { side: e.metaKey || e.ctrlKey || e.altKey });
+  row.ondblclick = () => openDoc(d.path, { keep: true });
   return row;
 }
 
 // ---- panes and tabs ---------------------------------------------------------
-// Open a document as a tab. `side` puts it in the other pane, splitting if needed.
-async function openDoc(path, { pane = state.active, side = false, hash } = {}) {
+// Open a document. A plain open takes the place of the pane's preview tab (the
+// one opened by the last single click); `keep` adds it as a tab that stays.
+// `side` puts it in the right-hand pane, splitting if needed.
+async function openDoc(path, { pane = state.active, side = false, hash, keep = false } = {}) {
   if (!docOf(path)) return;
   let rebuilt = false;
   if (side) {
-    if (state.panes.length < 2) { state.panes.push({ tabs: [], active: null }); rebuilt = true; }
-    pane = pane === 0 ? 1 : 0;
+    if (state.panes.length < 2) { state.panes.push({ tabs: [], active: null, preview: null }); rebuilt = true; pane = 1; }
+    else pane = pane === 0 ? 1 : 0;
   }
   const p = state.panes[pane];
   remember(pane);
-  if (!p.tabs.includes(path)) p.tabs.push(path);
+  if (!p.tabs.includes(path)) {
+    const at = keep ? -1 : p.tabs.indexOf(p.preview);
+    if (at >= 0) { p.bumped = { path: p.preview, by: path, at: Date.now() }; p.tabs[at] = path; } else p.tabs.push(path);
+    if (!keep) p.preview = path;
+  }
+  if (keep && p.preview === path) {
+    // A double click arrives as click + click: the first click has already
+    // replaced the previewed document, so put that one back beside the new one.
+    const b = p.bumped;
+    p.preview = null;
+    if (b && b.by === path && Date.now() - b.at < 800 && docOf(b.path) && !p.tabs.includes(b.path)) {
+      p.tabs.splice(p.tabs.indexOf(path), 0, b.path);
+      p.preview = b.path;
+    }
+  }
   p.active = path;
   state.active = pane;
   if (rebuilt) await buildPanes(); else { renderTabs(pane); await showDoc(pane, hash); }
@@ -275,6 +549,7 @@ async function closeTab(pane, path) {
   const p = state.panes[pane];
   const at = p.tabs.indexOf(path);
   p.tabs.splice(at, 1);
+  if (p.preview === path) p.preview = null;
   scrollMem.delete(pane + ':' + path);
   if (p.active === path) p.active = p.tabs[Math.min(at, p.tabs.length - 1)] || null;
   if (!p.tabs.length && state.panes.length > 1) {
@@ -284,7 +559,7 @@ async function closeTab(pane, path) {
     await buildPanes();
   } else {
     // Closing the last document falls back to the front page.
-    if (!p.tabs.length && config.front) { p.tabs.push(config.front); p.active = config.front; }
+    if (!p.tabs.length && config.front) { p.tabs.push(config.front); p.active = p.preview = config.front; }
     renderTabs(pane);
     await showDoc(pane);
   }
@@ -304,41 +579,19 @@ function setActive(pane) {
 
 async function buildPanes() {
   panesEl.innerHTML = '';
+  $('rightDoc').innerHTML = '';
   views.length = 0;
   state.panes.forEach((_, i) => {
-    if (i) panesEl.append(makeDivider());
     const root = el('section', 'pane'), tabsEl = el('div', 'tabs'), body = el('div', 'body');
-    root.append(tabsEl, body);
-    if (i) root.style.flex = `0 0 ${state.split}%`;
+    const bar = el('div', 'progress');
+    bar.append(el('i'));
+    root.append(tabsEl, bar, body);
     root.addEventListener('pointerdown', () => setActive(i), true);
-    panesEl.append(root);
-    views.push({ root, tabsEl, body, heads: [] });
+    (i ? $('rightDoc') : panesEl).append(root);
+    views.push({ root, tabsEl, body, bar: bar.firstChild, heads: [] });
   });
+  applyLayout();
   await Promise.all(state.panes.map((_, i) => { renderTabs(i); return showDoc(i); }));
-}
-
-function makeDivider() {
-  const div = el('div', 'divider');
-  div.title = 'Drag to resize';
-  div.addEventListener('pointerdown', (e) => {
-    e.preventDefault();
-    div.setPointerCapture(e.pointerId);
-    document.body.classList.add('dragging');
-    const move = (ev) => {
-      const box = panesEl.getBoundingClientRect();
-      state.split = Math.round(Math.max(20, Math.min(70, ((box.right - ev.clientX) / box.width) * 100)));
-      views[1].root.style.flex = `0 0 ${state.split}%`;
-    };
-    const up = () => {
-      document.body.classList.remove('dragging');
-      div.removeEventListener('pointermove', move);
-      div.removeEventListener('pointerup', up);
-      save();
-    };
-    div.addEventListener('pointermove', move);
-    div.addEventListener('pointerup', up);
-  });
-  return div;
 }
 
 function renderTabs(pane) {
@@ -346,8 +599,11 @@ function renderTabs(pane) {
   bar.innerHTML = '';
   for (const path of p.tabs) {
     const d = docOf(path);
-    const tab = el('div', 'tab' + (path === p.active ? ' active' : ''));
-    tab.title = path;
+    const tab = el('div', 'tab' + (path === p.active ? ' active' : '') + (path === p.preview ? ' preview' : ''));
+    tab.tabIndex = 0;
+    tab.setAttribute('role', 'button');
+    tab.title = path + (path === p.preview ? '\n(double-click to keep open)' : '');
+    tab.ondblclick = () => { if (p.preview === path) { p.preview = null; renderTabs(pane); save(); } };
     tab.append(el('span', '', d ? (d.front ? 'Front page' : d.title) : path));
     const x = el('button', '', '×');
     x.title = 'Close';
@@ -364,7 +620,7 @@ function renderTabs(pane) {
     bar.append(tab);
   }
   if (p.active) {
-    const split = el('button', '', state.panes.length > 1 ? 'to other side' : 'split');
+    const split = el('button', '', state.panes.length > 1 ? 'to other side' : 'open on right');
     split.title = 'Open this document in the other pane';
     split.onclick = () => openDoc(p.active, { pane, side: true });
     bar.append(split);
@@ -380,12 +636,14 @@ function slugify(text, used) {
   return out;
 }
 
-// Source files are shown as one fenced code block.
+// Source files are shown as one fenced code block, tagged with their language.
+const LANG = { c: 'c', h: 'c', cpp: 'cpp', hpp: 'cpp', cc: 'cpp', py: 'python', js: 'javascript', ts: 'typescript', rs: 'rust', go: 'go', java: 'java', sh: 'bash', Makefile: 'makefile' };
 async function fetchDoc(path) {
   const text = await api('/api/doc?path=' + encodeURIComponent(path));
   if (path.endsWith('.md')) return text;
   const fence = '`'.repeat(Math.max(3, ...(text.match(/`+/g) || []).map((t) => t.length + 1)));
-  return `# ${path.split('/').pop()}\n\n${fence}\n${text}\n${fence}\n`;
+  const name = path.split('/').pop();
+  return `# ${name}\n\n${fence}${LANG[name.split('.').pop()] || ''}\n${text}\n${fence}\n`;
 }
 
 async function showDoc(pane, hash, keepScroll) {
@@ -430,6 +688,7 @@ async function showDoc(pane, hash, keepScroll) {
     const src = img.getAttribute('src') || '';
     if (!/^([a-z]+:|\/)/i.test(src)) img.src = '/raw/' + resolve(path, src);
   }
+  colourCode(article);
   hideAnswers(article);
   if (path === config.front) {
     const b = el('button', 'editFront', 'edit front page');
@@ -438,12 +697,30 @@ async function showDoc(pane, hash, keepScroll) {
   }
   highlightAll(article, path);
   article.addEventListener('click', (e) => onDocClick(e, pane));
-  scroller.addEventListener('scroll', () => track(pane), { passive: true });
+  article.addEventListener('pointerup', () => setTimeout(() => {
+    const sel = window.getSelection();
+    if (sel.isCollapsed || !sel.rangeCount || !pendingQuote || !article.contains(sel.anchorNode)) return;
+    activeHl = null;
+    showFlyout(sel.getRangeAt(0).getBoundingClientRect());
+  }));
+  scroller.addEventListener('scroll', () => { track(pane); hideFlyout(); }, { passive: true });
+  article.addEventListener('mousemove', (e) => { if (view.focus) setHere(pane, e.target); });
 
   if (keepScroll) scroller.scrollTop = y;
   else if (hash) goTo(pane, hash);
   else scroller.scrollTop = scrollMem.get(pane + ':' + path) || 0;
   track(pane);
+}
+
+// Colour fenced code by the language named on the fence (```c, ```python, …).
+// Blocks with no language, or one that isn't known, are left plain.
+function colourCode(root) {
+  if (!window.hljs) return;
+  for (const code of root.querySelectorAll('pre code')) {
+    const lang = (code.className.match(/language-([\w+#-]+)/) || [])[1];
+    if (!lang || !hljs.getLanguage(lang)) continue;
+    code.innerHTML = hljs.highlight(code.textContent, { language: lang, ignoreIllegals: true }).value;
+  }
 }
 
 // "Check Yourself" blocks: hide the answer until asked for.
@@ -484,7 +761,7 @@ function goTo(pane, slug) {
 // hub.json, and modifier-clicks, open in the other pane.
 function onDocClick(e, pane) {
   const mark = e.target.closest('mark');
-  if (mark) return flash(notesEl.querySelector(`.note[data-id="${mark.dataset.note}"]`));
+  if (mark) return selectHighlight(mark.dataset.note, mark.getBoundingClientRect());
   const a = e.target.closest('a');
   if (!a) return;
   const href = a.getAttribute('href') || '';
@@ -503,7 +780,10 @@ function onDocClick(e, pane) {
 function track(pane) {
   const v = views[pane];
   if (!v.scroller) return;
-  const top = v.scroller.getBoundingClientRect().top;
+  const box = v.scroller.getBoundingClientRect(), top = box.top;
+  const room = v.scroller.scrollHeight - v.scroller.clientHeight;
+  v.bar.style.width = (room > 0 ? Math.round((v.scroller.scrollTop / room) * 100) : 100) + '%';
+  if (view.focus && v.article) setHere(pane, document.elementFromPoint(box.left + box.width / 2, top + box.height * 0.35));
   let cur = v.heads[0] || null;
   for (const h of v.heads) { if (h.getBoundingClientRect().top - top < 110) cur = h; else break; }
   if (cur === v.cur) return;
@@ -542,6 +822,8 @@ function chrome() {
   }
   treeEl.querySelector('.file.active')?.scrollIntoView({ block: 'nearest' });
   pendingQuote = '';
+  activeHl = null;
+  hideFlyout();
   renderOutline();
   renderContext();
   renderNotes(false);
@@ -551,11 +833,14 @@ function chrome() {
 }
 
 // ---- selection → what the note is about ---------------------------------------
-function takeSelection(raw, pane) {
+function takeSelection(raw, pane, node) {
   const text = raw.replace(/\s+/g, ' ').trim();
   if (text.length < 3) return;
   if (pane !== state.active) { state.active = pane; chrome(); }
   pendingQuote = text;
+  activeHl = null;
+  // The heading the selection sits under (not merely the one scrolled to).
+  pendingHead = node ? views[pane].heads.filter((h) => h.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING).pop() || null : null;
   renderContext();
   renderNotes(false);
 }
@@ -564,14 +849,23 @@ document.addEventListener('selectionchange', () => {
   if (sel.isCollapsed || !sel.rangeCount) return;
   const node = sel.getRangeAt(0).commonAncestorContainer;
   const pane = views.findIndex((v) => v.article?.contains(node));
-  if (pane >= 0) takeSelection(sel.toString(), pane);
+  if (pane >= 0) takeSelection(sel.toString(), pane, sel.getRangeAt(0).startContainer);
 });
 
 function renderContext() {
   const c = $('context'), d = docOf(activeDoc());
   c.textContent = '';
   if (!d) return c.append('Open a document to take notes on it.');
-  if (pendingQuote) {
+  const hl = hlNote();
+  if (hl) {
+    const x = el('button', '', '×');
+    x.type = 'button';
+    x.title = 'Stop annotating this highlight';
+    x.onclick = () => { activeHl = null; renderContext(); markActive(); };
+    const sw = el('span', 'sw');
+    sw.style.background = typeOf(hl.type).color;
+    c.append('Annotating ', sw, ' ', x, el('b', '', '“' + hl.quote + '”'));
+  } else if (pendingQuote) {
     const x = el('button', '', '×');
     x.type = 'button';
     x.title = 'Drop the quote';
@@ -590,10 +884,13 @@ $('composer').onsubmit = async (e) => {
   e.preventDefault();
   const text = input.value.trim(), doc = activeDoc();
   if (!text || !doc) return;
-  const cur = views[state.active].cur;
   input.value = '';
-  await api('/api/notes', 'POST', { doc, text, quote: pendingQuote, heading: cur?.dataset?.slug || '', headingText: cur?.textContent || '' });
+  const hl = hlNote();
+  if (hl && !hl.text) await api('/api/notes/' + hl.id, 'PUT', { text });
+  else if (hl) await api('/api/notes', 'POST', { doc: hl.doc, text, quote: hl.quote, type: hl.type, heading: hl.heading, headingText: hl.headingText });
+  else await createNote(text);
   pendingQuote = '';
+  activeHl = null;
   renderContext();
   await loadNotes();
   if (!state.notesOpen) setNotesOpen(true);
@@ -602,6 +899,119 @@ $('composer').onsubmit = async (e) => {
 input.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('composer').requestSubmit(); }
 });
+
+// A note or highlight on the current selection (or, with no selection, on the
+// section being read).
+function createNote(text) {
+  const head = (pendingQuote && pendingHead) || views[state.active].cur;
+  return api('/api/notes', 'POST', {
+    doc: activeDoc(), text, quote: pendingQuote, type: pendingQuote ? curType().id : '',
+    heading: head?.dataset?.slug || '', headingText: head?.textContent || '',
+  });
+}
+
+// ---- highlights -------------------------------------------------------------------
+// The flyout: one swatch per highlight type. On a fresh selection a swatch
+// highlights it; on an existing highlight it changes the type.
+function showFlyout(rect) {
+  const f = $('flyout'), hl = hlNote();
+  const cur = hl ? typeOf(hl.type).id : curType().id;
+  f.innerHTML = '';
+  for (const t of types()) {
+    const b = el('button', 'sw' + (t.id === cur ? ' cur' : ''));
+    b.style.background = t.color;
+    b.title = t.name;
+    b.onclick = () => pickType(t.id);
+    f.append(b);
+  }
+  const note = el('button', '', 'note');
+  note.title = 'Write a note on this';
+  note.onclick = async () => { if (!hl) await highlightSelection(curType().id); hideFlyout(); input.focus(); };
+  f.append(note);
+  if (hl) {
+    const rm = el('button', '', hl.text ? 'delete' : 'remove');
+    rm.onclick = async () => { await api('/api/notes/' + hl.id, 'DELETE'); activeHl = null; hideFlyout(); renderContext(); loadNotes(); };
+    f.append(rm);
+  }
+  f.hidden = false;
+  const w = f.offsetWidth;
+  f.style.left = Math.max(8, Math.min(rect.left + rect.width / 2 - w / 2, innerWidth - w - 8)) + 'px';
+  f.style.top = (rect.top > 52 ? rect.top - 42 : rect.bottom + 8) + 'px';
+}
+function hideFlyout() { $('flyout').hidden = true; }
+$('flyout').addEventListener('mousedown', (e) => e.preventDefault()); // keep the selection
+
+async function highlightSelection(typeId) {
+  if (!pendingQuote) return;
+  store.set('hlType', typeId);
+  const n = await createNote('');
+  pendingQuote = '';
+  window.getSelection().removeAllRanges();
+  activeHl = n.id;
+  await loadNotes();
+  renderContext();
+}
+async function pickType(typeId) {
+  const hl = hlNote();
+  store.set('hlType', typeId);
+  hideFlyout();
+  if (!hl) return highlightSelection(typeId);
+  await api('/api/notes/' + hl.id, 'PUT', { type: typeId });
+  await loadNotes();
+  renderContext();
+}
+function selectHighlight(id, rect) {
+  activeHl = id;
+  pendingQuote = '';
+  renderContext();
+  renderNotes(false);
+  markActive();
+  if (rect) showFlyout(rect);
+  flash(notesEl.querySelector(`.note[data-id="${id}"]`));
+}
+function markActive() {
+  for (const m of document.querySelectorAll('mark[data-note]')) m.classList.toggle('on', m.dataset.note === activeHl);
+}
+// Clicking elsewhere in a document drops the flyout and the active highlight.
+document.addEventListener('pointerdown', (e) => {
+  if (e.target.closest('#flyout')) return;
+  hideFlyout();
+  if (!e.target.closest('.md') || e.target.closest('mark')) return;
+  if (!activeHl && !pendingQuote) return;
+  activeHl = null;
+  pendingQuote = '';
+  renderContext();
+  renderNotes(false);
+  markActive();
+});
+
+// The legend above the notes: rename a type, change its colour, add one.
+function renderTypes() {
+  const box = el('div');
+  box.id = 'types';
+  box.append(el('h4', '', 'Highlight types'));
+  const saveTypes = async () => { config = await api('/api/config', 'PUT', { highlights: types() }); renderNotes(); };
+  for (const t of types()) {
+    const row = el('div', 'type' + (t.id === curType().id ? ' cur' : ''));
+    const color = el('input');
+    color.type = 'color';
+    color.value = t.color;
+    color.title = 'Change colour';
+    color.onchange = () => { t.color = color.value; saveTypes(); };
+    const name = el('span', '', t.name);
+    name.contentEditable = 'plaintext-only';
+    name.spellcheck = false;
+    name.title = 'Click to rename';
+    name.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); name.blur(); } };
+    name.onblur = () => { const v = name.textContent.trim(); if (v && v !== t.name) { t.name = v; saveTypes(); } else name.textContent = t.name; };
+    row.append(color, name);
+    box.append(row);
+  }
+  const add = el('button', '', '+ add a type');
+  add.onclick = () => { config.highlights = [...types(), { id: 't' + Date.now().toString(36), name: 'New type', color: '#e0d4f5' }]; saveTypes(); };
+  box.append(add);
+  return box;
+}
 
 function flash(node) {
   if (!node) return;
@@ -613,23 +1023,32 @@ function flash(node) {
 function renderNotes(rehighlight = true) {
   const doc = activeDoc(), mine = notes.filter((n) => n.doc === doc);
   notesEl.innerHTML = '';
-  notesEl.append(el('h4', '', 'Notes on this document'));
-  if (!mine.length) notesEl.append(el('p', 'empty', 'None yet. Type below; select text first to pin a note to it.'));
+  if (state.panes.length > 1) {
+    const flip = el('button', 'flip', state.notesTop ? 'move notes below' : 'move notes above');
+    flip.onclick = () => { state.notesTop = !state.notesTop; applyLayout(); renderNotes(false); save(); };
+    notesEl.append(flip);
+  }
+  notesEl.append(renderTypes(), el('h4', '', 'Highlights and notes on this document'));
+  if (!mine.length) notesEl.append(el('p', 'empty', 'None yet. Select text to highlight it, or type below.'));
   for (const n of mine) {
     const div = el('div', 'note');
     div.dataset.id = n.id;
     if (n.quote) {
       const q = el('div', 'quote', n.quote.length > 160 ? n.quote.slice(0, 160) + '…' : n.quote);
+      if (n.type) q.style.borderLeftColor = typeOf(n.type).color;
       q.onclick = () => {
         const mark = views[state.active].article?.querySelector(`mark[data-note="${n.id}"]`);
         if (mark) flash(mark); else goTo(state.active, n.heading);
+        selectHighlight(n.id);
       };
       div.append(q);
     }
-    div.append(el('div', 'text', n.text));
+    if (n.id === activeHl) div.classList.add('on');
+    if (n.text) div.append(el('div', 'text', n.text));
 
     const meta = el('div', 'meta');
     meta.append(new Date(n.ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }));
+    if (n.type) meta.append(' · ', typeOf(n.type).name);
     if (n.headingText) {
       const where = el('a', '', n.headingText);
       where.href = '#' + n.heading;
@@ -667,9 +1086,10 @@ function renderNotes(rehighlight = true) {
 function highlightAll(article, path) {
   for (const m of article.querySelectorAll('mark[data-note]')) m.replaceWith(...m.childNodes);
   article.normalize();
-  for (const n of notes) if (n.doc === path && n.quote) highlight(article, n.quote, n.id);
+  for (const n of notes) if (n.doc === path && n.quote) highlight(article, n.quote, n.id, n.type ? typeOf(n.type).color : '');
+  markActive();
 }
-function highlight(article, quote, id) {
+function highlight(article, quote, id, color) {
   const walker = document.createTreeWalker(article, NodeFilter.SHOW_TEXT);
   const at = [];
   let flat = '', node;
@@ -686,12 +1106,20 @@ function highlight(article, quote, id) {
     const s = spans.get(nd);
     if (s) s[1] = off; else spans.set(nd, [off, off]);
   }
+  // Whitespace-only text between the first and last piece is part of the span too.
+  const first = at[start][0], last = at[start + needle.length - 1][0];
+  const between = document.createTreeWalker(article, NodeFilter.SHOW_TEXT);
+  between.currentNode = first;
+  for (let nd = between.nextNode(); nd && nd !== last; nd = between.nextNode()) {
+    if (!spans.has(nd) && nd.data.length && !nd.data.includes('\n\n')) spans.set(nd, [0, nd.data.length - 1]);
+  }
   for (const [nd, [a, b]] of spans) {
     const range = document.createRange();
     range.setStart(nd, a);
     range.setEnd(nd, b + 1);
     const mark = el('mark');
     mark.dataset.note = id;
+    if (color) mark.style.background = color;
     range.surroundContents(mark);
   }
 }
@@ -713,6 +1141,7 @@ new EventSource('/api/events').onmessage = async (e) => {
 
 (async function init() {
   await loadConfig();
+  loadWorkspaces();
   notes = await api('/api/notes');
   await loadDocs();
 
@@ -721,14 +1150,16 @@ new EventSource('/api/events').onmessage = async (e) => {
   for (const p of state.panes) {
     p.tabs = p.tabs.filter(docOf);
     if (!p.tabs.includes(p.active)) p.active = p.tabs[0] || null;
+    if (!p.tabs.includes(p.preview)) p.preview = null;
   }
   state.panes = state.panes.filter((p, i) => i === 0 || p.tabs.length).slice(0, 2);
   state.active = Math.min(state.active, state.panes.length - 1);
   if (!state.panes[0].tabs.length) {
     const first = docs.find((d) => d.front) || docs.find((d) => !d.side) || docs[0];
-    if (first) state.panes[0] = { tabs: [first.path], active: first.path };
+    if (first) state.panes[0] = { tabs: [first.path], active: first.path, preview: first.path };
   }
   setNotesOpen(state.notesOpen);
+  setSideOpen(state.sideOpen);
   renderTree();
   await buildPanes();
 

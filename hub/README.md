@@ -10,10 +10,14 @@ PORT=4400 npm start                       # run two environments at once
 
 ## Using it
 
-- **Files** (left): the folder tree. Click a file to open it as a tab; the "side" button on a row (or Cmd/Ctrl/Alt-click) opens it in a second pane beside the first.
-- **Tabs**: each pane has its own. "split" puts the current document in the other pane. Drag the bar between the panes to resize. Closing a pane's last tab closes the pane; closing everything returns to the front page. The layout is remembered.
+- **Files** (left): the folder tree. A single click opens a file in place of the one you were previewing (its tab title is in italics). A double click opens it as a tab that stays, so both are open. Double-clicking a tab also keeps it.
+- **Second document**: the "side" button on a file row (or Cmd/Ctrl/Alt-click), or "open on right" in the tab bar, opens a document in the right-hand column, which it shares with the notes. Drag the column's left edge for width and the bar between document and notes for height; "move notes above/below" swaps them. Closing its last tab gives the column back to the notes. Closing everything returns to the front page. The layout is remembered.
+- **Reading aids**: "hide sidebar" tucks the sidebar away (hover or click the strip on the left edge to bring it back); "reading focus" fades everything except the paragraph under the pointer or at the reading line; "roomy text" widens line, word and paragraph spacing; A−/A+ change the text size. A thin bar under the tabs shows how far through the document you are. Keyboard focus always has a thick outline, and file rows and tabs work with Tab and Enter.
+- **Upload a folder**: "upload a folder…" in the sidebar picks a folder from your computer and asks where it goes. *Add to this workspace* copies it in as a new folder beside the others; files that already exist are left alone, never overwritten. *Open as its own workspace* copies it to `hub/workspaces/<name>/` and switches the hub to it, with its own notes, title and tabs. Nothing is deleted: the workspace menu that appears above the file list switches back. Dot-files, `node_modules` and files over 50 MB are left out.
+- **Theme and font**: the menu and button under the title. Themes are Plain, Selenized Light, Eva Dark and Triple-M; each is a block of colour tokens at the top of `index.html`.
 - **Outline** (left, below the files): headings of the document that has focus; click to jump.
-- **Notes** (right) and the box along the bottom belong to the document that has focus. Select text first to pin a note to it.
+- **Highlighting**: select text and a small menu appears. Click a colour to highlight (that colour stays in use until you pick another), or "note" to highlight and write about it. Click an existing highlight to change its type, annotate it or remove it.
+- **Notes** (right) and the box along the bottom belong to the document that has focus. While a highlight is selected, the line above the box shows which one you are annotating. The legend at the top of the notes panel renames and recolours the highlight types.
 
 ## Starting a new learning environment
 
@@ -52,6 +56,7 @@ Optional. Shown when the hub opens and whenever you close a document. Editable i
 ```
 
 - `title` — shown in the sidebar and browser tab. Only used when there is no `FRONTPAGE.md`.
+- `highlights` — the highlight types, each `{ "id", "name", "color" }`. Managed from the legend above the notes; four defaults are used until changed.
 - `side` — files, or folders ending in `/`, that open in the second pane when linked to.
 - `ignore` — file names, paths, or folders ending in `/`, left out of the reader.
 
@@ -60,6 +65,7 @@ Optional. Shown when the hub opens and whenever you close a document. Editable i
 - The first `# Heading` is the document's title in the picker.
 - `#`, `##`, `###` headings make up the table of contents.
 - Links to other files in the folder (relative paths, optional `#heading-slug`) open inside the hub as a tab; files listed under `side` open in the other pane. Relative image paths work. A heading's slug is its text lowercased with each run of non-letters/digits replaced by `-`.
+- Fenced code is coloured by the language on the fence (` ```c `, ` ```cpp `, ` ```python `, …); a fence with no language stays plain. Source files are coloured by their extension.
 - A blockquote containing a paragraph that starts with bold `**Answer…**` hides everything from that paragraph on behind "Show answer".
 
 ### Notes
@@ -68,6 +74,7 @@ Optional. Shown when the hub opens and whenever you close a document. Editable i
 
 ```json
 { "id": "…", "doc": "sources/file.md", "heading": "slug", "headingText": "Heading",
-  "quote": "pinned text span or empty", "text": "the note", "ts": "ISO time", "status": "open",
+  "quote": "pinned text span or empty", "type": "highlight type id or empty", "text": "the note, empty for a bare highlight",
+  "ts": "ISO time", "status": "highlight | open | answered",
   "reply": "markdown, optional", "replyDoc": "responses/file.md#slug, optional" }
 ```

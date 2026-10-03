@@ -17,9 +17,11 @@ Each entry in `notes/notes.json`:
 
 ```json
 { "id": "...", "doc": "discrete-math/sources/1-functions-and-proofs.md", "heading": "slug", "headingText": "4.1 Injective",
-  "quote": "text span the note is pinned to, may be empty", "text": "what the user wrote",
-  "ts": "ISO time", "status": "open" }
+  "quote": "text span the note is pinned to, may be empty", "type": "highlight type id from hub.json, may be empty",
+  "text": "what the user wrote, empty for a bare highlight", "ts": "ISO time", "status": "open" }
 ```
+
+`status` is `highlight` for a highlight with no note (nothing to answer — but its type name, e.g. "Unclear" or "Question", says how the user read that passage and is useful context), `open` for a note awaiting a reply, `answered` once replied to. Type names and colours are in `hub.json` under `highlights`.
 
 ## When the user asks to assess / answer the notes
 

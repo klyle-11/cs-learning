@@ -6,9 +6,14 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-const ROOT = path.resolve(process.argv[2] || process.env.HUB_ROOT || path.join(__dirname, '..'));
-const NOTES = path.join(ROOT, 'notes', 'notes.json');
-const CONFIG = path.join(ROOT, 'hub.json');
+// HOME is the folder the hub was started on. Uploaded folders can be opened as
+// workspaces of their own; those are kept in hub/workspaces/ and ROOT points at
+// whichever one is open.
+const HOME = path.resolve(process.argv[2] || process.env.HUB_ROOT || path.join(__dirname, '..'));
+const WORKSPACES = path.join(__dirname, 'workspaces');
+const CURRENT = path.join(WORKSPACES, '.current');
+const MAX_UPLOAD = 50 * 1024 * 1024;
+let ROOT, NOTES, CONFIG, watcher;
 const FRONT = 'FRONTPAGE.md';
 const PORT = process.env.PORT || 4321;
 const SKIP_DIRS = new Set(['node_modules', 'notes']);
@@ -22,7 +27,8 @@ const readable = (name) => name.endsWith('.md') || isHtml(name) || CODE.has(path
 function readConfig() {
   let c = {};
   try { c = JSON.parse(fs.readFileSync(CONFIG, 'utf8')); } catch {}
-  const cfg = { title: path.basename(ROOT), side: [], ignore: ['CLAUDE.md'], ...c, front: null, root: ROOT };
+  const cfg = { title: path.basename(ROOT), side: [], ignore: ['CLAUDE.md'], highlights: HIGHLIGHTS, ...c, front: null, root: ROOT };
+  if (!Array.isArray(cfg.highlights) || !cfg.highlights.length) cfg.highlights = HIGHLIGHTS;
   // FRONTPAGE.md, when present, is the landing page and its first heading is the title.
   try {
     const h1 = fs.readFileSync(path.join(ROOT, FRONT), 'utf8').match(/^#\s+(.+)$/m);
@@ -31,6 +37,13 @@ function readConfig() {
   } catch {}
   return cfg;
 }
+// Highlight types: a colour and a name the user can change.
+const HIGHLIGHTS = [
+  { id: 'important', name: 'Important', color: '#fbeeb0' },
+  { id: 'definition', name: 'Definition', color: '#cfe8c6' },
+  { id: 'question', name: 'Question', color: '#cfe0f5' },
+  { id: 'unclear', name: 'Unclear', color: '#f6d0d6' },
+];
 const matches = (rel, list) => list.some((x) => rel === x || path.basename(rel) === x || (x.endsWith('/') && (rel + '/').startsWith(x)));
 
 function readNotes() {
@@ -91,16 +104,58 @@ function readBody(req) {
   });
 }
 
+function readRaw(req, limit) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on('data', (c) => { size += c.length; if (size > limit) { reject(new Error('file too large')); req.destroy(); } else chunks.push(c); });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+// A relative path from an upload, made safe: no "..", no dot-files, no absolute paths.
+function cleanRel(rel) {
+  const parts = String(rel || '').split(/[\\/]+/).filter(Boolean);
+  if (!parts.length || parts.some((x) => x === '..' || x.startsWith('.') || x === 'node_modules')) return null;
+  return parts;
+}
+const cleanName = (name) => String(name || '').replace(/[^\w .-]+/g, ' ').replace(/^[ .]+|[ .]+$/g, '').slice(0, 80);
+
+function listWorkspaces() {
+  const list = [{ name: path.basename(HOME), root: HOME, home: true }];
+  if (fs.existsSync(WORKSPACES)) {
+    for (const e of fs.readdirSync(WORKSPACES, { withFileTypes: true })) {
+      if (e.isDirectory() && !e.name.startsWith('.')) list.push({ name: e.name, root: path.join(WORKSPACES, e.name), home: false });
+    }
+  }
+  return list.map((w) => ({ ...w, current: w.root === ROOT }));
+}
+
 // Live reload: tell open pages which file changed.
 const clients = new Set();
 let timers = {};
-fs.watch(ROOT, { recursive: true }, (_evt, file) => {
-  if (!file || /(^|\/)(\.|node_modules\/)/.test(file) || path.join(ROOT, file).startsWith(__dirname + path.sep)) return;
-  clearTimeout(timers[file]);
-  timers[file] = setTimeout(() => {
-    for (const res of clients) res.write(`data: ${JSON.stringify({ file })}\n\n`);
-  }, 150);
-});
+function setRoot(root) {
+  ROOT = root;
+  NOTES = path.join(ROOT, 'notes', 'notes.json');
+  CONFIG = path.join(ROOT, 'hub.json');
+  if (watcher) watcher.close();
+  const inHub = (file) => ROOT === HOME && path.join(ROOT, file).startsWith(__dirname + path.sep);
+  watcher = fs.watch(ROOT, { recursive: true }, (_evt, file) => {
+    if (!file || /(^|\/)(\.|node_modules\/)/.test(file) || inHub(file)) return;
+    clearTimeout(timers[file]);
+    timers[file] = setTimeout(() => {
+      for (const res of clients) res.write(`data: ${JSON.stringify({ file })}\n\n`);
+    }, 150);
+  });
+}
+// Start on the workspace that was open last time, if it still exists.
+(() => {
+  let last = '';
+  try { last = fs.readFileSync(CURRENT, 'utf8').trim(); } catch {}
+  const ws = last && path.join(WORKSPACES, last);
+  setRoot(ws && fs.existsSync(ws) ? ws : HOME);
+})();
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
@@ -109,6 +164,9 @@ const server = http.createServer(async (req, res) => {
     if (p === '/') return send(res, 200, fs.readFileSync(path.join(__dirname, 'index.html')), 'text/html');
     if (p === '/vendor/marked.js') {
       return send(res, 200, fs.readFileSync(path.join(__dirname, 'node_modules/marked/lib/marked.umd.js')), 'text/javascript');
+    }
+    if (p === '/vendor/highlight.js') {
+      return send(res, 200, fs.readFileSync(path.join(__dirname, 'node_modules/@highlightjs/cdn-assets/highlight.min.js')), 'text/javascript');
     }
     // Files as they are on disk: HTML documents shown in a frame, and the
     // images, styles and scripts that they or the markdown files refer to.
@@ -124,20 +182,53 @@ const server = http.createServer(async (req, res) => {
       req.on('close', () => clients.delete(res));
       return;
     }
+    if (p === '/api/workspaces') return send(res, 200, listWorkspaces());
+    // Switch to another workspace: the home folder, or one made from an upload.
+    if (p === '/api/workspace' && req.method === 'POST') {
+      const b = await readBody(req);
+      const target = listWorkspaces().find((w) => w.root === b.root);
+      if (!target) return send(res, 404, { error: 'no such workspace' });
+      setRoot(target.root);
+      fs.mkdirSync(WORKSPACES, { recursive: true });
+      fs.writeFileSync(CURRENT, target.home ? '' : target.name);
+      return send(res, 200, listWorkspaces());
+    }
+    // One file of an uploaded folder. to=here adds it to the open workspace
+    // (existing files are never overwritten); to=<name> puts it in a workspace
+    // of its own, created on first use.
+    if (p === '/api/upload' && req.method === 'POST') {
+      const parts = cleanRel(url.searchParams.get('path'));
+      const ws = url.searchParams.get('workspace');
+      const base = ws ? path.join(WORKSPACES, cleanName(ws)) : ROOT;
+      if (!parts || (ws && !cleanName(ws))) return send(res, 400, { error: 'bad path' });
+      const abs = path.join(base, ...parts);
+      if (!abs.startsWith(base + path.sep)) return send(res, 400, { error: 'bad path' });
+      const data = await readRaw(req, MAX_UPLOAD);
+      if (fs.existsSync(abs)) return send(res, 200, { skipped: true });
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, data);
+      return send(res, 200, { saved: true, root: base });
+    }
     if (p === '/api/docs') return send(res, 200, listDocs());
     if (p === '/api/config' && req.method === 'GET') return send(res, 200, readConfig());
     if (p === '/api/config' && req.method === 'PUT') {
       const b = await readBody(req);
-      const title = typeof b.title === 'string' && b.title.replace(/\s+/g, ' ').trim();
-      if (!title) return send(res, 400, { error: 'title required' });
       const { front, root, ...cfg } = readConfig();
-      if (front) {
+      const title = typeof b.title === 'string' && b.title.replace(/\s+/g, ' ').trim();
+      if (title && front) {
         const abs = path.join(ROOT, front);
         const md = fs.readFileSync(abs, 'utf8');
         fs.writeFileSync(abs, /^#\s+.+$/m.test(md) ? md.replace(/^#\s+.+$/m, () => '# ' + title) : `# ${title}\n\n${md}`);
-      } else {
-        fs.writeFileSync(CONFIG, JSON.stringify({ ...cfg, title }, null, 2) + '\n');
+      } else if (title) {
+        cfg.title = title;
       }
+      if (Array.isArray(b.highlights)) {
+        cfg.highlights = b.highlights
+          .filter((t) => t && t.id && /^#[0-9a-f]{6}$/i.test(t.color))
+          .map((t) => ({ id: String(t.id), name: String(t.name || '').trim() || 'Untitled', color: t.color }));
+      }
+      if (front) cfg.title = (() => { try { return JSON.parse(fs.readFileSync(CONFIG, 'utf8')).title; } catch {} })() || cfg.title;
+      fs.writeFileSync(CONFIG, JSON.stringify(cfg, null, 2) + '\n');
       return send(res, 200, readConfig());
     }
     if (p === '/api/doc') {
@@ -154,16 +245,18 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/notes' && req.method === 'GET') return send(res, 200, readNotes());
     if (p === '/api/notes' && req.method === 'POST') {
       const b = await readBody(req);
-      if (!b.text || !b.doc) return send(res, 400, { error: 'text and doc required' });
+      // A highlight is a note with a quote and no text yet.
+      if (!b.doc || (!b.text && !b.quote)) return send(res, 400, { error: 'doc and text or quote required' });
       const note = {
         id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
         doc: b.doc,
         heading: b.heading || '',
         headingText: b.headingText || '',
         quote: b.quote || '',
-        text: b.text,
+        type: b.type || '',
+        text: b.text || '',
         ts: new Date().toISOString(),
-        status: 'open',
+        status: b.text ? 'open' : 'highlight',
       };
       const notes = readNotes();
       notes.push(note);
@@ -177,7 +270,8 @@ const server = http.createServer(async (req, res) => {
       if (i < 0) return send(res, 404, { error: 'no such note' });
       if (req.method === 'PUT') {
         const b = await readBody(req);
-        for (const k of ['text', 'quote', 'heading', 'headingText']) if (k in b) notes[i][k] = b[k];
+        for (const k of ['text', 'quote', 'heading', 'headingText', 'type']) if (k in b) notes[i][k] = b[k];
+        if (notes[i].status === 'highlight' && notes[i].text) notes[i].status = 'open';
         writeNotes(notes);
         return send(res, 200, notes[i]);
       }
