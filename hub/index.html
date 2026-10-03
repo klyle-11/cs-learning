@@ -4,6 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Reader</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/icon-192.png">
+<meta name="theme-color" content="#fdfcf7">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Reader">
 <style>
   :root {
     --serif: "Iowan Old Style", Palatino, "Palatino Linotype", Georgia, serif;
@@ -326,7 +333,19 @@
   .type span:hover, .type span:focus { outline: 1px dashed var(--rule); }
   .type.cur span { font-weight: 600; }
   #types > button { margin-top: 6px; border: 0; padding: 0; color: var(--accent); font-size: 12px; }
-  .editFront { float: right; margin-top: 8px; }
+  .editFront { float: right; margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+  /* a locked folder: the password form, in place of the document */
+  .lockbox { width: min(100%, 420px); margin: 8vh auto; padding: 20px 22px; border: 1px solid var(--rule); font: 15px/1.5 var(--head); }
+  .lockbox h2 { margin: 0 0 10px; font-size: 19px; }
+  .lockbox p { margin: 0 0 10px; }
+  .lockbox label { display: block; margin: 10px 0; font-size: 13px; color: var(--muted); }
+  .lockbox input { display: block; width: 100%; margin-top: 3px; padding: 8px 10px; border: 1px solid var(--rule); background: var(--field); color: var(--ink); font: 16px var(--head); }
+  .lockbox button.main { display: block; margin: 12px 0 8px; padding: 8px 18px; font-size: 14px; background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  .lockbox button.main:disabled { opacity: .5; }
+  .lockbox button.link { display: block; border: 0; padding: 4px 0; margin-top: 14px; color: var(--muted); text-decoration: underline; text-align: left; }
+  #gate label.check { display: flex; gap: 8px; align-items: center; color: var(--ink); font-size: 14px; }
+  #gate label.check input { display: inline; width: auto; margin: 0; }
+  #gate button:disabled { opacity: .45; cursor: default; }
   /* front page: what is in here, by kind */
   .browse { margin-top: 1.6em; font-family: var(--head); }
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }

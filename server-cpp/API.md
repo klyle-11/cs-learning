@@ -10,6 +10,7 @@ All JSON bodies are UTF-8. Errors are `{ "error": "message" }` with a 4xx or 5xx
 |---|---|
 | `GET /` | `index.html` |
 | `GET /app.js`, `/local.js`, `/vault.js` | the page's own scripts |
+| `GET /sw.js`, `/manifest.webmanifest`, `/icon-192.png`, `/icon-512.png`, `/apple-touch-icon.png` | the service worker, manifest and icons: they let the page be installed and opened without the server |
 | `GET /vendor/marked.js`, `/vendor/highlight.js`, `/vendor/purify.js` | the three libraries the page loads |
 | `GET /raw/<path>` | the file as it is on disk, with a content type from its extension. 404 if missing |
 | `GET /api/doc?path=<path>` | the text of a markdown, HTML or source file. 404 if missing or not a readable type |
@@ -37,6 +38,10 @@ All JSON bodies are UTF-8. Errors are `{ "error": "message" }` with a 4xx or 5xx
 `front` is `null` when there is no `FRONTPAGE.md`. When there is one, `title` is its first heading.
 
 `PUT /api/config` with any of `{ "title": "…", "highlights": [...] }` → the new config. A title is trimmed and its whitespace collapsed; with a front page it rewrites that file's heading, otherwise it is stored in `hub.json`. Highlight types without an `id` or a `#rrggbb` colour are dropped; an empty name becomes `Untitled`.
+
+`PUT /api/config` also takes `"locks"`: `{ "some/folder": { "salt": "…", "hash": "…" }, "other": {} }`, the folders the reader asks a password for. The whole set is replaced. `salt` and `hash` are base64 (up to 64 and 128 characters); an entry without both is kept as `{}`, a lock whose password is still to be chosen. Folder names that try to leave the workspace are dropped. The server only stores these: the reader does the asking, and the files are stored as they are.
+
+`DELETE /api/folder?path=some/folder` → `{ "removed": "some/folder" }`. Deletes the folder and everything in it, and any lock on it or inside it. 400 if it is not a folder in the workspace, tries to leave it, or is `notes`.
 
 `PUT /api/front` with `{ "markdown": "…" }` → the new config. Writes `FRONTPAGE.md`. 400 without `markdown`. With `"folder": "some/folder"` it writes that folder's own `FRONTPAGE.md` instead; 400 if the folder does not exist or the path tries to leave the workspace.
 

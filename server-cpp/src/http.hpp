@@ -301,6 +301,7 @@ struct Options {
 inline const char *reason(int status) {
   switch (status) {
     case 200: return "OK";
+    case 204: return "No Content";
     case 206: return "Partial Content";
     case 308: return "Permanent Redirect";
     case 400: return "Bad Request";

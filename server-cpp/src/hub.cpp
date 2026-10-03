@@ -129,6 +129,24 @@ static bool write_file(const string &p, const string &data) {
   return secure::replace(tmp, p);
 }
 
+// Delete a folder and everything in it. Links are removed, never followed.
+static bool remove_tree(const string &dir) {
+  DIR *d = ::opendir(dir.c_str());
+  if (!d) return false;
+  bool ok = true;
+  while (struct dirent *e = ::readdir(d)) {
+    string name = e->d_name;
+    if (name == "." || name == "..") continue;
+    string abs = dir + "/" + name;
+    struct stat st;
+    if (::lstat(abs.c_str(), &st) != 0) { ok = false; continue; }
+    if (S_ISDIR(st.st_mode)) ok = remove_tree(abs) && ok;
+    else ok = ::unlink(abs.c_str()) == 0 && ok;
+  }
+  ::closedir(d);
+  return ::rmdir(dir.c_str()) == 0 && ok;
+}
+
 // A path sent by a client, split into parts. Rejects anything that could step
 // outside the folder ("..", empty or absolute parts) and, when asked, hidden
 // files and node_modules.
@@ -521,8 +539,35 @@ static string cookie_of(const http::Request &req, const string &name) {
 }
 // The id of the paired device that sent this request: "local" for this machine
 // itself, "" for a stranger.
-static string device_of(const http::Request &req) {
-  string cookie = cookie_of(req, "hub_device");
+// Whether a request comes from a page of another site, going by what the
+// browser says (Origin, Sec-Fetch-Site).
+static bool cross_site(const http::Request &req) {
+  const string &origin = req.header("origin"), &site = req.header("sec-fetch-site");
+  if (!origin.empty()) {
+    size_t scheme = origin.find("://");
+    if (scheme == string::npos || origin.substr(scheme + 3) != req.header("host")) return true;
+  }
+  return !site.empty() && site != "same-origin" && site != "none";
+}
+// "http(s)://host[:port]" and nothing more.
+static bool plain_origin(const string &o) {
+  size_t at = starts_with(o, "https://") ? 8 : starts_with(o, "http://") ? 7 : 0;
+  if (!at || o.size() == at) return false;
+  return std::all_of(o.begin() + static_cast<long>(at), o.end(), [](unsigned char c) { return c > ' ' && c != '/' && c < 127; });
+}
+static string bearer_of(const http::Request &req) {
+  const string &h = req.header("authorization");
+  return starts_with(h, "Bearer ") ? trim(h.substr(7)) : "";
+}
+
+// A request from this hub's own page proves itself with its cookie. A reader
+// that was loaded from another hub (`cross`) proves itself with the token it
+// was given when it paired, sent as "Authorization: Bearer"; for it the cookie
+// and being on this machine count for nothing, since any website could cause
+// such a request.
+static string device_of(const http::Request &req, bool cross) {
+  string cookie = bearer_of(req);
+  if (cookie.empty() && !cross) cookie = cookie_of(req, "hub_device");
   size_t dot = cookie.find('.');
   if (dot != string::npos) {
     string id = cookie.substr(0, dot), hash = secure::sha256_hex(cookie.substr(dot + 1)), today = now_iso().substr(0, 10);
@@ -533,7 +578,45 @@ static string device_of(const http::Request &req) {
       return d.id;
     }
   }
-  return req.local && !pair_local ? "local" : "";
+  return !cross && req.local && !pair_local ? "local" : "";
+}
+
+// Other hubs the reader may also connect to: a name and an address each, set
+// from the reader. The page is allowed to talk to these and to nothing else.
+struct Hub { string name, url; };
+static std::vector<Hub> read_hubs() {
+  std::vector<Hub> out;
+  string text;
+  Json file(secure::slurp(STATE + "/hubs.json", text) ? cJSON_Parse(text.c_str()) : nullptr);
+  const cJSON *h;
+  cJSON_ArrayForEach(h, cJSON_GetObjectItemCaseSensitive(file.p, "hubs")) {
+    Hub hub{str_of(h, "name"), str_of(h, "url")};
+    if (has_str(h, "name") && plain_origin(hub.url)) out.push_back(hub);
+  }
+  return out;
+}
+static cJSON *hubs_json(const std::vector<Hub> &hubs) {
+  cJSON *arr = cJSON_CreateArray();
+  for (const Hub &h : hubs) {
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "name", h.name.c_str());
+    cJSON_AddStringToObject(o, "url", h.url.c_str());
+    cJSON_AddItemToArray(arr, o);
+  }
+  return arr;
+}
+// What a typed address comes down to: scheme and host in lower case, the
+// port unless it is the usual one, and nothing after it. "" if it is no address.
+static string origin_of(const string &typed) {
+  string u = lower(trim(typed));
+  bool tls = starts_with(u, "https://");
+  if (!tls && !starts_with(u, "http://")) return "";
+  size_t at = tls ? 8 : 7, end = u.find_first_of("/?#", at);
+  string host = u.substr(at, end == string::npos ? string::npos : end - at);
+  const string usual = tls ? ":443" : ":80";
+  if (host.size() > usual.size() && host.compare(host.size() - usual.size(), usual.size(), usual) == 0) host.erase(host.size() - usual.size());
+  string out = (tls ? "https://" : "http://") + host;
+  return !host.empty() && host.find('@') == string::npos && plain_origin(out) ? out : "";
 }
 static string device_cookie(const string &value, bool tls, bool clear = false) {
   return "Set-Cookie: hub_device=" + value + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=" + (clear ? "0" : "31536000") + (tls ? "; Secure" : "") + "\r\n";
@@ -760,6 +843,16 @@ static http::Response answer(http::Request &req) {
 
   if (m == "GET") {
     if (p == "/") return asset_response(WWW + "/index.html", "text/html");
+    // What lets the page be installed and opened without the server. The
+    // worker gets a content policy of its own: the one for data would stop
+    // it asking the server for anything.
+    if (p == "/sw.js") {
+      http::Response r = asset_response(WWW + "/sw.js", "text/javascript");
+      r.extra += "Content-Security-Policy: default-src 'none'; connect-src 'self'\r\n";
+      return r;
+    }
+    if (p == "/manifest.webmanifest") return asset_response(WWW + p, "application/manifest+json");
+    if (p == "/icon-192.png" || p == "/icon-512.png" || p == "/apple-touch-icon.png") return asset_response(WWW + p, "image/png");
     for (const auto &a : ASSETS) {
       if (p != a.first) continue;
       // Scripts sit beside the page (copied there for the board), or in node_modules.
@@ -771,12 +864,22 @@ static http::Response answer(http::Request &req) {
   // A page on another website must not be able to use what is here. Browsers
   // say where a request comes from (Origin, Sec-Fetch-Site); if that is not
   // this server itself, refuse.
-  const string &origin = req.header("origin"), &site = req.header("sec-fetch-site");
-  if (!origin.empty()) {
-    size_t scheme = origin.find("://");
-    if (scheme == string::npos || origin.substr(scheme + 3) != req.header("host")) return http::error(403, "requests from other sites are not allowed");
+  // The one exception is a reader that was loaded from another hub and is
+  // paired with this one: it sends its token itself (never a cookie, which a
+  // browser would attach for any site), or is pairing with the code.
+  const bool cross = cross_site(req);
+  if (cross) {
+    const bool asked = m == "OPTIONS" && !req.header("access-control-request-method").empty();
+    const bool allowed = asked || !bearer_of(req).empty() || (p == "/api/pair" && m == "POST");
+    if (!allowed || !plain_origin(req.header("origin"))) return http::error(403, "requests from other sites are not allowed");
+    if (asked) {
+      http::Response r;
+      r.status = 204;
+      r.type = "text/plain";
+      r.extra = "Access-Control-Allow-Methods: GET, POST, PUT, DELETE\r\nAccess-Control-Allow-Headers: Authorization, Content-Type, Range\r\nAccess-Control-Max-Age: 600\r\n";
+      return r;
+    }
   }
-  if (!site.empty() && site != "same-origin" && site != "none") return http::error(403, "requests from other sites are not allowed");
 
   // Pairing: a new device shows it knows the code on offer and is given a token.
   if (p == "/api/pair" && m == "POST") {
@@ -805,12 +908,14 @@ static http::Response answer(http::Request &req) {
     cJSON *o = cJSON_AddObjectToObject(out.p, "device");
     cJSON_AddStringToObject(o, "id", d.id.c_str());
     cJSON_AddStringToObject(o, "name", d.name.c_str());
+    // A reader from another hub keeps the token itself; this hub's own page gets it as a cookie.
+    if (cross) { cJSON_AddStringToObject(out.p, "token", (d.id + "." + token).c_str()); return json_response(out.p); }
     http::Response r = json_response(out.p);
     r.extra = device_cookie(d.id + "." + token, req.tls);
     return r;
   }
 
-  const string device = device_of(req);
+  const string device = device_of(req, cross);
   if (device.empty()) return http::error(401, "pairing required");
 
   if (p == "/api/session" && m == "GET") return session_json(device);
@@ -945,6 +1050,27 @@ static http::Response answer(http::Request &req) {
     return json_response(d.p);
   }
 
+  if (p == "/api/hubs" && m == "GET") { Json out(hubs_json(read_hubs())); return json_response(out.p); }
+  if (p == "/api/hubs" && m == "PUT") {
+    string text;
+    if (int bad = json_body(req, text)) return body_error(bad);
+    Json body(cJSON_Parse(text.c_str()));
+    std::vector<Hub> hubs;
+    const cJSON *h;
+    int seen = 0;
+    cJSON_ArrayForEach(h, cJSON_GetObjectItemCaseSensitive(body.p, "hubs")) {
+      if (++seen > 12) break;
+      Hub hub{squeeze(str_of(h, "name")).substr(0, 40), origin_of(str_of(h, "url"))};
+      if (hub.url.empty() || hub.name.empty() || std::any_of(hubs.begin(), hubs.end(), [&](const Hub &x) { return x.url == hub.url; })) continue;
+      hubs.push_back(hub);
+    }
+    Json file(cJSON_CreateObject());
+    cJSON_AddItemToObject(file.p, "hubs", hubs_json(hubs));
+    if (!secure::spit(STATE + "/hubs.json", dump(file.p, true) + "\n", 0600)) return http::error(500, "could not save");
+    Json out(hubs_json(read_hubs()));
+    return json_response(out.p);
+  }
+
   if (p == "/api/config" && m == "GET") { Json cfg(read_config()); return json_response(cfg.p); }
   if (p == "/api/config" && m == "PUT") {
     string text;
@@ -981,9 +1107,60 @@ static http::Response answer(http::Request &req) {
       cJSON_DeleteItemFromObjectCaseSensitive(file.p, "highlights");
       cJSON_AddItemToObject(file.p, "highlights", clean);
     }
+    // Folder locks: which folders the reader asks a password for, and what
+    // it checks the password against. The whole set is replaced. The lock is
+    // the reader's (it hides the folder until the password is typed); the
+    // files themselves are stored as they are.
+    const cJSON *locks = cJSON_GetObjectItemCaseSensitive(body.p, "locks");
+    if (cJSON_IsObject(locks)) {
+      auto b64 = [](const string &v, size_t most) {
+        return !v.empty() && v.size() <= most && std::all_of(v.begin(), v.end(), [](unsigned char c) { return std::isalnum(c) || c == '+' || c == '/' || c == '='; });
+      };
+      cJSON *clean = cJSON_CreateObject();
+      const cJSON *l;
+      cJSON_ArrayForEach(l, locks) {
+        Strings parts;
+        if (!l->string || !cJSON_IsObject(l) || !clean_parts(l->string, parts, true)) continue;
+        string salt = str_of(l, "salt"), hash = str_of(l, "hash");
+        cJSON *o = cJSON_CreateObject();
+        if (b64(salt, 64) && b64(hash, 128)) {
+          cJSON_AddStringToObject(o, "salt", salt.c_str());
+          cJSON_AddStringToObject(o, "hash", hash.c_str());
+        }
+        cJSON_DeleteItemFromObjectCaseSensitive(clean, join(parts).c_str());
+        cJSON_AddItemToObject(clean, join(parts).c_str(), o);
+      }
+      cJSON_DeleteItemFromObjectCaseSensitive(file.p, "locks");
+      cJSON_AddItemToObject(file.p, "locks", clean);
+    }
     if (!write_file(ROOT + "/hub.json", dump(file.p, true) + "\n")) return http::error(500, "could not save");
     Json cfg(read_config());
     return json_response(cfg.p);
+  }
+
+  // Take a folder, and everything in it, out of the workspace. The notes
+  // folder is the reader's own and stays. Any lock on the folder goes with it.
+  if (p == "/api/folder" && m == "DELETE") {
+    Strings parts;
+    auto it = req.query.find("path");
+    struct stat st;
+    if (it == req.query.end() || !clean_parts(it->second, parts, true) || parts[0] == "notes" ||
+        ::lstat((ROOT + "/" + join(parts)).c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) return http::error(400, "no such folder");
+    std::lock_guard<std::mutex> g(store_lock);
+    string key = join(parts);
+    if (!remove_tree(ROOT + "/" + key)) return http::error(500, "could not remove");
+    Json file(read_settings_file());
+    cJSON *locks = cJSON_GetObjectItemCaseSensitive(file.p, "locks");
+    if (cJSON_IsObject(locks)) {
+      Strings gone;
+      const cJSON *l;
+      cJSON_ArrayForEach(l, locks) { string k = l->string ? l->string : ""; if (k == key || k.compare(0, key.size() + 1, key + "/") == 0) gone.push_back(k); }
+      for (const string &k : gone) cJSON_DeleteItemFromObjectCaseSensitive(locks, k.c_str());
+      if (!write_file(ROOT + "/hub.json", dump(file.p, true) + "\n")) return http::error(500, "could not save");
+    }
+    Json out(cJSON_CreateObject());
+    cJSON_AddStringToObject(out.p, "removed", key.c_str());
+    return json_response(out.p);
   }
 
   if (p == "/api/doc") {
@@ -1120,9 +1297,18 @@ static http::Response route(http::Request &req) {
   http::Response r = answer(req);
   if (r.hold) return r;
   bool page = req.method == "GET" && (req.path == "/" || req.path == "/trust") && r.status == 200;
-  if (page) r.extra += CSP_PAGE;
+  if (page) {
+    // The page may also talk to the other hubs it has been told about.
+    string csp = CSP_PAGE, also;
+    if (req.path == "/") for (const Hub &h : read_hubs()) also += " " + h.url;
+    size_t at = csp.find("connect-src 'self'");
+    if (at != string::npos) csp.insert(at + 18, also);
+    r.extra += csp;
+  }
   else if (r.extra.find("Content-Security-Policy") == string::npos && r.type != "application/pdf") r.extra += CSP_DATA;
   r.extra += COMMON_HEADERS;
+  // A reader loaded from another hub may read the answer (see cross_site, above).
+  if (cross_site(req) && plain_origin(req.header("origin"))) r.extra += "Access-Control-Allow-Origin: " + req.header("origin") + "\r\nVary: Origin\r\n";
   return r;
 }
 

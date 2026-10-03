@@ -138,6 +138,16 @@ const CSP_RAW = "sandbox allow-same-origin; default-src 'none'; img-src 'self' d
   "style-src 'self' 'unsafe-inline'; font-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'";
 const CSP_DATA = "default-src 'none'; sandbox; frame-ancestors 'none'";
 const COMMON = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'Cross-Origin-Resource-Policy': 'same-origin', 'X-DNS-Prefetch-Control': 'off' };
+// Other hubs the reader may also connect to: a name and an address each, set
+// from the reader. The page is allowed to talk to these and to nothing else.
+const HUBS = () => path.join(STATE, 'hubs.json');
+function readHubs() {
+  try { return JSON.parse(fs.readFileSync(HUBS(), 'utf8')).hubs.filter((h) => h && typeof h.name === 'string' && /^https?:\/\/[^\s/]+$/.test(h.url)); } catch { return []; }
+}
+const pageHeaders = () => ({
+  'Content-Security-Policy': CSP_PAGE.replace("connect-src 'self'", ["connect-src 'self'", ...readHubs().map((h) => h.url)].join(' ')),
+  'X-Frame-Options': 'DENY', 'Cross-Origin-Opener-Policy': 'same-origin',
+});
 const PAGE = { 'Content-Security-Policy': CSP_PAGE, 'X-Frame-Options': 'DENY', 'Cross-Origin-Opener-Policy': 'same-origin' };
 
 function send(res, status, body, type = 'application/json', extra = {}) {
@@ -211,8 +221,13 @@ function offerCode(announce) {
 const isLocal = (req) => /^(::ffff:)?127\.|^::1$/.test(req.socket.remoteAddress || '');
 // The id of the paired device that sent this request: "local" for this machine
 // itself, "" for a stranger.
-function deviceOf(req) {
-  const m = /(?:^|;\s*)hub_device=([^.;]+)\.([^;]+)/.exec(req.headers.cookie || '');
+// A request from this hub's own page proves itself with its cookie. A reader
+// that was loaded from another hub (`cross`) proves itself with the token it
+// was given when it paired, sent as "Authorization: Bearer"; for it the cookie
+// and being on this machine count for nothing, since any website could cause
+// such a request.
+function deviceOf(req, cross) {
+  const m = /^Bearer ([^.\s]+)\.(\S+)$/.exec(req.headers.authorization || '') || (!cross && /(?:^|;\s*)hub_device=([^.;]+)\.([^;]+)/.exec(req.headers.cookie || ''));
   if (m) {
     const devices = readDevices(), d = devices.find((x) => x.id === m[1] && same(x.hash, sha256(m[2])));
     const today = new Date().toISOString().slice(0, 10);
@@ -221,7 +236,7 @@ function deviceOf(req) {
       return d.id;
     }
   }
-  return isLocal(req) && !PAIR_LOCAL ? 'local' : '';
+  return !cross && isLocal(req) && !PAIR_LOCAL ? 'local' : '';
 }
 const deviceCookie = (value, tls, clear) =>
   `hub_device=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${clear ? 0 : 31536000}${tls ? '; Secure' : ''}`;
@@ -299,6 +314,15 @@ const ASSETS = {
   '/vendor/highlight.js': 'node_modules/@highlightjs/cdn-assets/highlight.min.js',
   '/vendor/purify.js': 'node_modules/dompurify/dist/purify.min.js',
 };
+// What lets the page be installed and opened without the server: the service
+// worker, the manifest and the icons. The worker gets a content policy of its
+// own: the one for data would stop it asking the server for anything.
+const CSP_WORKER = "default-src 'none'; connect-src 'self'";
+const SHELL = {
+  '/sw.js': ['text/javascript', { 'Content-Security-Policy': CSP_WORKER }],
+  '/manifest.webmanifest': ['application/manifest+json'],
+  '/icon-192.png': ['image/png'], '/icon-512.png': ['image/png'], '/apple-touch-icon.png': ['image/png'],
+};
 const asset = (name) => fs.readFileSync(path.join(__dirname, name));
 
 async function handle(req, res) {
@@ -326,7 +350,8 @@ async function handle(req, res) {
       return send(res, 308, 'This hub only speaks HTTPS.\n', 'text/plain', { Location: p === '/' ? '/trust' : 'https://' + req.headers.host + req.url, Connection: 'close' });
     }
 
-    if (m === 'GET' && p === '/') return send(res, 200, asset('index.html'), 'text/html', PAGE);
+    if (m === 'GET' && p === '/') return send(res, 200, asset('index.html'), 'text/html', pageHeaders());
+    if (m === 'GET' && SHELL[p]) return send(res, 200, asset(p.slice(1)), ...SHELL[p]);
     if (m === 'GET' && ASSETS[p]) {
       // Scripts sit beside the page (copied there for the board), or in node_modules.
       const beside = path.join(__dirname, p.slice(1));
@@ -336,10 +361,19 @@ async function handle(req, res) {
     // A page on another website must not be able to use what is here. Browsers
     // say where a request comes from (Origin, Sec-Fetch-Site); if that is not
     // this server itself, refuse.
+    // The one exception is a reader that was loaded from another hub and is
+    // paired with this one: it sends its token itself (never a cookie, which
+    // a browser would attach for any site), or is pairing with the code.
     const origin = req.headers.origin, site = req.headers['sec-fetch-site'];
-    if (origin && origin.replace(/^[a-z]+:\/\//i, '') !== req.headers.host) return send(res, 403, { error: 'requests from other sites are not allowed' });
-    if (origin && !/^[a-z]+:\/\//i.test(origin)) return send(res, 403, { error: 'requests from other sites are not allowed' });
-    if (site && site !== 'same-origin' && site !== 'none') return send(res, 403, { error: 'requests from other sites are not allowed' });
+    const cross = (!!origin && (!/^[a-z]+:\/\//i.test(origin) || origin.replace(/^[a-z]+:\/\//i, '') !== req.headers.host)) || (!!site && site !== 'same-origin' && site !== 'none');
+    if (cross) {
+      const asked = m === 'OPTIONS' && req.headers['access-control-request-method'];
+      const allowed = asked || /^Bearer \S/.test(req.headers.authorization || '') || (p === '/api/pair' && m === 'POST');
+      if (!allowed || !origin || !/^https?:\/\/[^\s/]+$/i.test(origin)) return send(res, 403, { error: 'requests from other sites are not allowed' });
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+      if (asked) return send(res, 204, '', 'text/plain', { 'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE', 'Access-Control-Allow-Headers': 'Authorization, Content-Type, Range', 'Access-Control-Max-Age': '600' });
+    }
 
     // Pairing: a new device shows it knows the code on offer and is given a token.
     if (p === '/api/pair' && m === 'POST') {
@@ -358,15 +392,30 @@ async function handle(req, res) {
       const d = { id: crypto.randomBytes(8).toString('hex'), name, hash: sha256(token), created: now, seen: now.slice(0, 10) };
       writeDevices([...readDevices(), d]);
       console.log(`paired: ${d.name} (${d.id})`);
+      // A reader from another hub keeps the token itself; this hub's own page gets it as a cookie.
+      if (cross) return send(res, 200, { device: { id: d.id, name: d.name }, token: d.id + '.' + token });
       return send(res, 200, { device: { id: d.id, name: d.name } }, 'application/json', { 'Set-Cookie': deviceCookie(d.id + '.' + token, tls) });
     }
 
-    const device = deviceOf(req);
+    const device = deviceOf(req, cross);
     if (!device) return send(res, 401, { error: 'pairing required' });
 
     if (p === '/api/session' && m === 'GET') {
       const d = readDevices().find((x) => x.id === device);
       return send(res, 200, { device: { id: device, name: d ? d.name : 'this computer' }, local: device === 'local', tls: USE_TLS });
+    }
+    if (p === '/api/hubs' && m === 'GET') return send(res, 200, readHubs());
+    if (p === '/api/hubs' && m === 'PUT') {
+      const b = await readBody(req), hubs = [];
+      for (const h of Array.isArray(b.hubs) ? b.hubs.slice(0, 12) : []) {
+        let url = '';
+        try { const u = new URL(String(h && h.url)); if (u.protocol === 'https:' || u.protocol === 'http:') url = u.origin; } catch {}
+        const name = String((h && h.name) || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+        if (url && name && !hubs.some((x) => x.url === url)) hubs.push({ name, url });
+      }
+      fs.mkdirSync(STATE, { recursive: true, mode: 0o700 });
+      fs.writeFileSync(HUBS(), JSON.stringify({ hubs }, null, 2) + '\n', { mode: 0o600 });
+      return send(res, 200, readHubs());
     }
     if (p === '/api/pair/code' && m === 'POST') return send(res, 200, { code: offerCode(false), minutes: 10 });
     if (p === '/api/devices' && m === 'GET') {
@@ -474,9 +523,38 @@ async function handle(req, res) {
           .filter((t) => t && t.id && /^#[0-9a-f]{6}$/i.test(t.color))
           .map((t) => ({ id: String(t.id), name: String(t.name || '').trim() || 'Untitled', color: t.color }));
       }
+      // Folder locks: which folders the reader asks a password for, and what
+      // it checks the password against. The whole set is replaced. The lock
+      // is the reader's (it hides the folder until the password is typed);
+      // the files themselves are stored as they are.
+      if (b.locks && typeof b.locks === 'object' && !Array.isArray(b.locks)) {
+        const b64 = (v, n) => typeof v === 'string' && v.length > 0 && v.length <= n && /^[A-Za-z0-9+/=]+$/.test(v);
+        cfg.locks = {};
+        for (const [folder, l] of Object.entries(b.locks)) {
+          const parts = cleanRel(folder);
+          if (!parts || !l || typeof l !== 'object') continue;
+          cfg.locks[parts.join('/')] = b64(l.salt, 64) && b64(l.hash, 128) ? { salt: l.salt, hash: l.hash } : {};
+        }
+      }
       if (front) cfg.title = (() => { try { return JSON.parse(fs.readFileSync(CONFIG, 'utf8')).title; } catch {} })() || cfg.title;
       fs.writeFileSync(CONFIG, JSON.stringify(cfg, null, 2) + '\n');
       return send(res, 200, readConfig());
+    }
+    // Take a folder, and everything in it, out of the workspace. The notes
+    // folder is the reader's own and stays. Any lock on the folder goes with it.
+    if (p === '/api/folder' && req.method === 'DELETE') {
+      const parts = cleanRel(url.searchParams.get('path'));
+      const dir = parts && path.join(ROOT, ...parts);
+      if (!dir || parts[0] === 'notes' || !fs.existsSync(dir) || !fs.lstatSync(dir).isDirectory()) return send(res, 400, { error: 'no such folder' });
+      fs.rmSync(dir, { recursive: true, force: true });
+      const key = parts.join('/');
+      let file = {};
+      try { file = JSON.parse(fs.readFileSync(CONFIG, 'utf8')); } catch {}
+      if (file.locks && typeof file.locks === 'object') {
+        for (const k of Object.keys(file.locks)) if (k === key || k.startsWith(key + '/')) delete file.locks[k];
+        fs.writeFileSync(CONFIG, JSON.stringify(file, null, 2) + '\n');
+      }
+      return send(res, 200, { removed: key });
     }
     if (p === '/api/doc') {
       const abs = safeDoc(url.searchParams.get('path'));

@@ -21,7 +21,11 @@ const scrollMem = new Map(); // "pane:path" -> scrollTop
 // answer in a few seconds counts as failed. The wait is only for the answer
 // to start: a long download is not cut short, and an upload is given time
 // for its size.
+const unreachable = (opts) => Object.assign(new Error('The server is not reachable.'), { offline: true, method: opts.method || 'GET' });
 async function call(url, opts = {}) {
+  // Known to be out of reach: nothing waits on it. Only the regular look for
+  // the server (`probe`) goes out, and everything resumes when that succeeds.
+  if (!net.online && !opts.probe) throw unreachable(opts);
   const ctl = new AbortController();
   const wait = opts.wait || (opts.body instanceof Blob ? 30000 + opts.body.size / 20 : net.online ? 8000 : 4000);
   const timer = setTimeout(() => ctl.abort(), wait);
@@ -35,7 +39,7 @@ async function call(url, opts = {}) {
   } catch {
     clearTimeout(timer);
     setOnline(false);
-    throw Object.assign(new Error('The server is not reachable.'), { offline: true, method: opts.method || 'GET' });
+    throw unreachable(opts);
   }
 }
 // Answers that are not a success become errors that say why, in the server's words.
@@ -281,19 +285,24 @@ function offerUpload(files) {
   }
   const front = () => (pick.value === '-' ? null : { from: ok.find((f) => f.rel === pick.value)?.file || null });
   const add = el('button', 'main', `Add to this workspace, as the folder “${folder}”`);
-  add.onclick = () => runUpload(ok, null, folder, front());
+  add.onclick = () => runUpload(ok, null, folder, front(), lock.checked);
   const fresh = el('button', '', 'Open as its own workspace, in place of this one');
   fresh.title = 'Nothing is deleted: the current workspace stays on disk and in the workspace menu';
   fresh.onclick = () => runUpload(ok, folder, folder, front());
+  // A folder added to this workspace can be locked: its password is chosen the first time it is opened.
+  const lockWrap = el('label', 'check'), lock = el('input');
+  lock.type = 'checkbox';
+  lockWrap.append(lock, ' Lock this folder: ask for a password before showing it');
+  lock.onchange = () => { fresh.disabled = lock.checked; fresh.title = lock.checked ? 'A lock is for a folder inside a workspace' : 'Nothing is deleted: the current workspace stays on disk and in the workspace menu'; };
   const cancel = el('button', 'link', 'Cancel');
   cancel.onclick = closeGate;
-  showGate(`Upload “${folder}”`, (card) => card.append(said, pick, add, fresh, cancel), true);
+  showGate(`Upload “${folder}”`, (card) => card.append(said, pick, lockWrap, add, fresh, cancel), true);
   add.focus();
 }
 
 // Send the files one at a time. `workspace` set: they become a workspace of
 // their own (the top folder name is dropped); otherwise they join this one.
-async function runUpload(files, workspace, folder, front) {
+async function runUpload(files, workspace, folder, front, lock) {
   const line = el('p');
   let box;
   showGate(`Upload “${folder}”`, (card) => { box = card; card.append(line); });
@@ -328,6 +337,7 @@ async function runUpload(files, workspace, folder, front) {
   } else {
     await loadDocs();
     if (front && !docOf(folder + '/FRONTPAGE.md')) { await api('/api/front', 'PUT', { markdown: await frontText(), folder }); await loadDocs(); }
+    if (lock && saved + skipped && !locks()[folder]) { await saveLocks({ ...locks(), [folder]: {} }); applyLocks(); renderTree(); }
     if (docOf(folder + '/FRONTPAGE.md')) openDoc(folder + '/FRONTPAGE.md');
     done.focus();
   }
@@ -370,12 +380,15 @@ function setOnline(on) {
 async function cameBack() {
   await flush();
   if (!net.online) return;
+  // Started without the server: now it can say which device this is.
+  if (!session) { try { const r = await call('/api/session', { quiet: true }); if (r.status === 401) return askToPair(); if (r.ok) session = await r.json(); } catch { return; } }
   await loadDocs();
   await loadNotes();
 }
 // While out of reach, look for the server every few seconds.
-setInterval(() => { if (!net.online) call('/api/config', { cache: 'no-store' }).catch(() => {}); }, 4000);
-window.addEventListener('online', () => call('/api/config', { cache: 'no-store' }).catch(() => {}));
+const probe = () => call('/api/config', { cache: 'no-store', probe: true }).catch(() => {});
+setInterval(() => { if (!net.online) probe(); }, 4000);
+window.addEventListener('online', probe);
 window.addEventListener('unhandledrejection', (e) => {
   e.preventDefault();
   if (!e.reason?.offline) return showProblem(e.reason);
@@ -625,7 +638,9 @@ async function turnOffProtection() {
 let hiddenAt = 0;
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) { hiddenAt = Date.now(); return; }
-  if (local.mode === 'open' && hiddenAt && Date.now() - hiddenAt > 10 * 60 * 1000 && player.paused && (!bg || bg.el.paused)) local.lock();
+  const long = hiddenAt && Date.now() - hiddenAt > 10 * 60 * 1000 && player.paused && (!bg || bg.el.paused);
+  if (local.mode === 'open' && long) local.lock();
+  else if (long && unlocked.size) { unlocked.clear(); locksChanged(); }   // locked folders close again too
 });
 
 function renderNet() {
@@ -847,7 +862,8 @@ async function discardPending(path) {
   await idb.del('files', keyOf(path));
   pendingFiles = pendingFiles.filter((f) => f.path !== path);
   outbox = outbox.filter((op) => !(op.kind === 'file' && op.path === path));
-  docs = docs.filter((d) => d.path !== path || serverDocs.some((x) => x.path === path));
+  allDocs = allDocs.filter((d) => d.path !== path || serverDocs.some((x) => x.path === path));
+  applyLocks();
   for (const [i, p] of state.panes.entries()) if (p.tabs.includes(path)) await closeTab(i, path);
   saveLocal();
   renderTree();
@@ -862,13 +878,152 @@ sideEl.addEventListener('drop', (e) => { if (!e.dataTransfer?.files.length) retu
 
 // ---- file browser -----------------------------------------------------------
 let serverDocs = [];
+
+// ---- folder locks ---------------------------------------------------------------------
+// A folder can be locked: the reader then shows nothing of it until its
+// password is typed, and asks again each time the reader is opened (and after
+// ten minutes in the background). The list of locked folders, with a salted
+// hash to check the password against, is part of the workspace's settings,
+// so every device sees the same locks and they hold without the server too.
+// A lock with no hash yet is one whose password is chosen on first open.
+//
+// This is a lock on the reader, not on the files: they are stored as they
+// are, and removing the folder and uploading it again takes the lock off.
+let allDocs = [];                 // everything the server lists; `docs` is what may be shown
+const unlocked = new Set();       // folders opened with their password, until the page is closed
+const locks = () => config.locks || {};
+// The outermost locked folder that still stands between the reader and this path.
+const gateOf = (path) => Object.keys(locks()).filter((f) => path.startsWith(f + '/') && !unlocked.has(f)).sort((a, b) => a.length - b.length)[0] || null;
+const frontOf = (folder) => folder + '/FRONTPAGE.md';
+function applyLocks() {
+  docs = allDocs.filter((d) => { const g = gateOf(d.path); return !g || d.path === frontOf(g); });
+  // A locked folder is reached through its front page; one without gets a stand-in to carry the lock screen.
+  for (const f of Object.keys(locks())) {
+    if (gateOf(frontOf(f)) === f && !docs.some((d) => d.path === frontOf(f)) && allDocs.some((d) => d.path.startsWith(f + '/')))
+      docs.push({ path: frontOf(f), group: f, title: f.split('/').pop(), side: false, front: false });
+  }
+}
+// After a lock is opened, closed, set or removed: redraw everything that could show the folder.
+async function locksChanged() {
+  applyLocks();
+  if (music.path && !docOf(music.path)) { player.pause(); player.removeAttribute('src'); music.path = null; }
+  if (bg && !docOf(bg.path)) stopVideo();
+  state.panes.forEach((p, i) => {
+    p.tabs = p.tabs.filter(docOf);
+    if (!p.tabs.includes(p.preview)) p.preview = null;
+    if (!p.tabs.includes(p.active)) p.active = p.tabs[0] || null;
+    if (!p.tabs.length && i === 0 && config.front) { p.tabs = [config.front]; p.active = p.preview = config.front; }
+  });
+  renderTree();
+  renderNet();
+  renderPlayers();
+  for (let i = 0; i < views.length; i++) { renderTabs(i); await showDoc(i); }
+  chrome();
+}
+async function saveLocks(next) {
+  config = await api('/api/config', 'PUT', { locks: next });
+  store.set('hub:config', config);
+}
+async function lockHash(password, salt) {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password.normalize('NFKC')), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: Uint8Array.from(atob(salt), (c) => c.charCodeAt(0)), iterations: 100000 }, key, 256);
+  return btoa(String.fromCharCode(...new Uint8Array(bits)));
+}
+// The password form: to open a locked folder, or to choose the password of one that has none yet.
+function lockForm(box, folder, done) {
+  const lock = locks()[folder], fresh = !lock?.hash;
+  if (!globalThis.crypto?.subtle) { box.append(el('p', 'say', 'Folder locks need an encrypted (HTTPS) connection, or localhost.')); return; }
+  const [w1, p1] = field(fresh ? 'New password' : 'Password', 'password'), say = el('p', 'say');
+  box.append(el('p', '', fresh ? 'Choose a password for this folder. It is asked for each time the reader is opened.' : 'This folder is locked. Type its password to see what is in it.'), w1);
+  let p2 = null;
+  if (fresh) {
+    const [w2, again] = field('The same again', 'password');
+    p2 = again;
+    p1.autocomplete = p2.autocomplete = 'new-password';
+    box.append(w2);
+  }
+  const go = el('button', 'main', fresh ? 'Set password' : 'Unlock');
+  const run = async () => {
+    say.textContent = '';
+    if (!p1.value || go.disabled) return;
+    if (fresh && p1.value !== p2.value) { say.textContent = 'The two do not match.'; return; }
+    go.disabled = true;
+    if (fresh) {
+      const salt = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));
+      try { await saveLocks({ ...locks(), [folder]: { salt, hash: await lockHash(p1.value, salt) } }); }
+      catch (e) { go.disabled = false; say.textContent = e.offline ? 'The server is not reachable. A password can only be set while connected.' : e.message; return; }
+    } else if ((await lockHash(p1.value, lock.salt)) !== lock.hash) {
+      go.disabled = false;
+      say.textContent = 'That is not the password.';
+      p1.select();
+      return;
+    }
+    unlocked.add(folder);
+    done();
+  };
+  go.onclick = run;
+  onEnter(p1, run);
+  if (p2) onEnter(p2, run);
+  box.append(go, say);
+}
+// In place of anything inside a locked folder.
+function showLock(pane, folder) {
+  const v = views[pane], box = el('div', 'lockbox');
+  box.append(el('h2', '', `“${folder.split('/').pop()}” is locked`));
+  lockForm(box, folder, locksChanged);
+  const rm = el('button', 'link', 'Remove this folder from the workspace…');
+  rm.onclick = () => removeFolder(folder);
+  box.append(rm);
+  v.bar.style.width = '0%';
+  v.body.replaceChildren(box);
+}
+// Lock controls on a folder's front page (the folder is open, or not locked).
+function lockButtons(folder) {
+  const out = [];
+  if (!locks()[folder]) {
+    const b = el('button', '', 'lock…');
+    b.title = 'Ask for a password before this folder is shown';
+    b.onclick = () => showGate(`Lock “${folder.split('/').pop()}”`, (card) => lockForm(card, folder, () => { closeGate(); locksChanged(); }), true);
+    out.push(b);
+  } else {
+    const now = el('button', '', 'lock now'), off = el('button', '', 'remove lock');
+    now.title = 'Hide this folder again until its password is typed';
+    now.onclick = () => { unlocked.delete(folder); locksChanged(); };
+    off.onclick = async () => { const { [folder]: gone, ...rest } = locks(); await saveLocks(rest); locksChanged(); };
+    out.push(now, off);
+  }
+  return out;
+}
+// Take a folder out of the workspace, after asking.
+function removeFolder(folder) {
+  const inside = allDocs.filter((d) => d.path.startsWith(folder + '/')).length;
+  showGate(`Remove “${folder.split('/').pop()}”?`, (card) => {
+    const say = el('p', 'say'), go = el('button', 'main', 'Remove the folder'), no = el('button', 'link', 'Cancel');
+    card.append(el('p', '', `The folder and the ${inside} file${inside === 1 ? '' : 's'} in it are deleted from this workspace, on the server and for every device. This cannot be undone here.`),
+      el('p', 'sub', 'Files on your own computer are not touched: a folder you uploaded can be uploaded again.'), go, no, say);
+    no.onclick = closeGate;
+    go.onclick = async () => {
+      go.disabled = true;
+      try { await api('/api/folder?path=' + encodeURIComponent(folder), 'DELETE'); }
+      catch (e) { go.disabled = false; say.textContent = e.offline ? 'The server is not reachable. A folder can only be removed while connected.' : e.message; return; }
+      for (const d of allDocs) if (d.path.startsWith(folder + '/') && kept.has(d.path)) await dropCopy(d.path);
+      queue = queue.filter((p) => !p.startsWith(folder + '/'));
+      saveQueue();
+      closeGate();
+      await loadConfig();
+      await loadDocs();
+      await locksChanged();
+    };
+  }, true);
+}
 async function loadDocs() {
   try { serverDocs = await api('/api/docs'); store.set('docs:' + config.root, serverDocs); }
   catch { serverDocs = store.get('docs:' + config.root) || serverDocs; }
   // Files added on this device and not yet sent appear in the list too.
   const waiting = pendingFiles.filter((f) => !serverDocs.some((d) => d.path === f.path))
     .map((f) => ({ path: f.path, group: f.path.split('/').slice(0, -1).join('/'), title: f.path.split('/').pop(), side: false, front: false }));
-  docs = serverDocs.concat(waiting);
+  allDocs = serverDocs.concat(waiting);
+  applyLocks();
   renderTree();
   renderNet();
   renderPlayers();
@@ -889,7 +1044,7 @@ function renderTree() {
   (function draw(node, parent, prefix) {
     // A folder's own front page comes first, under that name.
     const fp = prefix ? node.files.find((f) => isFront(f.path)) : null;
-    if (fp) parent.append(fileRow(fp, 'Front page'));
+    if (fp) parent.append(fileRow(fp, gateOf(fp.path) ? 'Locked: open to unlock' : 'Front page'));
     for (const [name, sub] of Object.entries(node.dirs)) {
       const det = el('details');
       det.open = state.opened.includes(prefix + name);   // folders start closed
@@ -1080,7 +1235,7 @@ function renderTabs(pane) {
     tab.setAttribute('role', 'button');
     tab.title = path + (path === p.preview ? '\n(double-click to keep open)' : '');
     tab.ondblclick = () => { if (p.preview === path) { p.preview = null; renderTabs(pane); save(); } };
-    tab.append(el('span', '', d ? (d.front ? 'Front page' : isFront(path) ? d.title + ' (front page)' : d.title) : path));
+    tab.append(el('span', '', gateOf(path) ? gateOf(path).split('/').pop() + ' (locked)' : d ? (d.front ? 'Front page' : isFront(path) ? d.title + ' (front page)' : d.title) : path));
     const x = el('button', '', '×');
     x.title = 'Close';
     x.onclick = (e) => { e.stopPropagation(); closeTab(pane, path); };
@@ -1135,6 +1290,7 @@ async function drawDoc(pane, hash, keepScroll) {
   const y = v.scroller ? v.scroller.scrollTop : 0;
   Object.assign(v, { heads: [], cur: null, article: null, surface: null, scroller: null, frame: null });
   if (!path) { v.body.replaceChildren(el('p', 'empty', 'Nothing open. Pick a file on the left.')); return; }
+  if (gateOf(path)) { showLock(pane, gateOf(path)); return; }
 
   if (isAudio(path)) { showPlayer(pane, path); return; }
   if (isMedia(path)) {
@@ -1267,9 +1423,17 @@ async function drawDoc(pane, hash, keepScroll) {
   hideAnswers(article);
   if (isFront(path)) appendBrowse(article, pane, folderOf(path));
   if (isFront(path)) {
-    const b = el('button', 'editFront', 'edit front page');
-    b.onclick = () => editFront(pane, md, folderOf(path));
-    article.prepend(b);
+    const acts = el('div', 'editFront'), b = el('button', '', 'edit front page'), folder = folderOf(path);
+    b.onclick = () => editFront(pane, md, folder);
+    // A folder's own front page can also lock the folder, or take it out of the workspace.
+    if (folder) {
+      const rm = el('button', '', 'remove folder…');
+      rm.title = 'Take this folder and everything in it out of the workspace';
+      rm.onclick = () => removeFolder(folder);
+      acts.append(...lockButtons(folder), rm);
+    }
+    acts.append(b);
+    article.prepend(acts);
   }
   highlightAll(article, path);
   article.addEventListener('click', (e) => onDocClick(e, pane));
@@ -2263,7 +2427,7 @@ let events = null;
 function listen() {
   events?.close();
   events = new EventSource('/api/events');
-  events.onerror = () => call('/api/config', { cache: 'no-store' }).catch(() => {});
+  events.onerror = probe;
   events.onopen = () => setOnline(true);
   events.onmessage = onFileChange;
 }
@@ -2281,12 +2445,16 @@ async function onFileChange(e) {
   }
 }
 
+// Keep a copy of the page itself, so the reader opens without the server (see sw.js).
+// Browsers allow this on HTTPS and on localhost only.
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+
 (async function init() {
   // Private copies first: if they are encrypted, ask for the passphrase.
   if (local.start() === 'locked') await askUnlock();
   // Then find out whether the server knows this device.
   try {
-    const r = await call('/api/session', { quiet: true });
+    const r = await call('/api/session', { quiet: true, wait: 3000 });
     if (r.status === 401) return askToPair();
     if (r.ok) session = await r.json();
   } catch { /* not reachable: carry on with what is on this device */ }

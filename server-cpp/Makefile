@@ -39,7 +39,7 @@ test: hubd
 card:
 	@test -d "$(CARD)" || { echo "usage: make card CARD=/Volumes/<the card>"; exit 1; }
 	mkdir -p "$(CARD)/hub/www/vendor"
-	cp ../hub/index.html ../hub/app.js ../hub/local.js ../hub/vault.js ../hub/trust.html ../hub/trust.js "$(CARD)/hub/www/"
+	cp ../hub/index.html ../hub/app.js ../hub/local.js ../hub/vault.js ../hub/trust.html ../hub/trust.js ../hub/sw.js ../hub/manifest.webmanifest ../hub/icon-192.png ../hub/icon-512.png ../hub/apple-touch-icon.png "$(CARD)/hub/www/"
 	cp ../hub/node_modules/marked/lib/marked.umd.js "$(CARD)/hub/www/vendor/marked.js"
 	cp ../hub/node_modules/@highlightjs/cdn-assets/highlight.min.js "$(CARD)/hub/www/vendor/highlight.js"
 	cp ../hub/node_modules/dompurify/dist/purify.min.js "$(CARD)/hub/www/vendor/purify.js"
