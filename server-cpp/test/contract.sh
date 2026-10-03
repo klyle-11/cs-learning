@@ -11,6 +11,7 @@ cd "$(dirname "$0")/.."
 REPO="$(cd .. && pwd)"
 WORK="$(mktemp -d)"
 CPP_PORT=4412
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) EXE=.exe ;; *) EXE= ;; esac
 trap 'kill $CPP_PID 2>/dev/null; wait 2>/dev/null; rm -rf "$WORK"' EXIT
 
 fixture() {
@@ -35,7 +36,7 @@ fixture "$WORK/cpp/ws"
 # It is told to ask even this machine to pair, so the requests below prove
 # that nothing is answered without a paired device's token.
 mkdir -p "$WORK/cpp/workspaces"
-./hubd "$WORK/cpp/ws" --port $CPP_PORT --www "$REPO/hub" --state "$WORK/cpp/state" --workspaces "$WORK/cpp/workspaces" --pair-local > "$WORK/cpp.log" 2>&1 &
+./hubd$EXE "$WORK/cpp/ws" --port $CPP_PORT --www "$REPO/hub" --state "$WORK/cpp/state" --workspaces "$WORK/cpp/workspaces" --pair-local > "$WORK/cpp.log" 2>&1 &
 CPP_PID=$!
 # wait until it answers (the memory-checked build starts slowly)
 for port in $CPP_PORT; do
@@ -166,6 +167,7 @@ run() { # run <port> <root> <log>: the request script
   req "remove folder again"   body -X DELETE "$B/api/folder?path=gone"
   req "remove folder escape"  body -X DELETE "$B/api/folder?path=../.."
   req "remove notes folder"   body -X DELETE "$B/api/folder?path=notes"
+  req "remove notes folder, other case" body -X DELETE "$B/api/folder?path=Notes"
   req "remove a file"         body -X DELETE "$B/api/folder?path=code.c"
   req "upload new"            body -X POST --data-binary '# Uploaded' "$B/api/upload?path=up/new%20file.md"
   req "upload again"          body -X POST --data-binary '# Changed' "$B/api/upload?path=up/new%20file.md"
@@ -251,7 +253,8 @@ run() { # run <port> <root> <log>: the request script
 
 run $CPP_PORT "$(cd "$WORK/cpp/ws" && pwd -P)" "$WORK/cpp.log" > "$WORK/cpp.out"
 # macOS temp folders are reached through a symlink; the server reports the real path.
-sed -i '' "s|$(cd "$WORK/cpp/ws" && pwd -P)|<root>|g; s|$(cd "$WORK/cpp/workspaces" && pwd -P)|<workspaces>|g" "$WORK/cpp.out"
+# (written to a second file: "sed -i" takes different arguments on macOS and elsewhere)
+sed "s|$(cd "$WORK/cpp/ws" && pwd -P)|<root>|g; s|$(cd "$WORK/cpp/workspaces" && pwd -P)|<workspaces>|g" "$WORK/cpp.out" > "$WORK/cpp.norm" && mv "$WORK/cpp.norm" "$WORK/cpp.out"
 
 EXPECTED="test/expected.txt"
 TOTAL=$(grep -c '^## ' "$WORK/cpp.out")

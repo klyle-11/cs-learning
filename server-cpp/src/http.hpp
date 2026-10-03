@@ -11,13 +11,7 @@
 // Bodies and files are moved in pieces, never held whole in memory.
 #pragma once
 
-#include <arpa/inet.h>
-#include <fcntl.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#include <sys/poll.h>
-#include <sys/socket.h>
-#include <unistd.h>
+#include "platform.hpp"
 
 #include <mbedtls/net_sockets.h>
 #include <mbedtls/ssl.h>
@@ -96,7 +90,7 @@ class Conn {
   std::string ahead;          // bytes already read from the wire but not yet used
 
   Conn(int socket, bool is_local) : fd(socket), local(is_local) {
-    ::fcntl(fd, F_SETFL, ::fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
+    sys::nonblocking(fd);
     within(15000);
   }
   ~Conn() {
@@ -105,7 +99,7 @@ class Conn {
       mbedtls_ssl_close_notify(&ssl);
       mbedtls_ssl_free(&ssl);
     }
-    ::close(fd);
+    sys::close_socket(fd);
   }
   Conn(const Conn &) = delete;
   Conn &operator=(const Conn &) = delete;
@@ -130,10 +124,12 @@ class Conn {
   int peek() {
     unsigned char b;
     for (;;) {
-      ssize_t n = ::recv(fd, &b, 1, MSG_PEEK);
+      long n = sys::receive(fd, &b, 1, true);
       if (n == 1) return b;
-      if (n == 0 || (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)) return -1;
-      if (errno != EINTR && !wait(POLLIN)) return -1;
+      if (n == 0) return -1;
+      sys::Why why = sys::why();
+      if (why == sys::Why::failed) return -1;
+      if (why == sys::Why::again && !wait(true)) return -1;
     }
   }
 
@@ -171,30 +167,29 @@ class Conn {
   bool write_all(const std::string &s) { return write_all(s.data(), s.size()); }
 
  private:
-  bool wait(short events) {
+  bool wait(bool to_read) {
     auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - Clock::now()).count();
     if (left <= 0) return false;
-    pollfd p{fd, events, 0};
-    int rc;
-    do { rc = ::poll(&p, 1, static_cast<int>(std::min<long long>(left, 60000))); } while (rc < 0 && errno == EINTR);
-    return rc > 0;
+    return sys::wait_ready(fd, to_read, static_cast<int>(std::min<long long>(left, 60000)));
   }
   long raw_recv(unsigned char *out, size_t len) {
     for (;;) {
-      ssize_t n = ::recv(fd, out, len, 0);
-      if (n >= 0) return static_cast<long>(n);
-      if (errno == EINTR) continue;
-      if (errno != EAGAIN && errno != EWOULDBLOCK) return -1;
-      if (!wait(POLLIN)) return -2;
+      long n = sys::receive(fd, out, len);
+      if (n >= 0) return n;
+      sys::Why why = sys::why();
+      if (why == sys::Why::interrupted) continue;
+      if (why == sys::Why::failed) return -1;
+      if (!wait(true)) return -2;
     }
   }
   long raw_send(const unsigned char *data, size_t len) {
     for (;;) {
-      ssize_t n = ::send(fd, data, len, 0);
-      if (n >= 0) return static_cast<long>(n);
-      if (errno == EINTR) continue;
-      if (errno != EAGAIN && errno != EWOULDBLOCK) return -1;
-      if (!wait(POLLOUT)) return -2;
+      long n = sys::send_some(fd, data, len);
+      if (n >= 0) return n;
+      sys::Why why = sys::why();
+      if (why == sys::Why::interrupted) continue;
+      if (why == sys::Why::failed) return -1;
+      if (!wait(false)) return -2;
     }
   }
   static int bio_send(void *self, const unsigned char *data, size_t len) {
@@ -361,7 +356,7 @@ inline bool write_response(Conn &conn, const Response &r, bool keep, size_t piec
   if (!conn.write_all(head)) return false;
   if (r.file.empty()) return conn.write_all(r.body);
   FILE *f = std::fopen(r.file.c_str(), "rb");
-  bool ok = f && ::fseeko(f, static_cast<off_t>(r.offset), SEEK_SET) == 0;
+  bool ok = f && sys::seek(f, r.offset);
   std::vector<char> chunk(piece);
   unsigned long long left = r.length;
   while (ok && left > 0) {
@@ -496,30 +491,27 @@ inline void handle_connection(std::shared_ptr<Conn> conn, const Handler &handler
 
 // Listen and serve until the process ends. Returns non-zero if it cannot start.
 inline int serve(const Options &opt, Handler handler) {
-#ifndef ESP_PLATFORM
-  std::signal(SIGPIPE, SIG_IGN);
+  if (!sys::net_start()) { std::fprintf(stderr, "the network could not be started\n"); return 1; }
+  int srv = sys::tcp_socket();
+  if (srv < 0) { std::fprintf(stderr, "no socket to be had\n"); return 1; }
+#ifndef _WIN32
+  sys::set_option(srv, SOL_SOCKET, SO_REUSEADDR);   // on Windows this option would let a second server take the port
 #endif
-  int srv = ::socket(AF_INET, SOCK_STREAM, 0);
-  if (srv < 0) { std::perror("socket"); return 1; }
-  int yes = 1;
-  ::setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof yes);
   sockaddr_in addr{};
   addr.sin_family = AF_INET;
   addr.sin_port = htons(static_cast<uint16_t>(opt.port));
   if (::inet_pton(AF_INET, opt.host.c_str(), &addr.sin_addr) != 1) { std::fprintf(stderr, "bad host address: %s\n", opt.host.c_str()); return 1; }
-  if (::bind(srv, reinterpret_cast<sockaddr *>(&addr), sizeof addr) < 0) { std::perror("bind"); return 1; }
-  if (::listen(srv, 16) < 0) { std::perror("listen"); return 1; }
+  if (!sys::bind_and_listen(srv, addr, 16)) { std::fprintf(stderr, "port %d is in use, or may not be used\n", opt.port); return 1; }
   for (;;) {
     sockaddr_in peer{};
-    socklen_t len = sizeof peer;
-    int fd = ::accept(srv, reinterpret_cast<sockaddr *>(&peer), &len);
+    int fd = sys::accept_from(srv, peer);
     if (fd < 0) continue;
 #ifdef SO_NOSIGPIPE
-    ::setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof yes);
+    sys::set_option(fd, SOL_SOCKET, SO_NOSIGPIPE);
 #endif
-    ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof yes);
+    sys::set_option(fd, IPPROTO_TCP, TCP_NODELAY);
     // Full: turn the newcomer away rather than start a thread for it.
-    if (active().load() >= opt.max_conns) { ::close(fd); continue; }
+    if (active().load() >= opt.max_conns) { sys::close_socket(fd); continue; }
     bool local = (ntohl(peer.sin_addr.s_addr) >> 24) == 127;
     active()++;
     try {
@@ -530,7 +522,7 @@ inline int serve(const Options &opt, Handler handler) {
       }).detach();
     } catch (...) { // no thread to be had
       active()--;
-      ::close(fd);
+      sys::close_socket(fd);
     }
   }
 }

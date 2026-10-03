@@ -5,7 +5,8 @@ A reader for a folder of documents (markdown, HTML, source code, pictures, video
 ```
 hub/          the page (index.html and its scripts)
 server-cpp/   the server, in C++ (API.md is the contract between it and the page)
-start.sh      builds what is missing and starts the server on data/
+start.sh      builds what is missing and starts the server on data/ (it calls hub/start.mjs, which does the same on Windows)
+WINDOWS.md    building and running on Windows and on a Raspberry Pi: prepared, not yet tried there
 sample/       starter content, tracked in git: example documents to develop against
 data/         the live workspace: your notes, highlights, uploads and edits. Not in git
 TODO.md       the plan
@@ -39,8 +40,8 @@ It answers this computer only by default. To reach the reader from a phone: `cd 
 
 ```
 cd hub && npm run build         # build the server (starting it does this too)
-cd hub && npm test              # 143 requests, answers compared with server-cpp/test/expected.txt
-cd hub && npm run               # lists every way of starting it
+cd hub && npm test              # 144 requests, answers compared with server-cpp/test/expected.txt
+cd hub && npm run               # lists every way of starting it (on Windows: the same names ending in :win)
 ```
 
 After changing `server-cpp/src/`, restart the server. After changing `hub/` (the page), reload the reader; it shows the copy it kept and offers "a newer version is ready" once it has fetched the change. There is no browser test suite in the repository yet; `REVIEW.md` says what was checked by hand.

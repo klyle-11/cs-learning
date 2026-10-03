@@ -16,6 +16,8 @@ npm run cert:new-authority                # replace the authority; every device 
 npm run build        npm test             # build the server; run its checks
 ```
 
+On Windows every one of these has a twin ending in `:win` (`npm run start:win`, `npm run start:network:win`, …); see `../WINDOWS.md`.
+
 `npm start` runs `../start.sh`, which starts the server, `../server-cpp/hubd`, building it first if needed. This folder holds only the page; npm is used for the page's three libraries and nothing else.
 
 The server answers this computer only unless started with `HOST=0.0.0.0`. Then it speaks HTTPS (it makes its certificates on that first start), prints a pairing code, and each device goes through two steps once: trust the hub's certificate (open `http://<address>:4321/` on the device and follow the page), then type the pairing code. On the computer the hub runs on, `http://localhost:4321` keeps working with nothing installed. `../CERTIFICATES.md` explains what trusting that certificate means; `server-cpp/API.md`, "Security", has the details.

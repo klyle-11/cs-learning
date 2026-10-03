@@ -26,6 +26,14 @@ Now, in order:
 
 Not yet checked on real devices: installing the authority on an iPhone and an Android phone, and the reader in Safari and Firefox (tested in Chrome only).
 
+## Windows and Raspberry Pi (prepared 3 October 2026)
+
+- [x] System-specific code gathered in `server-cpp/src/platform.hpp`, with a Windows half; Makefile branch, UTF-8 manifest, path checks for Windows; a Node launcher and `:win` scripts; `WINDOWS.md`
+- [ ] First build on Windows, working through the checklist in `WINDOWS.md` (nothing Windows-specific has been compiled yet)
+- [ ] First build on a Raspberry Pi (needs mbedTLS 3)
+- [ ] Then: a packaged desktop app with its own window (Tauri), starting with Windows
+- [ ] Start with the system (a Windows service; a systemd unit on the Pi)
+
 ## Other hubs (built 3 October 2026)
 
 - [x] A reader can be pointed at a hub on another machine: add it in settings by address, pair once, switch with a menu. Notes, uploads and find go to the hub being viewed
@@ -168,7 +176,7 @@ Goal: serve the same `index.html` from an ESP32 with the documents on a microSD 
 Done:
 - [x] API written down as the contract: `server-cpp/API.md`
 - [x] Desktop server `hubd` (C++17, POSIX sockets, cJSON): pages, files, document list, settings, front page, notes and highlights, folder upload into the workspace, live reload by polling
-- [x] `test/contract.sh`: 123 requests, answers compared with `test/expected.txt`, recorded when both servers answered identically
+- [x] `test/contract.sh`: 144 requests, answers compared with `test/expected.txt`, recorded when both servers answered identically
 - [x] `make check` build with memory-error detection; clean on the contract test and on malformed requests
 - [x] Device profiles (desktop / small / esp32) picked at start-up, with caching of the page, scripts and document list
 - [x] Write-up: `docs/08-server-migration/node-to-cpp-server.md`

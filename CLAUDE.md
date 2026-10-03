@@ -17,6 +17,8 @@ A self-directed CS learning environment. The user works in small steps, irregula
 
 ## Working on the hub's code
 
+- The server must keep building on macOS, Linux (Raspberry Pi) and Windows. Anything system-specific goes in `server-cpp/src/platform.hpp`, with both halves written; `WINDOWS.md` says what has been tried where. The Windows half has not been compiled yet: say so when touching it.
+- Start scripts are in `hub/package.json`; each has a `:win` twin for Windows. Add both when adding one.
 - Build: `cd server-cpp && make`. Test: `make test` (compares answers with `test/expected.txt`; after an intended change, read the differences, then `UPDATE=1 ./test/contract.sh`).
 - A server change needs the server restarted. A page change (`hub/`) shows one reload late: the reader opens from the copy it kept and then offers "a newer version is ready".
 - Try things on a scratch copy, never on `data/`: `PORT=4396 HUB_STATE=<dir> ./start.sh data-test --workspaces <dir>`. Put scratch state under `server-cpp/build/` (ignored by git).

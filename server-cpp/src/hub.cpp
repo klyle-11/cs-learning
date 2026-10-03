@@ -12,13 +12,6 @@
 //
 // File access goes through dirent/stat/stdio only, which ESP-IDF maps onto an
 // SD card, so these handlers are meant to move to the ESP32 unchanged.
-#include <dirent.h>
-#include <sys/stat.h>
-#ifndef ESP_PLATFORM
-#include <ifaddrs.h>
-#include <sys/statvfs.h>
-#endif
-
 #include <algorithm>
 #include <chrono>
 #include <ctime>
@@ -120,7 +113,7 @@ static bool read_start(const string &p, string &out, size_t max) {
 }
 static void make_dirs(const string &dir) {
   for (size_t i = 1; i <= dir.size(); i++) {
-    if (i == dir.size() || dir[i] == '/') ::mkdir(dir.substr(0, i).c_str(), 0755);
+    if (i == dir.size() || dir[i] == '/') sys::make_dir(dir.substr(0, i));
   }
 }
 // Write to a temporary file and rename, so a crash or power cut never leaves a
@@ -146,8 +139,9 @@ static bool remove_tree(const string &dir) {
     string name = e->d_name;
     if (name == "." || name == "..") continue;
     string abs = dir + "/" + name;
+    if (sys::is_link(abs)) { ok = sys::remove_link(abs) && ok; continue; }
     struct stat st;
-    if (::lstat(abs.c_str(), &st) != 0) { ok = false; continue; }
+    if (::stat(abs.c_str(), &st) != 0) { ok = false; continue; }
     if (S_ISDIR(st.st_mode)) ok = remove_tree(abs) && ok;
     else ok = ::unlink(abs.c_str()) == 0 && ok;
   }
@@ -165,7 +159,10 @@ static bool clean_parts(const string &rel, Strings &parts, bool strict) {
   while (std::getline(ss, part, '/')) {
     if (part.empty() || part == ".") continue;
     if (part == ".." || part.find('\\') != string::npos || part.find('\0') != string::npos) return false;
-    if (strict && (part[0] == '.' || part == "node_modules")) return false;
+    if (strict && (part[0] == '.' || lower(part) == "node_modules")) return false;
+#ifdef _WIN32
+    if (sys::odd_on_windows(part)) return false;
+#endif
     parts.push_back(part);
   }
   return !parts.empty();
@@ -208,8 +205,7 @@ static void detect_profile(const string &forced) {
 #ifdef ESP_PLATFORM
   profile = PROFILES[2];
 #else
-  long pages = ::sysconf(_SC_PHYS_PAGES), page_size = ::sysconf(_SC_PAGESIZE);
-  if (pages > 0 && page_size > 0) device_memory_mb = static_cast<unsigned long long>(pages) * static_cast<unsigned long long>(page_size) >> 20;
+  device_memory_mb = sys::memory_mb();
   profile = device_memory_mb != 0 && device_memory_mb < 1024 ? PROFILES[1] : PROFILES[0];
 #endif
   for (const Profile &pr : PROFILES) if (forced == pr.name) profile = pr;
@@ -428,7 +424,7 @@ static string now_iso() {
   std::time_t t = std::chrono::system_clock::to_time_t(now);
   auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() % 1000;
   std::tm tm{};
-  ::gmtime_r(&t, &tm);
+  sys::utc(t, tm);
   char buf[40];
   std::snprintf(buf, sizeof buf, "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, static_cast<int>(ms));
   return buf;
@@ -470,24 +466,14 @@ static Strings host_names() {
 #ifdef ESP_PLATFORM
   if (const char *ip = board_ip()) out.push_back(ip); // the address Wi-Fi gave the board (esp32/main/board.cpp)
 #else
-  char name[256] = {0};
-  if (::gethostname(name, sizeof name - 1) == 0 && name[0]) {
-    string h = lower(name);
+  if (string h = lower(sys::host_name()); !h.empty()) {
     out.push_back(h);
     if (!ends_with(h, ".local") && h.find('.') == string::npos) out.push_back(h + ".local");
   }
 #ifdef __APPLE__
   if (!mac_local_name().empty()) out.push_back(mac_local_name());
 #endif
-  ifaddrs *list = nullptr;
-  if (::getifaddrs(&list) == 0) {
-    for (ifaddrs *i = list; i; i = i->ifa_next) {
-      if (!i->ifa_addr || i->ifa_addr->sa_family != AF_INET) continue;
-      char buf[INET_ADDRSTRLEN];
-      if (::inet_ntop(AF_INET, &reinterpret_cast<sockaddr_in *>(i->ifa_addr)->sin_addr, buf, sizeof buf)) out.push_back(buf);
-    }
-    ::freeifaddrs(list);
-  }
+  for (const string &a : sys::ipv4_addresses()) out.push_back(a);
 #endif
   if (bind_host != "0.0.0.0") out.push_back(bind_host);
   for (const string &h : extra_hosts) out.push_back(lower(h));
@@ -687,11 +673,7 @@ static unsigned long long used_bytes() {
   return usage_cache;
 }
 static unsigned long long free_bytes() {
-#ifndef ESP_PLATFORM
-  struct statvfs v;
-  if (::statvfs(ROOT.c_str(), &v) == 0) return static_cast<unsigned long long>(v.f_bavail) * static_cast<unsigned long long>(v.f_frsize);
-#endif
-  return ~0ULL;
+  return sys::free_bytes(ROOT);
 }
 // Whether `more` bytes may be added: under the quota, and leaving the disk 16 MB to breathe.
 static bool room_for(unsigned long long more) {
@@ -1339,8 +1321,8 @@ static http::Response answer(http::Request &req) {
     Strings parts;
     auto it = req.query.find("path");
     struct stat st;
-    if (it == req.query.end() || !clean_parts(it->second, parts, true) || parts[0] == "notes" ||
-        ::lstat((ROOT + "/" + join(parts)).c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) return http::error(400, "no such folder");
+    if (it == req.query.end() || !clean_parts(it->second, parts, true) || lower(parts[0]) == "notes" ||
+        sys::is_link(ROOT + "/" + join(parts)) || ::stat((ROOT + "/" + join(parts)).c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) return http::error(400, "no such folder");
     string key = join(parts);
     // Not the page's own folder, nor a folder that holds it.
     if (in_page_folder(ROOT + "/" + key) || starts_with(WWW + "/", ROOT + "/" + key + "/")) return http::error(400, "no such folder");
@@ -1497,7 +1479,7 @@ static http::Response answer(http::Request &req) {
     make_dirs(dirname_of(abs));
     string tmp = abs + "." + secure::random_hex(4) + ".tmp";
     if (int bad = req.save_body(tmp, profile.max_upload, profile.piece)) return bad == 507 ? http::error(507, "storage is full") : bad == 500 ? http::error(500, "could not save") : body_error(bad);
-    if (::rename(tmp.c_str(), abs.c_str()) != 0) { ::unlink(tmp.c_str()); return http::error(500, "could not save"); }
+    if (!sys::replace(tmp, abs)) { ::unlink(tmp.c_str()); return http::error(500, "could not save"); }
     if (base == ROOT) used_more(req.content_length);
     touch_tree();
     cJSON_AddBoolToObject(out.p, "saved", true);
@@ -1549,8 +1531,8 @@ int main(int argc, char **argv) {
   int port = 4321;
   bool want_tls = false, insecure = false, make_cert = false, new_authority = false;
   long long quota_mb = -1;
-  const char *home = std::getenv("HOME"), *state_env = std::getenv("HUB_STATE");
-  STATE = state_env ? state_env : string(home ? home : ".") + "/.config/hub";
+  const char *state_env = std::getenv("HUB_STATE");
+  STATE = state_env ? state_env : sys::default_state_dir();
   for (int i = 1; i < argc; i++) {
     string a = argv[i];
     if (a == "--port" && i + 1 < argc) port = std::atoi(argv[++i]);
@@ -1585,7 +1567,8 @@ int main(int argc, char **argv) {
     } else folder = a;
   }
   make_dirs(STATE);
-  ::chmod(STATE.c_str(), 0700);
+  sys::owner_only(STATE, 0700);
+  if (!sys::net_start()) { std::fprintf(stderr, "the network could not be started\n"); return 1; }   // before the machine's names are asked for
   bind_host = host;
   if (!secure::rng().ok) { std::fprintf(stderr, "no source of random numbers\n"); return 1; }
 
@@ -1624,21 +1607,21 @@ int main(int argc, char **argv) {
     std::printf("WARNING: serving the network without encryption. Anyone on it can read and change what is sent.\n");
   }
 
-  char resolved[4096];
-  if (!::realpath(folder.c_str(), resolved) || !is_dir(resolved)) { std::fprintf(stderr, "not a folder: %s\n", folder.c_str()); return 1; }
+  string resolved;
+  if (!sys::real_path(folder, resolved) || !is_dir(resolved)) { std::fprintf(stderr, "not a folder: %s\n", folder.c_str()); return 1; }
   HOME_DIR = open_root = ROOT = resolved;
-  if (::realpath(STATE.c_str(), resolved)) STATE = resolved;
+  if (sys::real_path(STATE, resolved)) STATE = resolved;
   if (starts_with(STATE + "/", ROOT + "/")) { std::fprintf(stderr, "the state folder must not be inside the folder being served\n"); return 1; }
   // The page lives beside the server (../hub from server-cpp/), or inside the folder being served.
   if (www.empty()) www = is_file(ROOT + "/hub/index.html") ? ROOT + "/hub" : is_file("../hub/index.html") ? "../hub" : "hub";
-  if (!::realpath(www.c_str(), resolved) || !is_file(string(resolved) + "/index.html")) { std::fprintf(stderr, "no index.html in %s\n", www.c_str()); return 1; }
+  if (!sys::real_path(www, resolved) || !is_file(resolved + "/index.html")) { std::fprintf(stderr, "no index.html in %s\n", www.c_str()); return 1; }
   WWW = resolved;
   // Workspaces of their own are kept beside the page, unless the page is part
   // of what is being served (as on the board), or where --workspaces says.
   if (workspaces.empty() && !starts_with(WWW + "/", HOME_DIR + "/")) workspaces = WWW + "/workspaces";
   if (!workspaces.empty()) {
     make_dirs(workspaces);
-    if (!::realpath(workspaces.c_str(), resolved)) { std::fprintf(stderr, "cannot use %s for workspaces\n", workspaces.c_str()); return 1; }
+    if (!sys::real_path(workspaces, resolved)) { std::fprintf(stderr, "cannot use %s for workspaces\n", workspaces.c_str()); return 1; }
     WORKSPACES = resolved;
     if (starts_with(STATE + "/", WORKSPACES + "/") || starts_with(WORKSPACES + "/", HOME_DIR + "/")) { std::fprintf(stderr, "the workspaces folder must not hold the state folder, or be inside the folder being served\n"); return 1; }
     // Start on the workspace that was open last time, if it is still there.

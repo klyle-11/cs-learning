@@ -29,9 +29,7 @@
 #include <mbedtls/x509_crt.h>
 #include <psa/crypto.h>
 
-#include <arpa/inet.h>
-#include <sys/stat.h>
-#include <unistd.h>
+#include "platform.hpp"
 
 #include <algorithm>
 #include <array>
@@ -137,13 +135,8 @@ inline bool slurp(const string &path, string &out) {
 // Put `tmp` in place of `path`. On a computer that is one step that cannot be
 // half done. The FAT filesystem on the board's card cannot rename onto an
 // existing file, so there the old one is removed first.
-inline bool replace(const string &tmp, const string &path) {
-#ifdef ESP_PLATFORM
-  ::unlink(path.c_str());
-#endif
-  return ::rename(tmp.c_str(), path.c_str()) == 0;
-}
-inline bool spit(const string &path, const string &data, mode_t mode) {
+inline bool replace(const string &tmp, const string &path) { return sys::replace(tmp, path); }
+inline bool spit(const string &path, const string &data, int mode) {
   string tmp = path + ".tmp";
   {
     std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
@@ -151,7 +144,7 @@ inline bool spit(const string &path, const string &data, mode_t mode) {
     f.write(data.data(), static_cast<std::streamsize>(data.size()));
     if (!f) return false;
   }
-  ::chmod(tmp.c_str(), mode);
+  sys::owner_only(tmp, mode);
   return replace(tmp, path);
 }
 
@@ -277,7 +270,7 @@ struct Key { // an owned key pair
 
 inline string cert_time(std::time_t t) { // YYYYMMDDhhmmss, UTC
   std::tm tm{};
-  ::gmtime_r(&t, &tm);
+  sys::utc(t, tm);
   char buf[20];
   std::strftime(buf, sizeof buf, "%Y%m%d%H%M%S", &tm);
   return buf;

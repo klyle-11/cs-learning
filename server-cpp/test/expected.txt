@@ -272,6 +272,8 @@ About this folder.
 400 {"error": "no such folder"}
 ## remove notes folder
 400 {"error": "no such folder"}
+## remove notes folder, other case
+400 {"error": "no such folder"}
 ## remove a file
 400 {"error": "no such folder"}
 ## upload new

@@ -12,10 +12,25 @@ LDFLAGS  += -L$(MBEDTLS)/lib
 endif
 LDLIBS   ?= -lmbedtls -lmbedx509 -lmbedcrypto
 
-hubd: build/hub.o build/cJSON.o
+# Windows, built in the MSYS2 "UCRT64" shell (see ../WINDOWS.md). Not yet tried.
+#   - the network and adapter libraries Windows keeps separate
+#   - 64-bit file sizes; one .exe with nothing else to install beside it
+#   - a manifest that makes file names UTF-8, so names outside ASCII work
+ifeq ($(OS),Windows_NT)
+EXE      := .exe
+CXXFLAGS += -D_FILE_OFFSET_BITS=64
+LDFLAGS  += -static
+LDLIBS   += -lws2_32 -liphlpapi -lbcrypt
+EXTRA    := build/hubd-res.o
+build/hubd-res.o: windows/hubd.rc windows/hubd.manifest | build
+	windres windows/hubd.rc -O coff -o $@
+hubd: hubd.exe
+endif
+
+hubd$(EXE): build/hub.o build/cJSON.o $(EXTRA)
 	$(CXX) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
-build/hub.o: src/hub.cpp src/http.hpp src/secure.hpp vendor/cJSON.h | build
+build/hub.o: src/hub.cpp src/http.hpp src/secure.hpp src/platform.hpp vendor/cJSON.h | build
 	$(CXX) $(CXXFLAGS) -c -o $@ src/hub.cpp
 
 build/cJSON.o: vendor/cJSON.c vendor/cJSON.h | build
@@ -45,6 +60,6 @@ card:
 	cp ../hub/node_modules/dompurify/dist/purify.min.js "$(CARD)/hub/www/vendor/purify.js"
 
 clean:
-	rm -rf build hubd
+	rm -rf build hubd hubd.exe
 
 .PHONY: check test clean card

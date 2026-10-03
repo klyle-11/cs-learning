@@ -1361,8 +1361,10 @@ function renderTree() {
       det.open = !!finding || state.opened.includes(prefix + name);   // folders start closed; while finding, everything that matches shows
       det.append(el('summary', '', name));
       det.addEventListener('toggle', () => {
-        state.opened = state.opened.filter((p) => p !== prefix + name);
+        // Closing a folder forgets what was open inside it, so it comes back with its subfolders closed.
+        state.opened = state.opened.filter((p) => p !== prefix + name && (det.open || !p.startsWith(prefix + name + '/')));
         if (det.open) state.opened.push(prefix + name);
+        else for (const inner of det.querySelectorAll('details[open]')) inner.open = false;
         save();
       });
       const kids = el('div', 'kids');
