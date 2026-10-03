@@ -1,0 +1,742 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reader</title>
+<style>
+  :root {
+    --serif: "Iowan Old Style", Palatino, "Palatino Linotype", Georgia, serif;
+    --sans: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    --body: var(--serif);
+    --head: var(--sans);
+    --paper: #fdfcf7;
+    --shade: #f4f1e8;
+    --ink: #1d1b16;
+    --muted: #6f6a5f;
+    --rule: #ddd8ca;
+    --accent: #8c2f1b;
+    --mark: #fbeeb0;
+    --reply: #eef3ea;
+  }
+  :root[data-font="sans"] { --body: var(--sans); --head: var(--serif); }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; overflow: hidden; background: var(--paper); color: var(--ink); font: 18px/1.65 var(--body); }
+  a { color: var(--accent); }
+  button, textarea { font: inherit; color: inherit; }
+  button { background: none; border: 1px solid var(--rule); padding: 1px 8px; cursor: pointer; font: 13px var(--head); }
+
+  #app { display: grid; grid-template-columns: 250px minmax(0, 1fr) 300px; height: 100vh; }
+  body.no-notes #app { grid-template-columns: 250px minmax(0, 1fr); }
+  body.no-notes #notes { display: none; }
+
+  /* sidebar: title, file browser, outline of the active document */
+  #side { display: flex; flex-direction: column; min-height: 0; padding: 14px 0 0 14px; font: 14px/1.4 var(--head); border-right: 1px solid var(--rule); }
+  #hubTitle { font-size: 17px; font-weight: 700; margin: 0 14px 8px 0; padding: 2px 4px; margin-left: -4px; cursor: text; }
+  #hubTitle:hover, #hubTitle:focus { outline: 1px dashed var(--rule); }
+  #sideTools button { margin: 0 4px 8px 0; }
+  .label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); padding: 8px 0 4px; border-top: 1px solid var(--rule); }
+  #tree, #toc { flex: 1 1 50%; min-height: 0; overflow-y: auto; padding: 0 8px 12px 0; }
+  #tree summary { cursor: pointer; padding: 2px 0; font-weight: 600; }
+  #tree .kids { padding-left: 14px; }
+  .file { display: flex; align-items: baseline; gap: 6px; padding: 2px 4px; cursor: pointer; color: var(--muted); }
+  .file span.name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file.open { color: var(--ink); }
+  .file.active { color: var(--accent); background: var(--shade); }
+  .file small { color: var(--muted); }
+  .file button { visibility: hidden; border: 0; padding: 0 2px; color: var(--accent); font-size: 11px; }
+  .file:hover button { visibility: visible; }
+  #toc a { display: block; padding: 3px 0 3px 8px; color: var(--muted); text-decoration: none; border-left: 2px solid transparent; }
+  #toc a.l1 { color: var(--ink); font-weight: 600; margin-top: 8px; }
+  #toc a.l3 { padding-left: 22px; font-size: 13px; }
+  #toc a.active { color: var(--accent); border-left-color: var(--accent); }
+
+  /* workspace: one or two panes, each with tabs along the top */
+  #work { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  #panes { flex: 1; display: flex; min-height: 0; }
+  .pane { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
+  .divider { flex: 0 0 7px; cursor: col-resize; border-left: 1px solid var(--rule); }
+  .divider:hover, .dragging .divider { background: var(--rule); }
+  .dragging iframe { pointer-events: none; }
+  .tabs { display: flex; align-items: stretch; background: var(--shade); border-bottom: 1px solid var(--rule); font: 13px var(--head); overflow-x: auto; flex: none; }
+  .tab { display: flex; align-items: center; gap: 8px; padding: 7px 8px 6px 12px; border-right: 1px solid var(--rule); border-top: 2px solid transparent; cursor: pointer; color: var(--muted); white-space: nowrap; }
+  .tab span { max-width: 190px; overflow: hidden; text-overflow: ellipsis; }
+  .tab.active { background: var(--paper); color: var(--ink); }
+  .pane.active .tab.active { border-top-color: var(--accent); }
+  .tab button, .tabs > button { border: 0; padding: 0 4px; color: var(--muted); }
+  .tabs > button { margin-left: auto; padding: 0 10px; white-space: nowrap; flex: none; position: sticky; right: 0; background: var(--shade); }
+  .tab { flex: none; }
+  .body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .scroller { flex: 1; overflow-y: auto; padding: 0 32px; }
+  .body iframe { flex: 1; width: 100%; border: 0; background: #fff; }
+  .empty { color: var(--muted); font: 14px var(--head); padding: 24px 32px; }
+
+  /* a rendered document */
+  .md { max-width: 720px; margin: 0 auto; padding: 16px 0 120px; }
+  .md h1, .md h2, .md h3, .md h4 { font-family: var(--head); line-height: 1.25; scroll-margin-top: 12px; }
+  .md h1 { font-size: 1.7em; margin-top: 1.6em; border-bottom: 1px solid var(--rule); padding-bottom: .2em; }
+  .md h2 { font-size: 1.25em; margin-top: 1.8em; }
+  .md blockquote { margin: 1em 0; padding: 0 1em; border-left: 3px solid var(--rule); color: #3b382f; }
+  .md pre { background: var(--shade); padding: 12px; overflow-x: auto; font-size: 14px; line-height: 1.45; }
+  .md code { font-family: Menlo, Consolas, monospace; font-size: .86em; }
+  .md table { border-collapse: collapse; font-size: .92em; }
+  .md td, .md th { border: 1px solid var(--rule); padding: 6px 10px; vertical-align: top; }
+  .md img { max-width: 100%; }
+  .md hr { border: 0; border-top: 1px solid var(--rule); margin: 2em 0; }
+  .md summary { cursor: pointer; color: var(--accent); font: 14px var(--head); }
+  mark { background: var(--mark); cursor: pointer; }
+  mark.flash, .note.flash { outline: 2px solid var(--accent); }
+  .editFront { float: right; margin-top: 8px; }
+  .frontEditor { max-width: 720px; margin: 0 auto; padding: 16px 0; }
+  .frontEditor textarea { width: 100%; min-height: 55vh; padding: 12px; border: 1px solid var(--rule); background: #fff; font: 14px/1.5 Menlo, Consolas, monospace; }
+  .frontEditor button { margin: 8px 8px 0 0; padding: 4px 12px; }
+  .frontEditor p { font: 13px var(--head); color: var(--muted); }
+
+  /* notes: a separate layer beside the documents */
+  #notes { min-height: 0; overflow-y: auto; padding: 14px; border-left: 1px solid var(--rule); font: 14px/1.4 var(--head); }
+  #notes h4 { margin: 0 0 10px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 400; }
+  #notes .empty { padding: 0; }
+  .note { border-top: 1px solid var(--rule); padding: 10px 0; }
+  .note .quote { font-family: var(--body); font-style: italic; color: var(--muted); border-left: 3px solid var(--mark); padding-left: 8px; margin-bottom: 6px; cursor: pointer; }
+  .note .text { font-family: var(--body); font-size: 15px; white-space: pre-wrap; }
+  .note .meta { color: var(--muted); font-size: 12px; margin-top: 6px; }
+  .note .meta button { border: 0; padding: 0; margin-left: 8px; color: var(--accent); font-size: 12px; }
+  .note .reply { background: var(--reply); padding: 8px 10px; margin-top: 8px; font-family: var(--body); font-size: 15px; }
+  .note .reply p { margin: 0 0 .5em; }
+
+  /* composer: along the bottom, like talking to the open document */
+  #composer { flex: none; border-top: 1px solid var(--rule); padding: 8px 32px 12px; }
+  #composer .inner { max-width: 720px; margin: 0 auto; }
+  #context { font: 13px var(--head); color: var(--muted); margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #context b { color: var(--ink); font-weight: 600; }
+  #context button { border: 0; padding: 0 4px; color: var(--accent); }
+  #input { display: block; width: 100%; height: 56px; resize: vertical; padding: 8px 10px; border: 1px solid var(--rule); background: #fff; font: 16px/1.4 var(--body); }
+</style>
+</head>
+<body>
+<div id="app">
+  <nav id="side">
+    <h1 id="hubTitle" contenteditable="plaintext-only" spellcheck="false" title="Click to rename"></h1>
+    <div id="sideTools"><button id="fontToggle"></button><button id="notesToggle"></button></div>
+    <div class="label">Files</div>
+    <div id="tree"></div>
+    <div class="label">Outline</div>
+    <div id="toc"></div>
+  </nav>
+  <div id="work">
+    <div id="panes"></div>
+    <form id="composer">
+      <div class="inner">
+        <div id="context"></div>
+        <textarea id="input" placeholder="Write a note or a question…  (Enter to save, Shift+Enter for a new line)"></textarea>
+      </div>
+    </form>
+  </div>
+  <aside id="notes"></aside>
+</div>
+
+<script src="/vendor/marked.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+const panesEl = $('panes'), treeEl = $('tree'), tocEl = $('toc'), notesEl = $('notes'), input = $('input'), titleEl = $('hubTitle');
+
+let docs = [], config = { title: '' }, notes = [], pendingQuote = '', editing = false;
+// Layout: one or two panes, each with its open tabs. Saved per folder.
+let state = { panes: [{ tabs: [], active: null }], active: 0, split: 42, notesOpen: true, closed: [] };
+const views = [];            // DOM for each pane: { root, tabsEl, body, scroller, article, frame, heads, cur }
+const scrollMem = new Map(); // "pane:path" -> scrollTop
+
+const api = (url, method = 'GET', body) =>
+  fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) })
+    .then((r) => (r.headers.get('content-type').includes('json') ? r.json() : r.text()));
+const store = {
+  get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+};
+const save = () => store.set('layout:' + config.root, state);
+const docOf = (path) => docs.find((d) => d.path === path);
+const isHtml = (path) => /\.html?$/.test(path);
+const activeDoc = () => state.panes[state.active]?.active || null;
+const resolve = (base, rel) => decodeURIComponent(new URL(rel, 'http://x/' + base).pathname.slice(1));
+
+// ---- font switcher, notes panel toggle ------------------------------------
+function setFont(f) {
+  document.documentElement.dataset.font = f;
+  $('fontToggle').textContent = f === 'serif' ? 'Aa sans body' : 'Aa serif body';
+  store.set('font', f);
+}
+$('fontToggle').onclick = () => setFont(document.documentElement.dataset.font === 'serif' ? 'sans' : 'serif');
+setFont(store.get('font') || 'serif');
+
+function setNotesOpen(open) {
+  state.notesOpen = open;
+  document.body.classList.toggle('no-notes', !open);
+  $('notesToggle').textContent = open ? 'hide notes' : 'show notes';
+}
+$('notesToggle').onclick = () => { setNotesOpen(!state.notesOpen); save(); };
+
+// ---- title (FRONTPAGE.md heading, or hub.json) -----------------------------
+function setTabTitle() {
+  const d = docOf(activeDoc());
+  document.title = (d && !d.front ? d.title + ' · ' : '') + config.title;
+}
+async function loadConfig() {
+  config = await api('/api/config');
+  if (document.activeElement !== titleEl) titleEl.textContent = config.title;
+  setTabTitle();
+}
+titleEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); titleEl.blur(); }
+  if (e.key === 'Escape') { titleEl.textContent = config.title; titleEl.blur(); }
+});
+titleEl.addEventListener('blur', async () => {
+  const t = titleEl.textContent.trim();
+  if (!t || t === config.title) return (titleEl.textContent = config.title);
+  config = await api('/api/config', 'PUT', { title: t });
+  titleEl.textContent = config.title;
+  setTabTitle();
+});
+
+// ---- file browser -----------------------------------------------------------
+async function loadDocs() { docs = await api('/api/docs'); renderTree(); }
+
+function renderTree() {
+  const y = treeEl.scrollTop;
+  treeEl.innerHTML = '';
+  const root = { dirs: {}, files: [] };
+  for (const d of docs) {
+    if (d.front) continue;
+    let node = root;
+    for (const part of d.path.split('/').slice(0, -1)) node = node.dirs[part] ??= { dirs: {}, files: [] };
+    node.files.push(d);
+  }
+  const front = docs.find((d) => d.front);
+  if (front) treeEl.append(fileRow(front, 'Front page'));
+  (function draw(node, parent, prefix) {
+    for (const [name, sub] of Object.entries(node.dirs)) {
+      const det = el('details');
+      det.open = !state.closed.includes(prefix + name);
+      det.append(el('summary', '', name));
+      det.addEventListener('toggle', () => {
+        state.closed = state.closed.filter((p) => p !== prefix + name);
+        if (!det.open) state.closed.push(prefix + name);
+        save();
+      });
+      const kids = el('div', 'kids');
+      det.append(kids);
+      draw(sub, kids, prefix + name + '/');
+      parent.append(det);
+    }
+    for (const f of node.files) parent.append(fileRow(f));
+  })(root, treeEl, '');
+  treeEl.scrollTop = y;
+}
+
+function fileRow(d, label) {
+  const row = el('div', 'file');
+  row.dataset.path = d.path;
+  row.title = d.title;
+  if (state.panes.some((p) => p.tabs.includes(d.path))) row.classList.add('open');
+  if (d.path === activeDoc()) row.classList.add('active');
+  row.append(el('span', 'name', label || d.path.split('/').pop()));
+  const n = notes.filter((x) => x.doc === d.path).length;
+  if (n) row.append(el('small', '', n));
+  const side = el('button', '', 'side');
+  side.title = 'Open to the side';
+  side.onclick = (e) => { e.stopPropagation(); openDoc(d.path, { side: true }); };
+  row.append(side);
+  row.onclick = (e) => openDoc(d.path, { side: e.metaKey || e.ctrlKey || e.altKey });
+  return row;
+}
+
+// ---- panes and tabs ---------------------------------------------------------
+// Open a document as a tab. `side` puts it in the other pane, splitting if needed.
+async function openDoc(path, { pane = state.active, side = false, hash } = {}) {
+  if (!docOf(path)) return;
+  let rebuilt = false;
+  if (side) {
+    if (state.panes.length < 2) { state.panes.push({ tabs: [], active: null }); rebuilt = true; }
+    pane = pane === 0 ? 1 : 0;
+  }
+  const p = state.panes[pane];
+  remember(pane);
+  if (!p.tabs.includes(path)) p.tabs.push(path);
+  p.active = path;
+  state.active = pane;
+  if (rebuilt) await buildPanes(); else { renderTabs(pane); await showDoc(pane, hash); }
+  if (rebuilt && hash) goTo(pane, hash);
+  chrome();
+}
+
+async function closeTab(pane, path) {
+  const p = state.panes[pane];
+  const at = p.tabs.indexOf(path);
+  p.tabs.splice(at, 1);
+  scrollMem.delete(pane + ':' + path);
+  if (p.active === path) p.active = p.tabs[Math.min(at, p.tabs.length - 1)] || null;
+  if (!p.tabs.length && state.panes.length > 1) {
+    state.panes.splice(pane, 1);
+    state.active = 0;
+    scrollMem.clear();
+    await buildPanes();
+  } else {
+    // Closing the last document falls back to the front page.
+    if (!p.tabs.length && config.front) { p.tabs.push(config.front); p.active = config.front; }
+    renderTabs(pane);
+    await showDoc(pane);
+  }
+  chrome();
+}
+
+function remember(pane) {
+  const v = views[pane], path = state.panes[pane]?.active;
+  if (v?.scroller && path) scrollMem.set(pane + ':' + path, v.scroller.scrollTop);
+}
+
+function setActive(pane) {
+  if (state.active === pane) return;
+  state.active = pane;
+  chrome();
+}
+
+async function buildPanes() {
+  panesEl.innerHTML = '';
+  views.length = 0;
+  state.panes.forEach((_, i) => {
+    if (i) panesEl.append(makeDivider());
+    const root = el('section', 'pane'), tabsEl = el('div', 'tabs'), body = el('div', 'body');
+    root.append(tabsEl, body);
+    if (i) root.style.flex = `0 0 ${state.split}%`;
+    root.addEventListener('pointerdown', () => setActive(i), true);
+    panesEl.append(root);
+    views.push({ root, tabsEl, body, heads: [] });
+  });
+  await Promise.all(state.panes.map((_, i) => { renderTabs(i); return showDoc(i); }));
+}
+
+function makeDivider() {
+  const div = el('div', 'divider');
+  div.title = 'Drag to resize';
+  div.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    div.setPointerCapture(e.pointerId);
+    document.body.classList.add('dragging');
+    const move = (ev) => {
+      const box = panesEl.getBoundingClientRect();
+      state.split = Math.round(Math.max(20, Math.min(70, ((box.right - ev.clientX) / box.width) * 100)));
+      views[1].root.style.flex = `0 0 ${state.split}%`;
+    };
+    const up = () => {
+      document.body.classList.remove('dragging');
+      div.removeEventListener('pointermove', move);
+      div.removeEventListener('pointerup', up);
+      save();
+    };
+    div.addEventListener('pointermove', move);
+    div.addEventListener('pointerup', up);
+  });
+  return div;
+}
+
+function renderTabs(pane) {
+  const p = state.panes[pane], bar = views[pane].tabsEl;
+  bar.innerHTML = '';
+  for (const path of p.tabs) {
+    const d = docOf(path);
+    const tab = el('div', 'tab' + (path === p.active ? ' active' : ''));
+    tab.title = path;
+    tab.append(el('span', '', d ? (d.front ? 'Front page' : d.title) : path));
+    const x = el('button', '', '×');
+    x.title = 'Close';
+    x.onclick = (e) => { e.stopPropagation(); closeTab(pane, path); };
+    tab.append(x);
+    tab.onclick = async () => {
+      if (p.active === path) return;
+      remember(pane);
+      p.active = path;
+      renderTabs(pane);
+      await showDoc(pane);
+      chrome();
+    };
+    bar.append(tab);
+  }
+  if (p.active) {
+    const split = el('button', '', state.panes.length > 1 ? 'to other side' : 'split');
+    split.title = 'Open this document in the other pane';
+    split.onclick = () => openDoc(p.active, { pane, side: true });
+    bar.append(split);
+  }
+}
+
+// ---- rendering a document into a pane ---------------------------------------
+function slugify(text, used) {
+  const s = text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, '') || 'section';
+  let out = s, n = 2;
+  while (used.has(out)) out = s + '-' + n++;
+  used.add(out);
+  return out;
+}
+
+// Source files are shown as one fenced code block.
+async function fetchDoc(path) {
+  const text = await api('/api/doc?path=' + encodeURIComponent(path));
+  if (path.endsWith('.md')) return text;
+  const fence = '`'.repeat(Math.max(3, ...(text.match(/`+/g) || []).map((t) => t.length + 1)));
+  return `# ${path.split('/').pop()}\n\n${fence}\n${text}\n${fence}\n`;
+}
+
+async function showDoc(pane, hash, keepScroll) {
+  const v = views[pane], path = state.panes[pane].active;
+  const y = v.scroller ? v.scroller.scrollTop : 0;
+  Object.assign(v, { heads: [], cur: null, article: null, scroller: null, frame: null });
+  if (!path) { v.body.replaceChildren(el('p', 'empty', 'Nothing open. Pick a file on the left.')); return; }
+
+  // HTML files are shown as they are, in a frame.
+  if (isHtml(path)) {
+    const frame = el('iframe');
+    frame.src = '/raw/' + path.split('/').map(encodeURIComponent).join('/');
+    frame.onload = () => {
+      try {
+        const d = frame.contentDocument;
+        v.heads = [...d.querySelectorAll('h1, h2, h3')];
+        d.addEventListener('pointerdown', () => setActive(pane));
+        d.addEventListener('selectionchange', () => takeSelection(d.getSelection().toString(), pane));
+      } catch {}
+      if (pane === state.active) renderOutline();
+    };
+    v.frame = frame;
+    v.body.replaceChildren(frame);
+    return;
+  }
+
+  const md = await fetchDoc(path);
+  if (views[pane] !== v || state.panes[pane].active !== path) return; // changed while loading
+  const scroller = el('div', 'scroller'), article = el('article', 'md');
+  article.innerHTML = marked.parse(md);
+  scroller.append(article);
+  v.body.replaceChildren(scroller);
+  Object.assign(v, { scroller, article });
+
+  const used = new Set();
+  for (const h of article.querySelectorAll('h1, h2, h3')) {
+    h.dataset.slug = slugify(h.textContent, used);
+    h.id = `p${pane}-${h.dataset.slug}`;
+    v.heads.push(h);
+  }
+  for (const img of article.querySelectorAll('img')) {
+    const src = img.getAttribute('src') || '';
+    if (!/^([a-z]+:|\/)/i.test(src)) img.src = '/raw/' + resolve(path, src);
+  }
+  hideAnswers(article);
+  if (path === config.front) {
+    const b = el('button', 'editFront', 'edit front page');
+    b.onclick = () => editFront(pane, md);
+    article.prepend(b);
+  }
+  highlightAll(article, path);
+  article.addEventListener('click', (e) => onDocClick(e, pane));
+  scroller.addEventListener('scroll', () => track(pane), { passive: true });
+
+  if (keepScroll) scroller.scrollTop = y;
+  else if (hash) goTo(pane, hash);
+  else scroller.scrollTop = scrollMem.get(pane + ':' + path) || 0;
+  track(pane);
+}
+
+// "Check Yourself" blocks: hide the answer until asked for.
+function hideAnswers(root) {
+  for (const bq of root.querySelectorAll('blockquote')) {
+    const start = [...bq.children].find((c) => /^Answer/.test(c.querySelector('strong')?.textContent || ''));
+    if (!start) continue;
+    const details = el('details');
+    start.before(details);
+    details.append(el('summary', '', 'Show answer'));
+    while (details.nextSibling) details.append(details.nextSibling);
+  }
+}
+
+// The front page can be edited in place; it is saved back to FRONTPAGE.md.
+function editFront(pane, md) {
+  editing = true;
+  const box = el('div', 'frontEditor'), ta = el('textarea');
+  ta.value = md;
+  const done = async () => { editing = false; await showDoc(pane); chrome(); };
+  const saveBtn = el('button', '', 'Save');
+  saveBtn.onclick = async () => { await api('/api/front', 'PUT', { markdown: ta.value }); await loadConfig(); done(); };
+  const cancel = el('button', '', 'Cancel');
+  cancel.onclick = done;
+  box.append(el('p', '', 'Markdown. The first "# Heading" is the title; everything after it is the description.'), ta, saveBtn, cancel);
+  const scroller = el('div', 'scroller');
+  scroller.append(box);
+  views[pane].body.replaceChildren(scroller);
+  ta.focus();
+}
+
+function goTo(pane, slug) {
+  const h = views[pane].heads.find((x) => x.dataset?.slug === slug);
+  if (h) h.scrollIntoView();
+}
+
+// Links between files stay in the hub. Documents listed under "side" in
+// hub.json, and modifier-clicks, open in the other pane.
+function onDocClick(e, pane) {
+  const mark = e.target.closest('mark');
+  if (mark) return flash(notesEl.querySelector(`.note[data-id="${mark.dataset.note}"]`));
+  const a = e.target.closest('a');
+  if (!a) return;
+  const href = a.getAttribute('href') || '';
+  if (href.startsWith('#')) { e.preventDefault(); return goTo(pane, decodeURIComponent(href.slice(1))); }
+  if (/^[a-z]+:/i.test(href)) { a.target = '_blank'; a.rel = 'noopener'; return; }
+  const [file, hash] = href.split('#');
+  if (!file) return;
+  const resolved = resolve(state.panes[pane].active, file);
+  const target = docOf(resolved);
+  e.preventDefault();
+  if (!target) return window.open('/raw/' + resolved, '_blank');
+  openDoc(resolved, { pane, hash, side: target.side || e.metaKey || e.ctrlKey || e.altKey });
+}
+
+// ---- outline, and which heading the reader is under ---------------------------
+function track(pane) {
+  const v = views[pane];
+  if (!v.scroller) return;
+  const top = v.scroller.getBoundingClientRect().top;
+  let cur = v.heads[0] || null;
+  for (const h of v.heads) { if (h.getBoundingClientRect().top - top < 110) cur = h; else break; }
+  if (cur === v.cur) return;
+  v.cur = cur;
+  if (pane === state.active) { markOutline(); renderContext(); }
+}
+
+function renderOutline() {
+  const v = views[state.active];
+  tocEl.innerHTML = '';
+  if (!v) return;
+  v.heads.forEach((h, k) => {
+    const a = el('a', 'l' + h.tagName[1], h.textContent);
+    a.href = '#' + (h.dataset?.slug || '');
+    a.onclick = (e) => {
+      e.preventDefault();
+      h.scrollIntoView();
+      if (h.dataset?.slug) history.replaceState(null, '', '?doc=' + encodeURIComponent(activeDoc()) + '#' + h.dataset.slug);
+    };
+    tocEl.append(a);
+  });
+  markOutline();
+}
+function markOutline() {
+  const v = views[state.active];
+  [...tocEl.children].forEach((a, k) => a.classList.toggle('active', v.heads[k] === v.cur));
+  tocEl.querySelector('.active')?.scrollIntoView({ block: 'nearest' });
+}
+
+// Everything outside the panes that depends on which document has focus.
+function chrome() {
+  views.forEach((v, i) => v.root.classList.toggle('active', i === state.active));
+  for (const row of treeEl.querySelectorAll('.file')) {
+    row.classList.toggle('active', row.dataset.path === activeDoc());
+    row.classList.toggle('open', state.panes.some((p) => p.tabs.includes(row.dataset.path)));
+  }
+  treeEl.querySelector('.file.active')?.scrollIntoView({ block: 'nearest' });
+  pendingQuote = '';
+  renderOutline();
+  renderContext();
+  renderNotes(false);
+  setTabTitle();
+  if (activeDoc()) history.replaceState(null, '', '?doc=' + encodeURIComponent(activeDoc()));
+  save();
+}
+
+// ---- selection → what the note is about ---------------------------------------
+function takeSelection(raw, pane) {
+  const text = raw.replace(/\s+/g, ' ').trim();
+  if (text.length < 3) return;
+  if (pane !== state.active) { state.active = pane; chrome(); }
+  pendingQuote = text;
+  renderContext();
+  renderNotes(false);
+}
+document.addEventListener('selectionchange', () => {
+  const sel = window.getSelection();
+  if (sel.isCollapsed || !sel.rangeCount) return;
+  const node = sel.getRangeAt(0).commonAncestorContainer;
+  const pane = views.findIndex((v) => v.article?.contains(node));
+  if (pane >= 0) takeSelection(sel.toString(), pane);
+});
+
+function renderContext() {
+  const c = $('context'), d = docOf(activeDoc());
+  c.textContent = '';
+  if (!d) return c.append('Open a document to take notes on it.');
+  if (pendingQuote) {
+    const x = el('button', '', '×');
+    x.type = 'button';
+    x.title = 'Drop the quote';
+    x.onclick = () => { pendingQuote = ''; renderContext(); renderNotes(false); };
+    c.append('On: ', x, el('b', '', '“' + pendingQuote + '”'));
+  } else {
+    const cur = views[state.active].cur;
+    c.append('In: ', el('b', '', (d.front ? 'Front page' : d.title) + (cur && cur.textContent !== d.title ? ' › ' + cur.textContent : '')), '  · select text to pin the note to it');
+  }
+}
+
+// ---- notes ---------------------------------------------------------------------
+async function loadNotes() { notes = await api('/api/notes'); renderNotes(); renderTree(); }
+
+$('composer').onsubmit = async (e) => {
+  e.preventDefault();
+  const text = input.value.trim(), doc = activeDoc();
+  if (!text || !doc) return;
+  const cur = views[state.active].cur;
+  input.value = '';
+  await api('/api/notes', 'POST', { doc, text, quote: pendingQuote, heading: cur?.dataset?.slug || '', headingText: cur?.textContent || '' });
+  pendingQuote = '';
+  renderContext();
+  await loadNotes();
+  if (!state.notesOpen) setNotesOpen(true);
+  notesEl.lastElementChild?.scrollIntoView({ block: 'nearest' });
+};
+input.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('composer').requestSubmit(); }
+});
+
+function flash(node) {
+  if (!node) return;
+  node.scrollIntoView({ block: 'center' });
+  node.classList.add('flash');
+  setTimeout(() => node.classList.remove('flash'), 1200);
+}
+
+function renderNotes(rehighlight = true) {
+  const doc = activeDoc(), mine = notes.filter((n) => n.doc === doc);
+  notesEl.innerHTML = '';
+  notesEl.append(el('h4', '', 'Notes on this document'));
+  if (!mine.length) notesEl.append(el('p', 'empty', 'None yet. Type below; select text first to pin a note to it.'));
+  for (const n of mine) {
+    const div = el('div', 'note');
+    div.dataset.id = n.id;
+    if (n.quote) {
+      const q = el('div', 'quote', n.quote.length > 160 ? n.quote.slice(0, 160) + '…' : n.quote);
+      q.onclick = () => {
+        const mark = views[state.active].article?.querySelector(`mark[data-note="${n.id}"]`);
+        if (mark) flash(mark); else goTo(state.active, n.heading);
+      };
+      div.append(q);
+    }
+    div.append(el('div', 'text', n.text));
+
+    const meta = el('div', 'meta');
+    meta.append(new Date(n.ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }));
+    if (n.headingText) {
+      const where = el('a', '', n.headingText);
+      where.href = '#' + n.heading;
+      where.onclick = (e) => { e.preventDefault(); goTo(state.active, n.heading); };
+      meta.append(' · ', where);
+    }
+    if (pendingQuote) {
+      const attach = el('button', '', n.quote ? 'move to selection' : 'attach selection');
+      attach.onclick = async () => { await api('/api/notes/' + n.id, 'PUT', { quote: pendingQuote }); pendingQuote = ''; renderContext(); loadNotes(); };
+      meta.append(attach);
+    }
+    const del = el('button', '', 'delete');
+    del.onclick = async () => { if (del.textContent === 'delete') return (del.textContent = 'really delete?'); await api('/api/notes/' + n.id, 'DELETE'); loadNotes(); };
+    meta.append(del);
+    div.append(meta);
+
+    if (n.reply) {
+      const r = el('div', 'reply');
+      r.innerHTML = marked.parse(n.reply);
+      if (n.replyDoc) {
+        const a = el('a', '', 'Read the full write-up →');
+        a.href = '#';
+        a.onclick = (e) => { e.preventDefault(); const [f, h] = n.replyDoc.split('#'); openDoc(f, { hash: h, side: true }); };
+        r.append(a);
+      }
+      div.append(r);
+    }
+    notesEl.append(div);
+  }
+  if (rehighlight) views.forEach((v, i) => v.article && highlightAll(v.article, state.panes[i].active));
+}
+
+// Wrap each note's quote in <mark>. Matching ignores whitespace so a selection
+// that crossed paragraphs or inline formatting still finds its place.
+function highlightAll(article, path) {
+  for (const m of article.querySelectorAll('mark[data-note]')) m.replaceWith(...m.childNodes);
+  article.normalize();
+  for (const n of notes) if (n.doc === path && n.quote) highlight(article, n.quote, n.id);
+}
+function highlight(article, quote, id) {
+  const walker = document.createTreeWalker(article, NodeFilter.SHOW_TEXT);
+  const at = [];
+  let flat = '', node;
+  while ((node = walker.nextNode())) {
+    const s = node.data;
+    for (let i = 0; i < s.length; i++) if (!/\s/.test(s[i])) { flat += s[i]; at.push([node, i]); }
+  }
+  const needle = quote.replace(/\s+/g, '');
+  const start = flat.indexOf(needle);
+  if (start < 0 || !needle) return;
+  const spans = new Map();
+  for (let i = start; i < start + needle.length; i++) {
+    const [nd, off] = at[i];
+    const s = spans.get(nd);
+    if (s) s[1] = off; else spans.set(nd, [off, off]);
+  }
+  for (const [nd, [a, b]] of spans) {
+    const range = document.createRange();
+    range.setStart(nd, a);
+    range.setEnd(nd, b + 1);
+    const mark = el('mark');
+    mark.dataset.note = id;
+    range.surroundContents(mark);
+  }
+}
+
+// ---- live reload when files change on disk --------------------------------------
+new EventSource('/api/events').onmessage = async (e) => {
+  const { file } = JSON.parse(e.data);
+  if (file.endsWith('notes.json')) return loadNotes();
+  if (file === 'hub.json' || file === config.front || file === 'FRONTPAGE.md') await loadConfig();
+  await loadDocs();
+  if (editing) return;
+  for (let i = 0; i < state.panes.length; i++) {
+    if (state.panes[i].active !== file) continue;
+    renderTabs(i);
+    await showDoc(i, null, true);
+    if (i === state.active) renderOutline();
+  }
+};
+
+(async function init() {
+  await loadConfig();
+  notes = await api('/api/notes');
+  await loadDocs();
+
+  const saved = store.get('layout:' + config.root);
+  if (saved?.panes?.length) state = { ...state, ...saved };
+  for (const p of state.panes) {
+    p.tabs = p.tabs.filter(docOf);
+    if (!p.tabs.includes(p.active)) p.active = p.tabs[0] || null;
+  }
+  state.panes = state.panes.filter((p, i) => i === 0 || p.tabs.length).slice(0, 2);
+  state.active = Math.min(state.active, state.panes.length - 1);
+  if (!state.panes[0].tabs.length) {
+    const first = docs.find((d) => d.front) || docs.find((d) => !d.side) || docs[0];
+    if (first) state.panes[0] = { tabs: [first.path], active: first.path };
+  }
+  setNotesOpen(state.notesOpen);
+  renderTree();
+  await buildPanes();
+
+  const want = new URLSearchParams(location.search).get('doc');
+  const hash = decodeURIComponent(location.hash.slice(1));
+  if (want && docOf(want) && want !== activeDoc()) await openDoc(want, { hash });
+  else { if (want && hash) goTo(state.active, hash); chrome(); }
+})();
+</script>
+</body>
+</html>
