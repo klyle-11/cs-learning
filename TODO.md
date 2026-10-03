@@ -6,12 +6,14 @@ The review found the reader is not private yet. This order replaces the old one 
 
 1. [ ] Retire the Node server: workspaces and streamed files in C++, then delete `hub/server.js`
 2. [ ] Split `hub/index.html` into modules; commit a browser test suite
-3. [ ] Content cannot act: sanitise markdown, Content-Security-Policy on the reader, serve `/raw/` sandboxed, block loading from the internet
-4. [ ] The server knows who is asking: allowed host names, device pairing and tokens, storage quota; body cap in Node, catch-all and connection limits in C++, outbox keeps changes the server refused
-5. [ ] Encrypted connection: TLS with a trust step in the interface; then the service worker
-6. [ ] Encrypted copies on the device
+3. [x] Content cannot act: sanitise markdown, Content-Security-Policy on the reader, serve `/raw/` sandboxed, block loading from the internet
+4. [x] The server knows who is asking: allowed host names, device pairing and tokens, storage quota; body cap in Node, catch-all and connection limits in C++, outbox keeps changes the server refused
+5. [x] Encrypted connection: TLS with a trust step in the interface (`/trust`). [ ] Then the service worker
+6. [x] Encrypted copies on the device (passphrase; opt-in from the privacy box). [ ] Unlock with the device's fingerprint or face instead of typing
 7. [ ] Decide: devices encrypt before upload (the board only holds ciphertext), or the board encrypts the card itself
 8. [ ] Performance pass for the board: index file, notes per document, incremental rendering
+
+Not yet checked on real devices: installing the authority on an iPhone and an Android phone, and the reader in Safari and Firefox (tested in Chrome only).
 
 ## Annotations that link (after review steps 1 to 3)
 
@@ -150,13 +152,18 @@ Done:
 
 Still to do:
 - [ ] Upload as its own workspace, and switching workspaces (answers 501 for now)
-- [ ] Send files in pieces instead of reading them whole (needed on the board; also lifts the memory cost of big files on desktop)
+- [x] Send and receive files in pieces instead of reading them whole
 - [ ] HTTP Range requests and cache headers, so the browser's PDF reader can fetch a large PDF a piece at a time
-- [ ] Keep connections open between requests (each request currently opens a new one)
-- [ ] ESP-IDF project in `server-cpp/esp32/`: Wi-Fi start-up, SD mount, the same handlers registered with ESP-IDF's own HTTP server
+- [x] Keep connections open between requests
+- [x] ESP-IDF project in `server-cpp/esp32/` for the LilyGO T3 V1.6.1: Wi-Fi, SD card, a state partition in the board's own flash, then the same server as on a computer (its own HTTP and TLS code, not ESP-IDF's HTTP server). It builds with PlatformIO (`pio run -d server-cpp/esp32`: 1.3 MB of the 4 MB flash); never run on a board
+- [ ] Flash it: card prepared with `make card CARD=/Volumes/…`, Wi-Fi name and password in `HUB_WIFI_SSID` / `HUB_WIFI_PASSWORD`, then `pio run -d server-cpp/esp32 -t upload` and `pio device monitor`
+- [ ] Measure free memory with 1 to 4 HTTPS connections open; lower the connection limit if needed
+- [ ] Show the address, the certificate fingerprint and the pairing code on the board's screen (they go to the serial monitor for now)
+- [ ] Answer to `hub.local` (mDNS component)
+- [ ] A way to set the Wi-Fi name and password without rebuilding (they are build settings for now)
 - [ ] One notes file per document, so a save on the board rewrites a small file
 - [ ] Try it on the board; measure SD read speed and how long the document list takes
-- [ ] Copy the page and its two scripts to the card (`www/`), gzipped
+- [x] Copy the page and its scripts to the card (`hub/www/`): `make card CARD=/Volumes/…`. [ ] Serve them gzipped
 - [ ] Run the page against `hubd` in a browser for a full session (only the API has been compared so far)
 - [ ] When all of the above passes on desktop, delete `hub/server.js`
 

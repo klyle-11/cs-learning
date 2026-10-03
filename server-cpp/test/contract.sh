@@ -25,18 +25,22 @@ fixture() {
   echo '[]' > "$1/notes/notes.json"
   printf '0123456789abcdefghij' > "$1/b/clip.mp4"
   printf 'not really a png' > "$1/b/pic.png"
+  printf '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>' > "$1/b/drawing.svg"
 }
 fixture "$WORK/node/ws"
 fixture "$WORK/cpp/ws"
 
-PORT=$NODE_PORT node "$REPO/hub/server.js" "$WORK/node/ws" > "$WORK/node.log" 2>&1 &
+# Both are told to ask even this machine to pair, so the requests below prove
+# that nothing is answered without a paired device's token.
+PORT=$NODE_PORT HUB_STATE="$WORK/node/state" HUB_PAIR_LOCAL=1 node "$REPO/hub/server.js" "$WORK/node/ws" > "$WORK/node.log" 2>&1 &
 NODE_PID=$!
-./hubd "$WORK/cpp/ws" --port $CPP_PORT --www "$REPO/hub" > "$WORK/cpp.log" 2>&1 &
+./hubd "$WORK/cpp/ws" --port $CPP_PORT --www "$REPO/hub" --state "$WORK/cpp/state" --pair-local > "$WORK/cpp.log" 2>&1 &
 CPP_PID=$!
 # wait until both answer (the memory-checked build starts slowly)
 for port in $NODE_PORT $CPP_PORT; do
-  for _ in $(seq 1 50); do curl -s -o /dev/null -m 1 "http://127.0.0.1:$port/api/config" && break; sleep 0.2; done
+  for _ in $(seq 1 50); do curl -s -o /dev/null -m 1 "http://127.0.0.1:$port/" && break; sleep 0.2; done
 done
+code_in() { grep -o 'pairing code: [A-Z0-9-]*' "$1" | tail -1 | awk '{print $3}'; }
 
 # Print "status body" with the parts that legitimately differ (folder path,
 # ids, timestamps) replaced, and JSON keys sorted.
@@ -47,7 +51,7 @@ status, root = sys.argv[1], sys.argv[2]
 raw = sys.stdin.read()
 def scrub(v):
     if isinstance(v, dict):
-        return {k: ("<id>" if k == "id" else "<ts>" if k == "ts" else scrub(x)) for k, x in v.items()}
+        return {k: ("<" + k + ">" if k in ("id", "ts", "code", "created", "seen", "used", "free") else scrub(x)) for k, x in v.items()}
     if isinstance(v, list): return [scrub(x) for x in v]
     if isinstance(v, str): return v.replace(root, "<root>")
     return v
@@ -57,20 +61,56 @@ if sys.argv[3] == "status-only": out = ""
 print(status, out)' "$1" "$2" "$3"
 }
 
-run() { # run <port> <root>: the request script
-  local B="http://127.0.0.1:$1" R="$2" ID
-  req() { # req <label> <mode> curl-args...
+run() { # run <port> <root> <log>: the request script
+  local B="http://127.0.0.1:$1" R="$2" LOG="$3" ID JAR="$WORK/jar.$1"
+  anon() { # like req, with no token
     local label="$1" mode="$2"; shift 2
     local out; out="$(curl -s -m 5 -w '\n%{http_code}' "$@")"
+    echo "## $label"; printf '%s' "${out%$'\n'*}" | norm "${out##*$'\n'}" "$R" "$mode"
+  }
+  req() { # req <label> <mode> curl-args...
+    local label="$1" mode="$2"; shift 2
+    local out; out="$(curl -s -m 5 -b "$JAR" -w '\n%{http_code}' "$@")"
     echo "## $label"; printf '%s' "${out%$'\n'*}" | norm "${out##*$'\n'}" "$R" "$mode"
   }
   hreq() { # like req, but also shows the headers that matter for partial downloads
     local label="$1"; shift
     echo "## $label"
-    curl -s -m 5 -D - -o "$WORK/body" "$@" | tr -d '\r' | grep -iE '^(HTTP/|content-range|accept-ranges|content-type|content-length)' | sed 's/^HTTP\/1.1 \([0-9]*\).*/\1/' | tr 'A-Z' 'a-z' | sort
+    curl -s -m 5 -b "$JAR" -D - -o "$WORK/body" "$@" | tr -d '\r' | grep -iE '^(HTTP/|content-range|accept-ranges|content-type|content-length|content-security-policy|x-content-type-options|x-frame-options|referrer-policy|cross-origin-)' | sed 's/^HTTP\/1.1 \([0-9]*\).*/\1/' | tr 'A-Z' 'a-z' | sort
     echo "body: $(cat "$WORK/body")"
   }
   J=(-H 'Content-Type: application/json')
+  # Before pairing: the page itself is public, nothing else is.
+  anon "page without pairing"     status-only "$B/"
+  anon "script without pairing"   status-only "$B/app.js"
+  anon "config without pairing"   body "$B/api/config"
+  anon "file without pairing"     body "$B/raw/a/1-doc.md"
+  anon "note without pairing"     body -X POST "${J[@]}" -d '{"doc":"a/1-doc.md","text":"planted"}' "$B/api/notes"
+  anon "upload without pairing"   body -X POST --data-binary 'x' "$B/api/upload?path=planted.md"
+  anon "session without pairing"  body "$B/api/session"
+  anon "made-up token"            body -b 'hub_device=0123456789abcdef.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' "$B/api/config"
+  anon "pair with no code"        body -X POST "${J[@]}" -d '{}' "$B/api/pair"
+  anon "pair with a wrong code"   body -X POST "${J[@]}" -d '{"code":"AAAA-AAAA","name":"intruder"}' "$B/api/pair"
+  anon "pair from another site"   body -X POST "${J[@]}" -H 'Origin: http://evil.example' -d "{\"code\":\"$(code_in "$LOG")\"}" "$B/api/pair"
+  anon "pair"                     body -c "$JAR" -X POST "${J[@]}" -d "{\"code\":\"$(code_in "$LOG")\",\"name\":\"  test   device \"}" "$B/api/pair"
+  anon "code works once"          body -X POST "${J[@]}" -d "{\"code\":\"$(code_in "$LOG")\"}" "$B/api/pair"
+  req "session"               body "$B/api/session"
+  req "devices"               body "$B/api/devices"
+  req "new pairing code"      body -X POST "$B/api/pair/code"
+  req "storage"               body "$B/api/storage"
+  req "unknown device"        body -X DELETE "$B/api/devices/nope"
+  # A name that is not this machine's: what a DNS-rebinding page would send.
+  req "foreign host name"       body -H 'Host: evil.example' "$B/api/config"
+  req "foreign host and origin" body -X POST "${J[@]}" -H 'Host: evil.example' -H 'Origin: http://evil.example' -d '{"doc":"a/1-doc.md","text":"planted"}' "$B/api/notes"
+  req "other site fetches"      body -H 'Sec-Fetch-Site: cross-site' "$B/api/notes"
+  req "other port fetches"      body -H 'Sec-Fetch-Site: same-site' "$B/raw/a/1-doc.md"
+  req "own page fetches"        status-only -H 'Sec-Fetch-Site: same-origin' "$B/api/notes"
+  hreq "page headers"           "$B/"
+  hreq "html file headers"      "$B/raw/b/page.html"
+  hreq "svg file headers"       "$B/raw/b/drawing.svg"
+  hreq "api headers"            "$B/api/doc?path=a/1-doc.md"
+  head -c 1100000 /dev/zero | tr '\0' 'a' > "$WORK/big"
+  req "oversized json"          body -X POST "${J[@]}" --data-binary "@$WORK/big" "$B/api/notes"
   req "config"                body "$B/api/config"
   req "docs"                  body "$B/api/docs"
   req "doc"                   body "$B/api/doc?path=a/1-doc.md"
@@ -100,7 +140,7 @@ run() { # run <port> <root>: the request script
   req "own id is usable"      body -X PUT "${J[@]}" -d '{"text":"edited by its own id"}' "$B/api/notes/made-on-phone-1"
   req "note with bad id"      body -X POST "${J[@]}" -d '{"id":"../x","ts":"yesterday","doc":"a/1-doc.md","text":"bad id and time"}' "$B/api/notes"
   req "note bad"              body -X POST "${J[@]}" -d '{"doc":"a/1-doc.md"}' "$B/api/notes"
-  ID="$(curl -s "$B/api/notes" | python3 -c 'import sys,json; print([n for n in json.load(sys.stdin) if n["status"] == "highlight"][0]["id"])')"
+  ID="$(curl -s -b "$JAR" "$B/api/notes" | python3 -c 'import sys,json; print([n for n in json.load(sys.stdin) if n["status"] == "highlight"][0]["id"])')"
   req "highlight gets text"   body -X PUT "${J[@]}" -d '{"text":"now annotated ünïcode"}' "$B/api/notes/$ID"
   req "note retype"           body -X PUT "${J[@]}" -d '{"type":"unclear","ignored":"x"}' "$B/api/notes/$ID"
   req "notes list"            body "$B/api/notes"
@@ -126,13 +166,16 @@ run() { # run <port> <root>: the request script
   req "other site uploads"      body -X POST -H 'Origin: https://evil.example' --data-binary 'x' "$B/api/upload?path=planted.md"
   req "sandboxed page posts"    body -X POST "${J[@]}" -H 'Origin: null' -d '{"doc":"a/1-doc.md","text":"planted"}' "$B/api/notes"
   req "own page posts"          body -X POST "${J[@]}" -H "Origin: $B" -d '{"doc":"a/1-doc.md","text":"from the page itself"}' "$B/api/notes"
-  req "other site may read"     status-only -H 'Origin: http://evil.example' "$B/api/config"
+  req "other site reads"        body -H 'Origin: http://evil.example' "$B/api/config"
+  ID="$(curl -s -b "$JAR" "$B/api/devices" | python3 -c 'import sys,json; print(json.load(sys.stdin)[0]["id"])')"
+  req "unpair"                  body -X DELETE "$B/api/devices/$ID"
+  req "after unpairing"         body "$B/api/config"
   req "docs after changes"    body "$B/api/docs"
   req "workspaces"            body "$B/api/workspaces"
 }
 
-run $NODE_PORT "$WORK/node/ws" > "$WORK/node.out"
-run $CPP_PORT "$(cd "$WORK/cpp/ws" && pwd -P)" > "$WORK/cpp.out"
+run $NODE_PORT "$WORK/node/ws" "$WORK/node.log" > "$WORK/node.out"
+run $CPP_PORT "$(cd "$WORK/cpp/ws" && pwd -P)" "$WORK/cpp.log" > "$WORK/cpp.out"
 # macOS temp folders are reached through a symlink; the servers report the real path.
 sed -i '' "s|$(cd "$WORK/node/ws" && pwd -P)|<root>|g; s|$(cd "$WORK/cpp/ws" && pwd -P)|<root>|g" "$WORK/node.out" "$WORK/cpp.out"
 
@@ -143,5 +186,6 @@ else
   echo "DIFFERENCES (< node, > c++):"
   cat "$WORK/diff.txt"
   echo "--- of $TOTAL requests"
+  [ -n "${KEEP:-}" ] && cp "$WORK/node.out" "$WORK/cpp.out" "$WORK/node.log" "$WORK/cpp.log" "$KEEP/"
   exit 1
 fi

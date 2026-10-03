@@ -2,18 +2,29 @@
 // serving the same hub/index.html.
 //
 //   hubd <folder> [--port 4321] [--host 127.0.0.1] [--www <folder>/hub] [--profile desktop|small|esp32]
+//        [--state <dir>] [--tls] [--insecure-http] [--pair-local] [--allow-host <name>] [--quota-mb <n>]
+//   hubd --make-cert [--state <dir>] [--allow-host <name>]
+//
+// Who may use it (see ../API.md, "Security"): requests must name a host this
+// machine really has, must not come from another website, and, unless they come
+// from this machine itself, must carry the token of a paired device. Beyond
+// this machine the server only speaks HTTPS.
 //
 // File access goes through dirent/stat/stdio only, which ESP-IDF maps onto an
 // SD card, so these handlers are meant to move to the ESP32 unchanged.
 #include <dirent.h>
 #include <sys/stat.h>
+#ifndef ESP_PLATFORM
+#include <ifaddrs.h>
+#include <sys/statvfs.h>
+#endif
 
 #include <algorithm>
 #include <chrono>
 #include <ctime>
 #include <fstream>
 #include <mutex>
-#include <random>
+#include <set>
 #include <sstream>
 #include <vector>
 
@@ -25,6 +36,7 @@ using Strings = std::vector<string>;
 
 static string ROOT;                    // the folder of documents
 static string WWW;                     // where index.html and the vendor scripts live
+static string STATE;                   // certificates and the list of paired devices: never inside ROOT
 static const char *FRONT = "FRONTPAGE.md";
 static const size_t MAX_JSON = 1 << 20;          // 1 MB for API bodies
 
@@ -36,11 +48,16 @@ struct Profile {
   int watch_ms;        // how often the folder is checked for changes
   bool cache_assets;   // keep index.html and the scripts in memory between requests
   bool cache_listing;  // keep the document list until a file changes
+  int max_conns;       // connections served at once (each TLS connection costs tens of KB)
+  int max_streams;     // open pages listening for changes
+  size_t piece;        // bytes moved at a time when sending or receiving a file
+  long keepalive_ms;   // how long an idle connection is kept
+  unsigned long long quota_mb; // most the folder may hold in total
 };
 static const Profile PROFILES[] = {
-    {"desktop", 200u << 20, 500, true, true},   // a computer: plenty of memory, fast disk
-    {"small", 50u << 20, 1000, true, true},     // a Raspberry Pi class board: under 1 GB of memory
-    {"esp32", 4u << 20, 5000, false, true},     // a microcontroller: SD card, a few hundred KB free
+    {"desktop", 200u << 20, 500, true, true, 64, 16, 64 * 1024, 5000, 20480},  // a computer: plenty of memory, fast disk
+    {"small", 50u << 20, 1000, true, true, 24, 8, 16 * 1024, 5000, 8192},      // a Raspberry Pi class board: under 1 GB of memory
+    {"esp32", 4u << 20, 5000, false, true, 4, 2, 4 * 1024, 2000, 3072},        // a microcontroller: SD card, a few hundred KB free
 };
 static Profile profile = PROFILES[0];
 static unsigned device_cores = 1;
@@ -84,6 +101,15 @@ static bool read_file(const string &p, string &out) {
   out = ss.str();
   return true;
 }
+// The first `max` bytes of a file: enough to find a title without reading a large file whole.
+static bool read_start(const string &p, string &out, size_t max) {
+  FILE *f = std::fopen(p.c_str(), "rb");
+  if (!f) return false;
+  out.resize(max);
+  out.resize(std::fread(&out[0], 1, max, f));
+  std::fclose(f);
+  return true;
+}
 static void make_dirs(const string &dir) {
   for (size_t i = 1; i <= dir.size(); i++) {
     if (i == dir.size() || dir[i] == '/') ::mkdir(dir.substr(0, i).c_str(), 0755);
@@ -100,7 +126,7 @@ static bool write_file(const string &p, const string &data) {
     f.write(data.data(), static_cast<std::streamsize>(data.size()));
     if (!f) return false;
   }
-  return ::rename(tmp.c_str(), p.c_str()) == 0;
+  return secure::replace(tmp, p);
 }
 
 // A path sent by a client, split into parts. Rejects anything that could step
@@ -312,7 +338,7 @@ static bool natural_less(const string &a, const string &b) {
 static string title_of(const string &abs) {
   string name = basename_of(abs), text, title;
   if (is_html(name)) {
-    if (read_file(abs, text)) {
+    if (read_start(abs, text, 64 * 1024)) {
       string low = lower(text);
       size_t open = low.find("<title");
       size_t start = open == string::npos ? string::npos : low.find('>', open);
@@ -322,7 +348,7 @@ static string title_of(const string &abs) {
     return name;
   }
   if (!ends_with(name, ".md")) return name;
-  if (read_file(abs, text) && first_h1(text, title)) return title;
+  if (read_start(abs, text, 64 * 1024) && first_h1(text, title)) return title;
   return name.substr(0, name.size() - 3);
 }
 
@@ -363,11 +389,12 @@ static bool write_notes(const cJSON *notes) { return write_file(ROOT + "/notes/n
 
 static string new_id() {
   static const char digits[] = "0123456789abcdefghijklmnopqrstuvwxyz";
-  static std::mt19937_64 rng{std::random_device{}()};
   auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
   string id;
   for (auto v = static_cast<unsigned long long>(ms); v > 0; v /= 36) id.insert(id.begin(), digits[v % 36]);
-  for (int i = 0; i < 4; i++) id += digits[rng() % 36];
+  unsigned char r[4] = {0};
+  secure::random_bytes(r, sizeof r);
+  for (unsigned char c : r) id += digits[c % 36];
   return id;
 }
 static string now_iso() {
@@ -381,12 +408,190 @@ static string now_iso() {
   return buf;
 }
 
+// ---- who is asking: host names, paired devices -----------------------------------------
+// See ../API.md, "Security". State lives in STATE/devices.json; only a hash of
+// each device's token is kept, so the file alone lets nobody in.
+
+#ifdef ESP_PLATFORM
+extern "C" const char *board_ip();
+#endif
+static bool pair_local = false;        // even this machine's own browser must pair
+static bool tls_on = false;
+static Strings extra_hosts;
+static string bind_host = "127.0.0.1";
+
+// Every name this machine answers to. A request naming any other host is
+// refused: that is what stops a website from pointing its own name at this
+// address and being treated as "the same site" (DNS rebinding).
+static Strings host_names() {
+  Strings out = {"localhost", "127.0.0.1", "hub.local"};
+#ifdef ESP_PLATFORM
+  if (const char *ip = board_ip()) out.push_back(ip); // the address Wi-Fi gave the board (esp32/main/board.cpp)
+#else
+  char name[256] = {0};
+  if (::gethostname(name, sizeof name - 1) == 0 && name[0]) {
+    string h = lower(name);
+    out.push_back(h);
+    if (!ends_with(h, ".local") && h.find('.') == string::npos) out.push_back(h + ".local");
+  }
+  ifaddrs *list = nullptr;
+  if (::getifaddrs(&list) == 0) {
+    for (ifaddrs *i = list; i; i = i->ifa_next) {
+      if (!i->ifa_addr || i->ifa_addr->sa_family != AF_INET) continue;
+      char buf[INET_ADDRSTRLEN];
+      if (::inet_ntop(AF_INET, &reinterpret_cast<sockaddr_in *>(i->ifa_addr)->sin_addr, buf, sizeof buf)) out.push_back(buf);
+    }
+    ::freeifaddrs(list);
+  }
+#endif
+  if (bind_host != "0.0.0.0") out.push_back(bind_host);
+  for (const string &h : extra_hosts) out.push_back(lower(h));
+  std::sort(out.begin(), out.end());
+  out.erase(std::unique(out.begin(), out.end()), out.end());
+  return out;
+}
+static std::mutex hosts_lock;
+static std::set<string> hosts;
+static bool known_host(const string &header) {
+  string h = lower(header);
+  if (!h.empty() && h[0] == '[') h = h.substr(0, h.find(']') + 1);
+  else h = h.substr(0, h.rfind(':') == string::npos ? h.size() : h.rfind(':'));
+  if (h.empty()) return false;
+  if (h == "[::1]") return true;
+  std::lock_guard<std::mutex> g(hosts_lock);
+  if (hosts.count(h)) return true;
+  // The address may have changed since start-up (a new Wi-Fi network): look again.
+  Strings now = host_names();
+  hosts = std::set<string>(now.begin(), now.end());
+  return hosts.count(h) != 0;
+}
+
+struct Device { string id, name, hash, created, seen; };
+static std::mutex auth_lock;
+static std::vector<Device> devices;
+static string pair_code;                       // the code a new device must type, if one is on offer
+static http::Clock::time_point pair_until;
+static int pair_fails = 0;
+
+static void load_devices() {
+  string text;
+  Json file(secure::slurp(STATE + "/devices.json", text) ? cJSON_Parse(text.c_str()) : nullptr);
+  const cJSON *d;
+  cJSON_ArrayForEach(d, cJSON_GetObjectItemCaseSensitive(file.p, "devices")) {
+    Device dev{str_of(d, "id"), str_of(d, "name"), str_of(d, "hash"), str_of(d, "created"), str_of(d, "seen")};
+    if (!dev.id.empty() && dev.hash.size() == 64) devices.push_back(dev);
+  }
+}
+static bool save_devices() {
+  Json file(cJSON_CreateObject());
+  cJSON *arr = cJSON_AddArrayToObject(file.p, "devices");
+  for (const Device &d : devices) {
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "id", d.id.c_str());
+    cJSON_AddStringToObject(o, "name", d.name.c_str());
+    cJSON_AddStringToObject(o, "hash", d.hash.c_str());
+    cJSON_AddStringToObject(o, "created", d.created.c_str());
+    cJSON_AddStringToObject(o, "seen", d.seen.c_str());
+    cJSON_AddItemToArray(arr, o);
+  }
+  return secure::spit(STATE + "/devices.json", dump(file.p, true) + "\n", 0600);
+}
+// Offer a new pairing code for ten minutes. Call with auth_lock held.
+static string offer_code(bool announce) {
+  pair_code = secure::random_code(8);
+  pair_until = http::Clock::now() + std::chrono::minutes(10);
+  pair_fails = 0;
+  if (announce) {
+    std::printf("pairing code: %s-%s  (type it on the device you want to add; good for 10 minutes)\n", pair_code.substr(0, 4).c_str(), pair_code.substr(4).c_str());
+    std::fflush(stdout);
+  }
+  return pair_code;
+}
+static string cookie_of(const http::Request &req, const string &name) {
+  const string &all = req.header("cookie");
+  size_t pos = 0;
+  while (pos < all.size()) {
+    size_t end = all.find(';', pos);
+    if (end == string::npos) end = all.size();
+    string pair = trim(all.substr(pos, end - pos));
+    if (starts_with(pair, name + "=")) return pair.substr(name.size() + 1);
+    pos = end + 1;
+  }
+  return "";
+}
+// The id of the paired device that sent this request: "local" for this machine
+// itself, "" for a stranger.
+static string device_of(const http::Request &req) {
+  string cookie = cookie_of(req, "hub_device");
+  size_t dot = cookie.find('.');
+  if (dot != string::npos) {
+    string id = cookie.substr(0, dot), hash = secure::sha256_hex(cookie.substr(dot + 1)), today = now_iso().substr(0, 10);
+    std::lock_guard<std::mutex> g(auth_lock);
+    for (Device &d : devices) {
+      if (d.id != id || !secure::same(d.hash, hash)) continue;
+      if (d.seen != today) { d.seen = today; save_devices(); } // one small write a day, not one per request
+      return d.id;
+    }
+  }
+  return req.local && !pair_local ? "local" : "";
+}
+static string device_cookie(const string &value, bool tls, bool clear = false) {
+  return "Set-Cookie: hub_device=" + value + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=" + (clear ? "0" : "31536000") + (tls ? "; Secure" : "") + "\r\n";
+}
+
+// ---- how much is stored ---------------------------------------------------------------------
+
+static unsigned long long quota_bytes = 0;      // 0: no limit
+static std::mutex usage_lock;
+static unsigned long long usage_cache = 0;
+static http::Clock::time_point usage_at;
+static bool usage_known = false;
+
+static unsigned long long tree_size(const string &dir) {
+  unsigned long long total = 0;
+  DIR *d = ::opendir(dir.c_str());
+  if (!d) return 0;
+  while (dirent *e = ::readdir(d)) {
+    string name = e->d_name;
+    if (name == "." || name == "..") continue;
+    string abs = dir + "/" + name;
+    struct stat st;
+    if (::stat(abs.c_str(), &st) != 0) continue;
+    if (S_ISDIR(st.st_mode)) { if (abs != WWW) total += tree_size(abs); }
+    else if (S_ISREG(st.st_mode)) total += static_cast<unsigned long long>(st.st_size);
+  }
+  ::closedir(d);
+  return total;
+}
+static unsigned long long used_bytes() {
+  std::lock_guard<std::mutex> g(usage_lock);
+  if (!usage_known || http::Clock::now() - usage_at > std::chrono::seconds(3)) {
+    usage_cache = tree_size(ROOT);
+    usage_at = http::Clock::now();
+    usage_known = true;
+  }
+  return usage_cache;
+}
+static unsigned long long free_bytes() {
+#ifndef ESP_PLATFORM
+  struct statvfs v;
+  if (::statvfs(ROOT.c_str(), &v) == 0) return static_cast<unsigned long long>(v.f_bavail) * static_cast<unsigned long long>(v.f_frsize);
+#endif
+  return ~0ULL;
+}
+// Whether `more` bytes may be added: under the quota, and leaving the disk 16 MB to breathe.
+static bool room_for(unsigned long long more) {
+  if (free_bytes() < more + (16ULL << 20)) return false;
+  return quota_bytes == 0 || used_bytes() + more <= quota_bytes;
+}
+static void used_more(unsigned long long n) { std::lock_guard<std::mutex> g(usage_lock); usage_cache += n; }
+
 // ---- live reload: tell open pages which file changed --------------------------------
 // No file-watching API is assumed (the ESP32 has none): the tree's modification
 // times are compared once a second.
 
 static std::mutex clients_lock;
-static std::vector<int> clients;
+static std::vector<std::shared_ptr<http::Conn>> clients;
 
 static void snapshot(const string &dir, const string &rel, std::map<string, long long> &out) {
   DIR *d = ::opendir(dir.c_str());
@@ -402,12 +607,24 @@ static void snapshot(const string &dir, const string &rel, std::map<string, long
   }
   ::closedir(d);
 }
+// Send one line to every open page; a page that cannot take it is dropped.
+static void tell_clients(const string &line) {
+  std::lock_guard<std::mutex> g(clients_lock);
+  for (size_t i = 0; i < clients.size();) {
+    clients[i]->within(2000);
+    if (clients[i]->write_all(line)) i++;
+    else clients.erase(clients.begin() + static_cast<long>(i));
+  }
+}
 static void watch_loop() {
   std::map<string, long long> before;
   snapshot(ROOT, "", before);
+  auto pinged = http::Clock::now();
   for (;;) {
     std::this_thread::sleep_for(std::chrono::milliseconds(profile.watch_ms));
     { std::lock_guard<std::mutex> g(clients_lock); if (clients.empty()) continue; }
+    // A comment line now and then finds pages that have gone away, freeing their place.
+    if (http::Clock::now() - pinged > std::chrono::seconds(20)) { tell_clients(": ping\n\n"); pinged = http::Clock::now(); }
     std::map<string, long long> after;
     snapshot(ROOT, "", after);
     Strings changed;
@@ -417,12 +634,7 @@ static void watch_loop() {
     for (const string &file : changed) {
       Json msg(cJSON_CreateObject());
       cJSON_AddStringToObject(msg.p, "file", file.c_str());
-      string line = "data: " + dump(msg.p) + "\n\n";
-      std::lock_guard<std::mutex> g(clients_lock);
-      for (size_t i = 0; i < clients.size();) {
-        if (http::send_all(clients[i], line)) i++;
-        else { ::close(clients[i]); clients.erase(clients.begin() + static_cast<long>(i)); }
-      }
+      tell_clients("data: " + dump(msg.p) + "\n\n");
     }
   }
 }
@@ -441,7 +653,16 @@ static long long stamp_of(const string &abs) {
   struct stat st;
   return ::stat(abs.c_str(), &st) == 0 && S_ISREG(st.st_mode) ? static_cast<long long>(st.st_mtime) * 1000003LL + static_cast<long long>(st.st_size) : -1;
 }
-static http::Response file_response(const string &abs, const char *type);
+// A file sent a piece at a time, straight from disk.
+static http::Response file_response(const string &abs, const char *type) {
+  struct stat st;
+  if (::stat(abs.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) return http::error(404, "no such file");
+  http::Response r;
+  r.type = type;
+  r.file = abs;
+  r.length = static_cast<unsigned long long>(st.st_size);
+  return r;
+}
 static http::Response asset_response(const string &abs, const char *type) {
   if (!profile.cache_assets) return file_response(abs, type);
   long long stamp = stamp_of(abs);
@@ -467,29 +688,173 @@ static unsigned long long tree_stamp() {
   return h;
 }
 
-static http::Response file_response(const string &abs, const char *type) {
-  http::Response r;
-  if (!is_file(abs) || !read_file(abs, r.body)) return http::error(404, "no such file");
-  r.type = type;
-  return r;
+// What each kind of answer is allowed to do once a browser has it.
+//
+// The reader: its own scripts only, nothing inline, and it may load from and
+// talk to this server alone. So a document cannot make it run code, and
+// opening a document never contacts the internet.
+static const char *CSP_PAGE =
+    "Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
+    "media-src 'self' blob:; font-src 'self'; connect-src 'self'; frame-src 'self'; worker-src 'self'; manifest-src 'self'; "
+    "base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'\r\n"
+    "X-Frame-Options: DENY\r\nCross-Origin-Opener-Policy: same-origin\r\n";
+// A file from the folder: no scripts at all, wherever it is opened (in the
+// reader's frame or in a tab of its own), no forms, no leaving the frame, and
+// pictures, styles and fonts from this server only.
+static const char *CSP_RAW =
+    "Content-Security-Policy: sandbox allow-same-origin; default-src 'none'; img-src 'self' data: blob:; media-src 'self' data: blob:; "
+    "style-src 'self' 'unsafe-inline'; font-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'\r\n";
+static const char *CSP_DATA = "Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'\r\n";
+static const char *COMMON_HEADERS = "X-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nCross-Origin-Resource-Policy: same-origin\r\nX-DNS-Prefetch-Control: off\r\n";
+
+// The files that make up the page. Nothing else in WWW is served.
+static const std::pair<const char *, const char *> ASSETS[] = {
+    {"/app.js", "app.js"}, {"/local.js", "local.js"}, {"/vault.js", "vault.js"},
+    {"/vendor/marked.js", "node_modules/marked/lib/marked.umd.js"},
+    {"/vendor/highlight.js", "node_modules/@highlightjs/cdn-assets/highlight.min.js"},
+    {"/vendor/purify.js", "node_modules/dompurify/dist/purify.min.js"}};
+
+// The body of a JSON request, or the status to refuse it with.
+static int json_body(http::Request &req, string &body) { return req.read_body(body, MAX_JSON); }
+static http::Response body_error(int status) { return http::error(status, status == 413 ? "body too large" : "body not received"); }
+
+static http::Response session_json(const string &device) {
+  Json out(cJSON_CreateObject());
+  cJSON *d = cJSON_AddObjectToObject(out.p, "device");
+  cJSON_AddStringToObject(d, "id", device.c_str());
+  string name = "this computer";
+  if (device != "local") { std::lock_guard<std::mutex> g(auth_lock); for (const Device &x : devices) if (x.id == device) name = x.name; }
+  cJSON_AddStringToObject(d, "name", name.c_str());
+  cJSON_AddBoolToObject(out.p, "local", device == "local");
+  cJSON_AddBoolToObject(out.p, "tls", tls_on);
+  return json_response(out.p);
 }
 
-static http::Response route(http::Request &req) {
+static http::Response answer(http::Request &req) {
   const string &p = req.path, &m = req.method;
 
-  // A page on another website must not be able to change anything here. Browsers
-  // put the calling site in the Origin header; if it is not this server, refuse.
-  auto origin = req.headers.find("origin");
-  if (m != "GET" && origin != req.headers.end()) {
-    auto host = req.headers.find("host");
-    size_t scheme = origin->second.find("://");
-    string from = scheme == string::npos ? "" : origin->second.substr(scheme + 3);
-    if (host == req.headers.end() || from != host->second) return http::error(403, "requests from other sites are not allowed");
+  if (!known_host(req.header("host"))) return http::error(403, "unknown host name");
+
+  // The authority's certificate is public: a device needs it before it can trust the connection.
+  if (p == "/hub-ca.crt" && m == "GET" && tls_on) return file_response(STATE + "/ca.pem", "application/x-x509-ca-cert");
+  if (p == "/trust" && m == "GET" && tls_on) return asset_response(WWW + "/trust.html", "text/html");
+  if (p == "/trust.js" && m == "GET" && tls_on) return asset_response(WWW + "/trust.js", "text/javascript");
+  if (p == "/api/trust" && m == "GET" && tls_on) {
+    string pem;
+    secure::slurp(STATE + "/ca.pem", pem);
+    Json out(cJSON_CreateObject());
+    cJSON_AddStringToObject(out.p, "fingerprint", secure::fingerprint(pem).c_str());
+    cJSON_AddBoolToObject(out.p, "encrypted", req.tls);
+    return json_response(out.p);
+  }
+  // Someone typed http:// at a port that speaks HTTPS: send them to the trust page, or on to https://.
+  if (req.plain_on_tls) {
+    http::Response r;
+    r.status = 308;
+    r.type = "text/plain";
+    r.extra = "Location: " + string(p == "/" ? "/trust" : "https://" + req.header("host") + req.target) + "\r\n";
+    r.body = "This hub only speaks HTTPS.\n";
+    r.close = true;
+    return r;
   }
 
-  if (p == "/") return asset_response(WWW + "/index.html", "text/html");
-  if (p == "/vendor/marked.js") return asset_response(is_file(WWW + "/vendor/marked.js") ? WWW + "/vendor/marked.js" : WWW + "/node_modules/marked/lib/marked.umd.js", "text/javascript");
-  if (p == "/vendor/highlight.js") return asset_response(is_file(WWW + "/vendor/highlight.js") ? WWW + "/vendor/highlight.js" : WWW + "/node_modules/@highlightjs/cdn-assets/highlight.min.js", "text/javascript");
+  if (m == "GET") {
+    if (p == "/") return asset_response(WWW + "/index.html", "text/html");
+    for (const auto &a : ASSETS) {
+      if (p != a.first) continue;
+      // Scripts sit beside the page (copied there for the board), or in node_modules.
+      string name = a.first + 1;
+      return asset_response(is_file(WWW + "/" + name) ? WWW + "/" + name : WWW + "/" + a.second, "text/javascript");
+    }
+  }
+
+  // A page on another website must not be able to use what is here. Browsers
+  // say where a request comes from (Origin, Sec-Fetch-Site); if that is not
+  // this server itself, refuse.
+  const string &origin = req.header("origin"), &site = req.header("sec-fetch-site");
+  if (!origin.empty()) {
+    size_t scheme = origin.find("://");
+    if (scheme == string::npos || origin.substr(scheme + 3) != req.header("host")) return http::error(403, "requests from other sites are not allowed");
+  }
+  if (!site.empty() && site != "same-origin" && site != "none") return http::error(403, "requests from other sites are not allowed");
+
+  // Pairing: a new device shows it knows the code on offer and is given a token.
+  if (p == "/api/pair" && m == "POST") {
+    string text;
+    if (int bad = json_body(req, text)) return body_error(bad);
+    Json body(cJSON_Parse(text.c_str()));
+    string code, name = squeeze(str_of(body.p, "name")).substr(0, 60);
+    for (char c : str_of(body.p, "code")) if (std::isalnum(static_cast<unsigned char>(c))) code += static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    if (code.empty()) return http::error(400, "code required");
+    std::lock_guard<std::mutex> g(auth_lock);
+    bool on_offer = !pair_code.empty() && http::Clock::now() < pair_until;
+    if (!on_offer || !secure::same(code, pair_code)) {
+      // Five wrong tries and the code is withdrawn, so it cannot be guessed at.
+      if (on_offer && ++pair_fails >= 5) { pair_code.clear(); if (devices.empty()) offer_code(true); }
+      return http::error(403, "wrong or expired pairing code");
+    }
+    pair_code.clear();
+    string token = secure::random_token(32);
+    Device d{secure::random_hex(8), name.empty() ? "device" : name, secure::sha256_hex(token), now_iso(), now_iso().substr(0, 10)};
+    if (token.empty() || d.id.empty()) return http::error(500, "could not pair");
+    devices.push_back(d);
+    if (!save_devices()) { devices.pop_back(); return http::error(500, "could not save"); }
+    std::printf("paired: %s (%s)\n", d.name.c_str(), d.id.c_str());
+    std::fflush(stdout);
+    Json out(cJSON_CreateObject());
+    cJSON *o = cJSON_AddObjectToObject(out.p, "device");
+    cJSON_AddStringToObject(o, "id", d.id.c_str());
+    cJSON_AddStringToObject(o, "name", d.name.c_str());
+    http::Response r = json_response(out.p);
+    r.extra = device_cookie(d.id + "." + token, req.tls);
+    return r;
+  }
+
+  const string device = device_of(req);
+  if (device.empty()) return http::error(401, "pairing required");
+
+  if (p == "/api/session" && m == "GET") return session_json(device);
+  if (p == "/api/pair/code" && m == "POST") {
+    std::lock_guard<std::mutex> g(auth_lock);
+    string code = offer_code(false);
+    Json out(cJSON_CreateObject());
+    cJSON_AddStringToObject(out.p, "code", (code.substr(0, 4) + "-" + code.substr(4)).c_str());
+    cJSON_AddNumberToObject(out.p, "minutes", 10);
+    return json_response(out.p);
+  }
+  if (p == "/api/devices" && m == "GET") {
+    Json out(cJSON_CreateArray());
+    std::lock_guard<std::mutex> g(auth_lock);
+    for (const Device &d : devices) {
+      cJSON *o = cJSON_CreateObject();
+      cJSON_AddStringToObject(o, "id", d.id.c_str());
+      cJSON_AddStringToObject(o, "name", d.name.c_str());
+      cJSON_AddStringToObject(o, "created", d.created.c_str());
+      cJSON_AddStringToObject(o, "seen", d.seen.c_str());
+      cJSON_AddBoolToObject(o, "current", d.id == device);
+      cJSON_AddItemToArray(out.p, o);
+    }
+    return json_response(out.p);
+  }
+  if (starts_with(p, "/api/devices/") && m == "DELETE") {
+    string id = p.substr(13);
+    std::lock_guard<std::mutex> g(auth_lock);
+    auto it = std::find_if(devices.begin(), devices.end(), [&](const Device &d) { return d.id == id; });
+    if (it == devices.end()) return http::error(404, "no such device");
+    devices.erase(it);
+    if (!save_devices()) return http::error(500, "could not save");
+    http::Response r;
+    r.body = "{\"ok\":true}";
+    if (id == device) r.extra = device_cookie("", req.tls, true);
+    return r;
+  }
+  if (p == "/api/storage" && m == "GET") {
+    Json out(cJSON_CreateObject());
+    cJSON_AddNumberToObject(out.p, "used", static_cast<double>(used_bytes()));
+    cJSON_AddNumberToObject(out.p, "quota", static_cast<double>(quota_bytes));
+    cJSON_AddNumberToObject(out.p, "free", static_cast<double>(free_bytes() == ~0ULL ? 0 : free_bytes()));
+    return json_response(out.p);
+  }
 
   // Files as they are on disk (HTML documents, images and the like).
   if (starts_with(p, "/raw/")) {
@@ -502,6 +867,8 @@ static http::Response route(http::Request &req) {
     http::Response r;
     r.type = mime_of(parts.back());
     r.extra = "Accept-Ranges: bytes\r\n";
+    // A browser's PDF viewer does not start inside a sandbox; a PDF cannot touch the reader anyway.
+    if (r.type != "application/pdf") r.extra += CSP_RAW;
     // "Range: bytes=a-b", "bytes=a-" or "bytes=-n" (the last n): send that part
     // only. This is what lets a browser play and seek video, and read a large
     // PDF a piece at a time.
@@ -525,29 +892,25 @@ static http::Response route(http::Request &req) {
         end = std::min(end, start + MAX_RANGE - 1);
       }
     }
-    std::ifstream f(abs, std::ios::binary);
-    if (!f) return http::error(404, "no such file");
+    r.file = abs;
+    r.length = size;
     if (partial) {
       r.status = 206;
       r.extra += "Content-Range: bytes " + std::to_string(start) + "-" + std::to_string(end) + "/" + std::to_string(size) + "\r\n";
-      r.body.resize(static_cast<size_t>(end - start + 1));
-      f.seekg(static_cast<std::streamoff>(start));
-      f.read(&r.body[0], static_cast<std::streamsize>(r.body.size()));
-      r.body.resize(static_cast<size_t>(f.gcount()));
-    } else {
-      std::ostringstream ss;
-      ss << f.rdbuf();
-      r.body = ss.str();
+      r.offset = start;
+      r.length = end - start + 1;
     }
     return r;
   }
 
-  // The event stream: answer the headers here and keep the socket for watch_loop.
+  // The event stream: answer the headers here and keep the connection for watch_loop.
   if (p == "/api/events") {
-    http::Response r;
-    if (!http::send_all(req.fd, "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nConnection: keep-alive\r\n\r\n\n")) return http::error(500, "stream failed");
     std::lock_guard<std::mutex> g(clients_lock);
-    clients.push_back(req.fd);
+    if (static_cast<int>(clients.size()) >= profile.max_streams) return http::error(503, "too many open pages");
+    http::Response r;
+    req.conn->within(5000);
+    if (!req.conn->write_all(string("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nConnection: keep-alive\r\n") + COMMON_HEADERS + "\r\n\n")) { r.status = 500; r.close = true; return r; }
+    clients.push_back(req.conn);
     r.hold = true;
     return r;
   }
@@ -577,12 +940,16 @@ static http::Response route(http::Request &req) {
     cJSON_AddNumberToObject(d.p, "watchMs", profile.watch_ms);
     cJSON_AddBoolToObject(d.p, "cacheAssets", profile.cache_assets);
     cJSON_AddBoolToObject(d.p, "cacheListing", profile.cache_listing);
+    cJSON_AddNumberToObject(d.p, "maxConnections", profile.max_conns);
+    cJSON_AddNumberToObject(d.p, "quotaMB", static_cast<double>(quota_bytes >> 20));
     return json_response(d.p);
   }
 
   if (p == "/api/config" && m == "GET") { Json cfg(read_config()); return json_response(cfg.p); }
   if (p == "/api/config" && m == "PUT") {
-    Json body(cJSON_Parse(req.body.c_str()));
+    string text;
+    if (int bad = json_body(req, text)) return body_error(bad);
+    Json body(cJSON_Parse(text.c_str()));
     if (!cJSON_IsObject(body.p)) return http::error(400, "json object required");
     std::lock_guard<std::mutex> g(store_lock);
     Json file(read_settings_file());
@@ -629,7 +996,9 @@ static http::Response route(http::Request &req) {
 
   // The front page is the only document the reader may write.
   if (p == "/api/front" && m == "PUT") {
-    Json body(cJSON_Parse(req.body.c_str()));
+    string text;
+    if (int bad = json_body(req, text)) return body_error(bad);
+    Json body(cJSON_Parse(text.c_str()));
     if (!has_str(body.p, "markdown")) return http::error(400, "markdown required");
     string md = str_of(body.p, "markdown");
     if (md.empty() || md.back() != '\n') md += '\n';
@@ -648,7 +1017,9 @@ static http::Response route(http::Request &req) {
 
   if (p == "/api/notes" && m == "GET") { Json notes(read_notes()); return json_response(notes.p); }
   if (p == "/api/notes" && m == "POST") {
-    Json body(cJSON_Parse(req.body.c_str()));
+    string raw;
+    if (int bad = json_body(req, raw)) return body_error(bad);
+    Json body(cJSON_Parse(raw.c_str()));
     // A highlight is a note with a quote and no text yet.
     string doc = str_of(body.p, "doc"), text = str_of(body.p, "text"), quote = str_of(body.p, "quote");
     if (doc.empty() || (text.empty() && quote.empty())) return http::error(400, "doc and text or quote required");
@@ -659,6 +1030,7 @@ static http::Response route(http::Request &req) {
     string own_id = str_of(body.p, "id"), own_ts = str_of(body.p, "ts");
     const cJSON *seen;
     cJSON_ArrayForEach(seen, notes.p) if (!own_id.empty() && str_of(seen, "id") == own_id) return json_response(seen);
+    if (!room_for(raw.size())) return http::error(507, "storage is full");
     bool id_ok = own_id.size() >= 6 && own_id.size() <= 40 && std::all_of(own_id.begin(), own_id.end(), [](unsigned char c) { return std::isalnum(c) || c == '_' || c == '-'; });
     bool ts_ok = own_ts.size() >= 20 && own_ts.size() <= 30 && own_ts.back() == 'Z' && own_ts[4] == '-' && own_ts[7] == '-' && own_ts[10] == 'T' && own_ts[13] == ':' && own_ts[16] == ':' &&
                  std::all_of(own_ts.begin(), own_ts.end() - 1, [](unsigned char c) { return std::isdigit(c) || c == '-' || c == 'T' || c == ':' || c == '.'; });
@@ -691,7 +1063,9 @@ static http::Response route(http::Request &req) {
       r.body = "{\"ok\":true}";
       return r;
     }
-    Json body(cJSON_Parse(req.body.c_str()));
+    string text;
+    if (int bad = json_body(req, text)) return body_error(bad);
+    Json body(cJSON_Parse(text.c_str()));
     if (!cJSON_IsObject(body.p)) return http::error(400, "json object required");
     for (const char *key : {"text", "quote", "heading", "headingText", "type"}) if (has_str(body.p, key)) set_str(note, key, str_of(body.p, key));
     if (str_of(note, "status") == "highlight" && !str_of(note, "text").empty()) set_str(note, "status", "open");
@@ -711,42 +1085,121 @@ static http::Response route(http::Request &req) {
     return json_response(list.p);
   }
 
-  // One file of an uploaded folder, added to this folder. Existing files are never overwritten.
+  // One file of an uploaded folder, added to this folder. Existing files are
+  // never overwritten. The body goes to disk a piece at a time, under a
+  // temporary name until it is complete.
   if (p == "/api/upload" && m == "POST") {
     if (req.query.count("workspace")) return http::error(501, "opening an upload as its own workspace is not in the C++ server yet");
     Strings parts;
     auto it = req.query.find("path");
     if (it == req.query.end() || !clean_parts(it->second, parts, true)) return http::error(400, "bad path");
+    if (req.content_length > profile.max_upload) return http::error(413, "body too large");
     string abs = ROOT + "/" + join(parts);
     Json out(cJSON_CreateObject());
     if (is_file(abs) || is_dir(abs)) {
+      req.discard_body(profile.max_upload);
       cJSON_AddBoolToObject(out.p, "skipped", true);
-    } else {
-      if (!write_file(abs, req.body)) return http::error(500, "could not save");
-      cJSON_AddBoolToObject(out.p, "saved", true);
-      cJSON_AddStringToObject(out.p, "root", ROOT.c_str());
+      return json_response(out.p);
     }
+    if (!room_for(req.content_length)) return http::error(507, "storage is full");
+    make_dirs(dirname_of(abs));
+    string tmp = abs + "." + secure::random_hex(4) + ".tmp";
+    if (int bad = req.save_body(tmp, profile.max_upload, profile.piece)) return bad == 507 ? http::error(507, "storage is full") : bad == 500 ? http::error(500, "could not save") : body_error(bad);
+    if (::rename(tmp.c_str(), abs.c_str()) != 0) { ::unlink(tmp.c_str()); return http::error(500, "could not save"); }
+    used_more(req.content_length);
+    cJSON_AddBoolToObject(out.p, "saved", true);
+    cJSON_AddStringToObject(out.p, "root", ROOT.c_str());
     return json_response(out.p);
   }
 
   return http::error(404, "not found");
 }
 
+// Every answer leaves with the headers that say what a browser may do with it.
+static http::Response route(http::Request &req) {
+  http::Response r = answer(req);
+  if (r.hold) return r;
+  bool page = req.method == "GET" && (req.path == "/" || req.path == "/trust") && r.status == 200;
+  if (page) r.extra += CSP_PAGE;
+  else if (r.extra.find("Content-Security-Policy") == string::npos && r.type != "application/pdf") r.extra += CSP_DATA;
+  r.extra += COMMON_HEADERS;
+  return r;
+}
+
+static bool loopback(const string &host) { return starts_with(host, "127.") || host == "localhost"; }
+
+// On the board there is no command line: esp32/main/board.cpp brings up Wi-Fi
+// and the SD card, then calls this with the arguments it wants.
+#ifdef ESP_PLATFORM
+int hub_main(int argc, char **argv) {
+#else
 int main(int argc, char **argv) {
+#endif
   string folder = ".", host = "127.0.0.1", www, forced;
   int port = 4321;
+  bool want_tls = false, insecure = false, make_cert = false;
+  long long quota_mb = -1;
+  const char *home = std::getenv("HOME"), *state_env = std::getenv("HUB_STATE");
+  STATE = state_env ? state_env : string(home ? home : ".") + "/.config/hub";
   for (int i = 1; i < argc; i++) {
     string a = argv[i];
     if (a == "--port" && i + 1 < argc) port = std::atoi(argv[++i]);
     else if (a == "--host" && i + 1 < argc) host = argv[++i];
     else if (a == "--www" && i + 1 < argc) www = argv[++i];
     else if (a == "--profile" && i + 1 < argc) forced = argv[++i];
-    else if (a == "--help" || a == "-h") { std::printf("usage: hubd [folder] [--port 4321] [--host 127.0.0.1] [--www <folder>/hub] [--profile desktop|small|esp32]\n"); return 0; }
-    else folder = a;
+    else if (a == "--state" && i + 1 < argc) STATE = argv[++i];
+    else if (a == "--allow-host" && i + 1 < argc) extra_hosts.push_back(argv[++i]);
+    else if (a == "--quota-mb" && i + 1 < argc) quota_mb = std::atoll(argv[++i]);
+    else if (a == "--tls") want_tls = true;
+    else if (a == "--insecure-http") insecure = true;
+    else if (a == "--pair-local") pair_local = true;
+    else if (a == "--make-cert") make_cert = true;
+    else if (a == "--help" || a == "-h") {
+      std::printf("usage: hubd [folder] [--port 4321] [--host 127.0.0.1] [--www <folder>/hub] [--profile desktop|small|esp32]\n"
+                  "            [--state <dir>] [--tls] [--insecure-http] [--pair-local] [--allow-host <name>] [--quota-mb <n>]\n"
+                  "       hubd --make-cert [--state <dir>] [--allow-host <name>]\n\n"
+                  "  --state         where certificates and the list of paired devices are kept (default ~/.config/hub)\n"
+                  "  --tls           serve HTTPS. Always on when --host is not this machine only\n"
+                  "  --insecure-http serve the network without encryption anyway (not recommended)\n"
+                  "  --pair-local    ask this machine's own browser to pair too\n"
+                  "  --allow-host    another name this server may be reached by (repeatable)\n"
+                  "  --quota-mb      most the folder may hold in total; 0 for no limit\n"
+                  "  --make-cert     make or renew the certificates, print how to trust them, and stop\n");
+      return 0;
+    } else folder = a;
   }
+  make_dirs(STATE);
+  ::chmod(STATE.c_str(), 0700);
+  bind_host = host;
+  if (!secure::rng().ok) { std::fprintf(stderr, "no source of random numbers\n"); return 1; }
+
+  // Beyond this machine, everything is encrypted.
+  if (!loopback(host) && !insecure) want_tls = true;
+  static http::Tls tls;
+  if (want_tls || make_cert) {
+    secure::Certs certs;
+    string err;
+    Strings names;
+    for (const string &n : host_names()) if (n.find(':') == string::npos) names.push_back(n);
+    if (!secure::ensure_certs(STATE, names, certs, err)) { std::fprintf(stderr, "certificates: %s\n", err.c_str()); return 1; }
+    if (certs.issued || make_cert) {
+      std::printf("certificate %s for:", certs.issued ? "made" : "is current");
+      for (const string &n : names) std::printf(" %s", n.c_str());
+      std::printf("\n");
+    }
+    std::printf("To trust this hub on a device, install its authority once: %s\n  (or open http://<this address>:%d/ on the device and follow the steps)\n  fingerprint (SHA-256) %s\n", certs.ca_path.c_str(), port, certs.ca_fingerprint.c_str());
+    if (make_cert) return 0;
+    if (!tls.load(certs.cert_path, certs.key_path, err)) { std::fprintf(stderr, "TLS: %s\n", err.c_str()); return 1; }
+    tls_on = true;
+  } else if (!loopback(host)) {
+    std::printf("WARNING: serving the network without encryption. Anyone on it can read and change what is sent.\n");
+  }
+
   char resolved[4096];
   if (!::realpath(folder.c_str(), resolved) || !is_dir(resolved)) { std::fprintf(stderr, "not a folder: %s\n", folder.c_str()); return 1; }
   ROOT = resolved;
+  if (::realpath(STATE.c_str(), resolved)) STATE = resolved;
+  if (starts_with(STATE + "/", ROOT + "/")) { std::fprintf(stderr, "the state folder must not be inside the folder being served\n"); return 1; }
   // The page lives beside the server (../hub from server-cpp/), or inside the folder being served.
   if (www.empty()) www = is_file(ROOT + "/hub/index.html") ? ROOT + "/hub" : is_file("../hub/index.html") ? "../hub" : "hub";
   if (!::realpath(www.c_str(), resolved) || !is_file(string(resolved) + "/index.html")) { std::fprintf(stderr, "no index.html in %s\n", www.c_str()); return 1; }
@@ -754,9 +1207,21 @@ int main(int argc, char **argv) {
   if (port <= 0 || port > 65535) { std::fprintf(stderr, "bad port\n"); return 1; }
 
   detect_profile(forced);
+  quota_bytes = (quota_mb >= 0 ? static_cast<unsigned long long>(quota_mb) : profile.quota_mb) << 20;
+  load_devices();
   std::thread(watch_loop).detach();
-  std::printf("hubd: http://%s:%d  (reading %s)\n", host == "0.0.0.0" ? "localhost" : host.c_str(), port, ROOT.c_str());
-  std::printf("device: %s profile, %u cores, %llu MB memory; uploads up to %zu MB, folder checked every %d ms\n", profile.name, device_cores, device_memory_mb, profile.max_upload >> 20, profile.watch_ms);
+  std::printf("hubd: %s://%s:%d  (reading %s)\n", tls_on ? "https" : "http", host == "0.0.0.0" ? "localhost" : host.c_str(), port, ROOT.c_str());
+  std::printf("device: %s profile, %u cores, %llu MB memory; uploads up to %zu MB, folder checked every %d ms, %d connections at once\n", profile.name, device_cores, device_memory_mb, profile.max_upload >> 20, profile.watch_ms, profile.max_conns);
+  std::printf("%zu paired device%s%s\n", devices.size(), devices.size() == 1 ? "" : "s", pair_local ? "" : "; this machine's own browser needs no pairing");
+  // With nobody paired yet, someone has to be let in: offer a code on the terminal.
+  if (devices.empty() && (pair_local || !loopback(host))) { std::lock_guard<std::mutex> g(auth_lock); offer_code(true); }
   std::fflush(stdout);
-  return http::serve(host, port, route, [](const string &path) { return path == "/api/upload" ? profile.max_upload : MAX_JSON; });
+  http::Options opt;
+  opt.host = host;
+  opt.port = port;
+  opt.tls = tls_on ? &tls : nullptr;
+  opt.max_conns = profile.max_conns;
+  opt.keepalive_ms = profile.keepalive_ms;
+  opt.piece = profile.piece;
+  return http::serve(opt, route);
 }

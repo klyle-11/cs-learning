@@ -3,7 +3,22 @@
 //   node server.js [folder]      (default: ../data, the live workspace, which is
 //                                 not in git; first run fills it from ../sample)
 // Per-folder settings live in <folder>/hub.json, notes in <folder>/notes/notes.json.
+//
+// Who may use it (see ../server-cpp/API.md, "Security"): requests must name a host
+// this machine really has, must not come from another website, and, unless they
+// come from this machine itself, must carry the token of a paired device. Beyond
+// this machine the server only speaks HTTPS. Settings, all optional:
+//   HOST=0.0.0.0        listen on the network (default 127.0.0.1: this machine only)
+//   HUB_STATE=<dir>     certificates and paired devices (default ~/.config/hub)
+//   HUB_TLS=1           HTTPS even on this machine;  HUB_INSECURE_HTTP=1  network without HTTPS
+//   HUB_PAIR_LOCAL=1    this machine's own browser must pair too
+//   HUB_HOSTS=a,b       further names the server may be reached by
+//   HUB_QUOTA_MB=<n>    most the folder may hold in total (0: no limit)
 const http = require('http');
+const https = require('https');
+const net = require('net');
+const os = require('os');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
@@ -19,6 +34,13 @@ if (HOME === DATA && !fs.existsSync(DATA)) {
 const WORKSPACES = path.join(__dirname, 'workspaces');
 const CURRENT = path.join(WORKSPACES, '.current');
 const MAX_UPLOAD = 50 * 1024 * 1024;
+const MAX_JSON = 1024 * 1024;
+const HOST = process.env.HOST || '127.0.0.1';
+const STATE = path.resolve(process.env.HUB_STATE || path.join(os.homedir(), '.config', 'hub'));
+const PAIR_LOCAL = process.env.HUB_PAIR_LOCAL === '1';
+const QUOTA = (process.env.HUB_QUOTA_MB ? Number(process.env.HUB_QUOTA_MB) : 20480) * 1024 * 1024;
+const loopback = (h) => h.startsWith('127.') || h === 'localhost' || h === '::1';
+const USE_TLS = process.env.HUB_TLS === '1' || (!loopback(HOST) && process.env.HUB_INSECURE_HTTP !== '1');
 let ROOT, NOTES, CONFIG, watcher;
 const FRONT = 'FRONTPAGE.md';
 const PORT = process.env.PORT || 4321;
@@ -102,28 +124,130 @@ function listDocs() {
   return docs;
 }
 
-function send(res, status, body, type = 'application/json') {
-  res.writeHead(status, { 'Content-Type': withCharset(type), 'Cache-Control': 'no-store' });
-  res.end(type === 'application/json' ? JSON.stringify(body) : body);
-}
+// What each kind of answer is allowed to do once a browser has it.
+// The reader: its own scripts only, nothing inline, and it may load from and
+// talk to this server alone. So a document cannot make it run code, and
+// opening a document never contacts the internet.
+const CSP_PAGE = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; " +
+  "media-src 'self' blob:; font-src 'self'; connect-src 'self'; frame-src 'self'; worker-src 'self'; manifest-src 'self'; " +
+  "base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'";
+// A file from the folder: no scripts at all, wherever it is opened (in the
+// reader's frame or in a tab of its own), no forms, no leaving the frame, and
+// pictures, styles and fonts from this server only.
+const CSP_RAW = "sandbox allow-same-origin; default-src 'none'; img-src 'self' data: blob:; media-src 'self' data: blob:; " +
+  "style-src 'self' 'unsafe-inline'; font-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'";
+const CSP_DATA = "default-src 'none'; sandbox; frame-ancestors 'none'";
+const COMMON = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'Cross-Origin-Resource-Policy': 'same-origin', 'X-DNS-Prefetch-Control': 'off' };
+const PAGE = { 'Content-Security-Policy': CSP_PAGE, 'X-Frame-Options': 'DENY', 'Cross-Origin-Opener-Policy': 'same-origin' };
 
+function send(res, status, body, type = 'application/json', extra = {}) {
+  const data = Buffer.from(type === 'application/json' ? JSON.stringify(body) : body);
+  res.writeHead(status, { 'Content-Type': withCharset(type), 'Content-Length': data.length, 'Content-Security-Policy': CSP_DATA, ...COMMON, ...extra });
+  res.end(data);
+}
+// An error the handler answers with as it is.
+const fail = (status, message) => Object.assign(new Error(message), { status });
+
+// A JSON body of at most 1 MB. Anything that does not parse counts as empty.
 function readBody(req) {
   return new Promise((resolve, reject) => {
-    let data = '';
-    req.on('data', (c) => (data += c));
-    req.on('end', () => { try { resolve(JSON.parse(data || '{}')); } catch (e) { reject(e); } });
-  });
-}
-
-function readRaw(req, limit) {
-  return new Promise((resolve, reject) => {
+    if (Number(req.headers['content-length'] || 0) > MAX_JSON) return reject(fail(413, 'body too large'));
     const chunks = [];
     let size = 0;
-    req.on('data', (c) => { size += c.length; if (size > limit) { reject(new Error('file too large')); req.destroy(); } else chunks.push(c); });
-    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('data', (c) => { size += c.length; if (size > MAX_JSON) { reject(fail(413, 'body too large')); req.destroy(); } else chunks.push(c); });
+    req.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')); } catch { resolve({}); } });
     req.on('error', reject);
   });
 }
+// Read a body and throw it away, so the answer is not lost on a client that is still sending.
+const drain = (req) => new Promise((resolve) => { req.on('end', resolve).on('error', resolve).resume(); });
+
+// ---- who is asking: host names, paired devices ---------------------------------
+// State lives in STATE/devices.json, shared with the C++ server; only a hash of
+// each device's token is kept, so the file alone lets nobody in.
+
+// Every name this machine answers to. A request naming any other host is
+// refused: that is what stops a website from pointing its own name at this
+// address and being treated as "the same site" (DNS rebinding).
+function hostNames() {
+  const h = os.hostname().toLowerCase();
+  const names = ['localhost', '127.0.0.1', '[::1]', 'hub.local', h];
+  if (h && !h.includes('.')) names.push(h + '.local');
+  for (const list of Object.values(os.networkInterfaces())) for (const a of list || []) if (a.family === 'IPv4') names.push(a.address);
+  if (HOST !== '0.0.0.0') names.push(HOST);
+  for (const x of (process.env.HUB_HOSTS || '').split(',')) if (x.trim()) names.push(x.trim().toLowerCase());
+  return new Set(names);
+}
+let hosts = hostNames();
+function knownHost(header) {
+  const h = String(header || '').toLowerCase().replace(/:\d+$/, '');
+  if (!h) return false;
+  if (hosts.has(h)) return true;
+  hosts = hostNames(); // the address may have changed since start-up
+  return hosts.has(h);
+}
+
+const DEVICES = path.join(STATE, 'devices.json');
+const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
+const same = (a, b) => a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
+function readDevices() {
+  try { return JSON.parse(fs.readFileSync(DEVICES, 'utf8')).devices.filter((d) => d.id && d.hash); } catch { return []; }
+}
+function writeDevices(devices) {
+  fs.mkdirSync(STATE, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(DEVICES + '.tmp', JSON.stringify({ devices }, null, 2) + '\n', { mode: 0o600 });
+  fs.renameSync(DEVICES + '.tmp', DEVICES);
+}
+const pair = { code: '', until: 0, fails: 0 };
+// Offer a new pairing code for ten minutes.
+function offerCode(announce) {
+  const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O or 1/I
+  pair.code = [...crypto.randomBytes(8)].map((b) => letters[b & 31]).join('');
+  pair.until = Date.now() + 10 * 60 * 1000;
+  pair.fails = 0;
+  if (announce) console.log(`pairing code: ${pair.code.slice(0, 4)}-${pair.code.slice(4)}  (type it on the device you want to add; good for 10 minutes)`);
+  return pair.code.slice(0, 4) + '-' + pair.code.slice(4);
+}
+const isLocal = (req) => /^(::ffff:)?127\.|^::1$/.test(req.socket.remoteAddress || '');
+// The id of the paired device that sent this request: "local" for this machine
+// itself, "" for a stranger.
+function deviceOf(req) {
+  const m = /(?:^|;\s*)hub_device=([^.;]+)\.([^;]+)/.exec(req.headers.cookie || '');
+  if (m) {
+    const devices = readDevices(), d = devices.find((x) => x.id === m[1] && same(x.hash, sha256(m[2])));
+    const today = new Date().toISOString().slice(0, 10);
+    if (d) {
+      if (d.seen !== today) { d.seen = today; writeDevices(devices); } // one small write a day, not one per request
+      return d.id;
+    }
+  }
+  return isLocal(req) && !PAIR_LOCAL ? 'local' : '';
+}
+const deviceCookie = (value, tls, clear) =>
+  `hub_device=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${clear ? 0 : 31536000}${tls ? '; Secure' : ''}`;
+
+// ---- how much is stored -------------------------------------------------------------
+const usage = { bytes: 0, at: 0 };
+function usedBytes() {
+  if (Date.now() - usage.at < 3000) return usage.bytes;
+  let total = 0;
+  (function walk(dir) {
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch {}
+    for (const e of entries) {
+      const abs = path.join(dir, e.name);
+      if (e.isDirectory()) { if (abs !== __dirname) walk(abs); }
+      else if (e.isFile()) { try { total += fs.statSync(abs).size; } catch {} }
+    }
+  })(ROOT);
+  Object.assign(usage, { bytes: total, at: Date.now() });
+  return total;
+}
+function freeBytes() {
+  try { const v = fs.statfsSync(ROOT); return v.bavail * v.bsize; } catch { return Infinity; }
+}
+// Whether `more` bytes may be added: under the quota, and leaving the disk 16 MB to breathe.
+const roomFor = (more) => freeBytes() >= more + 16 * 1024 * 1024 && (!QUOTA || usedBytes() + more <= QUOTA);
 
 // A relative path from an upload, made safe: no "..", no dot-files, no absolute paths.
 function cleanRel(rel) {
@@ -168,33 +292,108 @@ function setRoot(root) {
   setRoot(ws && fs.existsSync(ws) ? ws : HOME);
 })();
 
-const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, 'http://localhost');
-  const p = url.pathname;
+// The files that make up the page. Nothing else in this folder is served.
+const ASSETS = {
+  '/app.js': 'app.js', '/local.js': 'local.js', '/vault.js': 'vault.js',
+  '/vendor/marked.js': 'node_modules/marked/lib/marked.umd.js',
+  '/vendor/highlight.js': 'node_modules/@highlightjs/cdn-assets/highlight.min.js',
+  '/vendor/purify.js': 'node_modules/dompurify/dist/purify.min.js',
+};
+const asset = (name) => fs.readFileSync(path.join(__dirname, name));
+
+async function handle(req, res) {
+  const tls = !!req.socket.encrypted;
+  let url;
+  try { url = new URL(req.url, 'http://localhost'); } catch { return send(res, 400, { error: 'bad request' }); }
+  let p;
+  try { p = decodeURIComponent(url.pathname); } catch { return send(res, 400, { error: 'bad request' }); }
+  const m = req.method;
   try {
-    // A page on another website must not be able to change anything here. Browsers
-    // put the calling site in the Origin header; if it is not this server, refuse.
-    const origin = req.headers.origin;
-    if (req.method !== 'GET' && origin && origin !== 'null' && new URL(origin).host !== req.headers.host) {
-      return send(res, 403, { error: 'requests from other sites are not allowed' });
+    if (!knownHost(req.headers.host)) return send(res, 403, { error: 'unknown host name' });
+
+    // The authority's certificate is public: a device needs it before it can trust the connection.
+    if (USE_TLS && m === 'GET') {
+      if (p === '/hub-ca.crt') return send(res, 200, fs.readFileSync(path.join(STATE, 'ca.pem')), 'application/x-x509-ca-cert');
+      if (p === '/trust') return send(res, 200, asset('trust.html'), 'text/html', PAGE);
+      if (p === '/trust.js') return send(res, 200, asset('trust.js'), 'text/javascript');
+      if (p === '/api/trust') {
+        const ca = new crypto.X509Certificate(fs.readFileSync(path.join(STATE, 'ca.pem')));
+        return send(res, 200, { fingerprint: ca.fingerprint256, encrypted: tls });
+      }
     }
-    if (req.method !== 'GET' && origin === 'null') return send(res, 403, { error: 'requests from other sites are not allowed' });
-    if (p === '/') return send(res, 200, fs.readFileSync(path.join(__dirname, 'index.html')), 'text/html');
-    if (p === '/vendor/marked.js') {
-      return send(res, 200, fs.readFileSync(path.join(__dirname, 'node_modules/marked/lib/marked.umd.js')), 'text/javascript');
+    // Someone typed http:// at a port that speaks HTTPS: send them to the trust page, or on to https://.
+    if (USE_TLS && !tls) {
+      return send(res, 308, 'This hub only speaks HTTPS.\n', 'text/plain', { Location: p === '/' ? '/trust' : 'https://' + req.headers.host + req.url, Connection: 'close' });
     }
-    if (p === '/vendor/highlight.js') {
-      return send(res, 200, fs.readFileSync(path.join(__dirname, 'node_modules/@highlightjs/cdn-assets/highlight.min.js')), 'text/javascript');
+
+    if (m === 'GET' && p === '/') return send(res, 200, asset('index.html'), 'text/html', PAGE);
+    if (m === 'GET' && ASSETS[p]) {
+      // Scripts sit beside the page (copied there for the board), or in node_modules.
+      const beside = path.join(__dirname, p.slice(1));
+      return send(res, 200, fs.existsSync(beside) ? fs.readFileSync(beside) : asset(ASSETS[p]), 'text/javascript');
+    }
+
+    // A page on another website must not be able to use what is here. Browsers
+    // say where a request comes from (Origin, Sec-Fetch-Site); if that is not
+    // this server itself, refuse.
+    const origin = req.headers.origin, site = req.headers['sec-fetch-site'];
+    if (origin && origin.replace(/^[a-z]+:\/\//i, '') !== req.headers.host) return send(res, 403, { error: 'requests from other sites are not allowed' });
+    if (origin && !/^[a-z]+:\/\//i.test(origin)) return send(res, 403, { error: 'requests from other sites are not allowed' });
+    if (site && site !== 'same-origin' && site !== 'none') return send(res, 403, { error: 'requests from other sites are not allowed' });
+
+    // Pairing: a new device shows it knows the code on offer and is given a token.
+    if (p === '/api/pair' && m === 'POST') {
+      const b = await readBody(req);
+      const code = String(typeof b.code === 'string' ? b.code : '').replace(/[^a-z0-9]/gi, '').toUpperCase();
+      if (!code) return send(res, 400, { error: 'code required' });
+      const onOffer = pair.code && Date.now() < pair.until;
+      if (!onOffer || !same(code, pair.code)) {
+        // Five wrong tries and the code is withdrawn, so it cannot be guessed at.
+        if (onOffer && ++pair.fails >= 5) { pair.code = ''; if (!readDevices().length) offerCode(true); }
+        return send(res, 403, { error: 'wrong or expired pairing code' });
+      }
+      pair.code = '';
+      const token = crypto.randomBytes(32).toString('base64url'), now = new Date().toISOString();
+      const name = String(typeof b.name === 'string' ? b.name : '').replace(/\s+/g, ' ').trim().slice(0, 60) || 'device';
+      const d = { id: crypto.randomBytes(8).toString('hex'), name, hash: sha256(token), created: now, seen: now.slice(0, 10) };
+      writeDevices([...readDevices(), d]);
+      console.log(`paired: ${d.name} (${d.id})`);
+      return send(res, 200, { device: { id: d.id, name: d.name } }, 'application/json', { 'Set-Cookie': deviceCookie(d.id + '.' + token, tls) });
+    }
+
+    const device = deviceOf(req);
+    if (!device) return send(res, 401, { error: 'pairing required' });
+
+    if (p === '/api/session' && m === 'GET') {
+      const d = readDevices().find((x) => x.id === device);
+      return send(res, 200, { device: { id: device, name: d ? d.name : 'this computer' }, local: device === 'local', tls: USE_TLS });
+    }
+    if (p === '/api/pair/code' && m === 'POST') return send(res, 200, { code: offerCode(false), minutes: 10 });
+    if (p === '/api/devices' && m === 'GET') {
+      return send(res, 200, readDevices().map((d) => ({ id: d.id, name: d.name, created: d.created, seen: d.seen, current: d.id === device })));
+    }
+    if (p.startsWith('/api/devices/') && m === 'DELETE') {
+      const id = p.slice(13), devices = readDevices();
+      if (!devices.some((d) => d.id === id)) return send(res, 404, { error: 'no such device' });
+      writeDevices(devices.filter((d) => d.id !== id));
+      return send(res, 200, { ok: true }, 'application/json', id === device ? { 'Set-Cookie': deviceCookie('', tls, true) } : {});
+    }
+    if (p === '/api/storage' && m === 'GET') {
+      const free = freeBytes();
+      return send(res, 200, { used: usedBytes(), quota: QUOTA, free: free === Infinity ? 0 : free });
     }
     // Files as they are on disk: HTML documents shown in a frame, and the
     // images, styles and scripts that they or the markdown files refer to.
     if (p.startsWith('/raw/')) {
-      const abs = path.resolve(ROOT, decodeURIComponent(p.slice(5)));
+      const abs = path.resolve(ROOT, p.slice(5));
       if (!abs.startsWith(ROOT + path.sep) || !fs.existsSync(abs) || !fs.statSync(abs).isFile()) return send(res, 404, { error: 'no such file' });
       // Sent as a stream, and in pieces when asked (Range), which is what lets a
       // browser play and seek video and read a large PDF a part at a time.
       const size = fs.statSync(abs).size;
-      const head = { 'Content-Type': withCharset(MIME[path.extname(abs).toLowerCase()] || 'text/plain'), 'Cache-Control': 'no-store', 'Accept-Ranges': 'bytes' };
+      const type = MIME[path.extname(abs).toLowerCase()] || 'text/plain';
+      const head = { 'Content-Type': withCharset(type), 'Accept-Ranges': 'bytes', ...COMMON };
+      // A browser's PDF viewer does not start inside a sandbox; a PDF cannot touch the reader anyway.
+      if (type !== 'application/pdf') head['Content-Security-Policy'] = CSP_RAW;
       const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
       if (range && (range[1] || range[2])) {
         const start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]));
@@ -208,7 +407,8 @@ const server = http.createServer(async (req, res) => {
       return fs.createReadStream(abs).pipe(res);
     }
     if (p === '/api/events') {
-      res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
+      if (clients.size >= 16) return send(res, 503, { error: 'too many open pages' });
+      res.writeHead(200, { 'Content-Type': 'text/event-stream', Connection: 'keep-alive', ...COMMON });
       res.write('\n');
       clients.add(res);
       req.on('close', () => clients.delete(res));
@@ -235,10 +435,25 @@ const server = http.createServer(async (req, res) => {
       if (!parts || (ws && !cleanName(ws))) return send(res, 400, { error: 'bad path' });
       const abs = path.join(base, ...parts);
       if (!abs.startsWith(base + path.sep)) return send(res, 400, { error: 'bad path' });
-      const data = await readRaw(req, MAX_UPLOAD);
-      if (fs.existsSync(abs)) return send(res, 200, { skipped: true });
+      const size = Number(req.headers['content-length'] || 0);
+      if (size > MAX_UPLOAD) return send(res, 413, { error: 'body too large' }, 'application/json', { Connection: 'close' });
+      if (fs.existsSync(abs)) { await drain(req); return send(res, 200, { skipped: true }); }
+      if (!roomFor(size)) return send(res, 507, { error: 'storage is full' }, 'application/json', { Connection: 'close' });
+      // The body goes to disk a piece at a time, under a temporary name until it is complete.
       fs.mkdirSync(path.dirname(abs), { recursive: true });
-      fs.writeFileSync(abs, data);
+      const tmp = `${abs}.${crypto.randomBytes(4).toString('hex')}.tmp`;
+      try {
+        await new Promise((resolve, reject) => {
+          const out = fs.createWriteStream(tmp);
+          let got = 0;
+          req.on('data', (c) => { got += c.length; if (got > MAX_UPLOAD) { req.destroy(); reject(fail(413, 'body too large')); } });
+          req.on('error', reject).on('aborted', () => reject(fail(408, 'body not received')));
+          out.on('error', reject).on('finish', resolve);
+          req.pipe(out);
+        });
+        fs.renameSync(tmp, abs);
+      } catch (e) { fs.rmSync(tmp, { force: true }); throw e; }
+      usage.bytes += size;
       return send(res, 200, { saved: true, root: base });
     }
     if (p === '/api/docs') return send(res, 200, listDocs());
@@ -290,6 +505,7 @@ const server = http.createServer(async (req, res) => {
       // and time it was given on the device. Sending the same one twice is harmless.
       const existing = readNotes().find((n) => n.id === b.id);
       if (existing) return send(res, 200, existing);
+      if (!roomFor(JSON.stringify(b).length)) return send(res, 507, { error: 'storage is full' });
       const ownId = typeof b.id === 'string' && /^[A-Za-z0-9_-]{6,40}$/.test(b.id);
       const ownTs = typeof b.ts === 'string' && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?Z$/.test(b.ts);
       const note = {
@@ -308,10 +524,10 @@ const server = http.createServer(async (req, res) => {
       writeNotes(notes);
       return send(res, 200, note);
     }
-    const m = p.match(/^\/api\/notes\/([\w-]+)$/);
-    if (m) {
+    const one = p.match(/^\/api\/notes\/([\w-]+)$/);
+    if (one) {
       const notes = readNotes();
-      const i = notes.findIndex((n) => n.id === m[1]);
+      const i = notes.findIndex((n) => n.id === one[1]);
       if (i < 0) return send(res, 404, { error: 'no such note' });
       if (req.method === 'PUT') {
         const b = await readBody(req);
@@ -328,8 +544,55 @@ const server = http.createServer(async (req, res) => {
     }
     send(res, 404, { error: 'not found' });
   } catch (e) {
-    send(res, 500, { error: String(e.message || e) });
+    if (res.headersSent) return res.destroy();
+    send(res, e.status || 500, { error: e.status ? e.message : 'server error' }, 'application/json', { Connection: 'close' });
   }
-});
+}
 
-server.listen(PORT, () => console.log(`${readConfig().title}: http://localhost:${PORT}  (reading ${ROOT})`));
+// A request that is slow to arrive or never finishes is dropped, and only so
+// many connections are served at once.
+function tune(server) {
+  server.headersTimeout = 15000;
+  server.requestTimeout = 30 * 60 * 1000;
+  server.keepAliveTimeout = 5000;
+  server.maxConnections = 64;
+  return server;
+}
+let server;
+if (USE_TLS) {
+  // The certificates are made by the C++ server, which carries the code for it (the board needs it too).
+  let cert, key;
+  try { cert = fs.readFileSync(path.join(STATE, 'cert.pem')); key = fs.readFileSync(path.join(STATE, 'key.pem')); }
+  catch { console.error(`No certificate in ${STATE}. Make one with:  server-cpp/hubd --make-cert\n(or set HUB_INSECURE_HTTP=1 to serve the network without encryption, which is not recommended)`); process.exit(1); }
+  const names = new crypto.X509Certificate(cert).subjectAltName || '';
+  const missing = [...hosts].filter((h) => h !== '[::1]' && !names.includes(h));
+  if (missing.length) console.log(`The certificate does not cover ${missing.join(', ')}. Renew it with:  server-cpp/hubd --make-cert`);
+  const secure = tune(https.createServer({ cert, key, minVersion: 'TLSv1.2' }, handle)), plain = tune(http.createServer(handle));
+  // One port for both: TLS records start with byte 22. Anything else is
+  // someone who typed http://, who is answered in plain text and redirected.
+  server = net.createServer((socket) => {
+    socket.setTimeout(10000, () => socket.destroy());
+    socket.on('error', () => {});
+    socket.once('data', (first) => {
+      socket.pause();
+      socket.setTimeout(0);
+      socket.unshift(first);
+      (first[0] === 22 ? secure : plain).emit('connection', socket);
+      process.nextTick(() => socket.resume());
+    });
+  });
+  server.maxConnections = 64;
+  console.log(`To trust this hub on a device, open http://<this address>:${PORT}/ on it and follow the steps.`);
+} else {
+  server = tune(http.createServer(handle));
+  if (!loopback(HOST)) console.log('WARNING: serving the network without encryption. Anyone on it can read and change what is sent.');
+}
+if (path.resolve(STATE).startsWith(HOME + path.sep)) { console.error('The state folder must not be inside the folder being served.'); process.exit(1); }
+
+server.listen(PORT, HOST, () => {
+  console.log(`${readConfig().title}: ${USE_TLS ? 'https' : 'http'}://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}  (reading ${ROOT})`);
+  const n = readDevices().length;
+  console.log(`${n} paired device${n === 1 ? '' : 's'}${PAIR_LOCAL ? '' : "; this machine's own browser needs no pairing"}`);
+  // With nobody paired yet, someone has to be let in: offer a code on the terminal.
+  if (!n && (PAIR_LOCAL || !loopback(HOST))) offerCode(true);
+});

@@ -1,0 +1,11 @@
+menu "Hub"
+    config HUB_WIFI_SSID
+        string "Wi-Fi network name"
+        default ""
+    config HUB_WIFI_PASSWORD
+        string "Wi-Fi password"
+        default ""
+    config HUB_PORT
+        int "Port the hub listens on"
+        default 443
+endmenu

@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trust this hub</title>
+<style>
+  body { margin: 0; background: #fdfcf7; color: #1d1b16; font: 17px/1.55 "Helvetica Neue", Helvetica, Arial, sans-serif; }
+  main { max-width: 34em; margin: 0 auto; padding: 24px 18px 60px; }
+  h1 { font-size: 24px; margin: 0 0 6px; }
+  h2 { font-size: 17px; margin: 26px 0 6px; }
+  p { margin: 0 0 12px; }
+  ol { padding-left: 1.3em; margin: 0 0 12px; }
+  li { margin-bottom: 6px; }
+  .state { padding: 10px 12px; border: 1px solid #ddd8ca; border-left: 4px solid #8c2f1b; background: #f4f1e8; }
+  .state.ok { border-left-color: #3f8f4f; }
+  .btn { display: inline-block; padding: 10px 18px; background: #1d1b16; color: #fdfcf7; text-decoration: none; }
+  code { font: 13px/1.5 Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+  details { border-top: 1px solid #ddd8ca; padding: 8px 0; }
+  summary { cursor: pointer; font-weight: 600; }
+  small { color: #6f6a5f; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Trust this hub</h1>
+  <p id="state" class="state">Checking how this page reached you…</p>
+
+  <p>The hub encrypts everything it sends. To do that it shows your device a certificate, and your device has never met the hub, so the browser warns you. You fix that once per device by installing the hub's own <b>certificate authority</b>: a small file that says "certificates signed by this hub are genuine".</p>
+  <p><small>It lets this device recognise this hub and nothing else. It is public, not a secret; the matching private key never leaves the hub.</small></p>
+
+  <h2>1. Check it is the right hub</h2>
+  <p>The hub printed a fingerprint when it started (the board shows it on its screen). It must match this one:</p>
+  <p><code id="print">…</code></p>
+
+  <h2>2. Download the authority</h2>
+  <p><a class="btn" href="/hub-ca.crt" download="hub-ca.crt">Download hub-ca.crt</a></p>
+
+  <h2>3. Install it</h2>
+  <div id="steps">
+    <details data-os="ios"><summary>iPhone and iPad</summary><ol>
+      <li>Download it in Safari and allow the profile.</li>
+      <li>Settings → General → VPN &amp; Device Management → the "Hub local authority" profile → Install.</li>
+      <li>Settings → General → About → Certificate Trust Settings → switch on "Hub local authority".</li>
+    </ol></details>
+    <details data-os="android"><summary>Android</summary><ol>
+      <li>Settings → Security (or "Security &amp; privacy") → More settings → Encryption &amp; credentials → Install a certificate → CA certificate.</li>
+      <li>Choose "Install anyway", then pick hub-ca.crt from Downloads.</li>
+    </ol></details>
+    <details data-os="mac"><summary>Mac</summary><ol>
+      <li>Open the downloaded file; Keychain Access adds it to the login keychain.</li>
+      <li>In Keychain Access, double-click "Hub local authority" → Trust → "When using this certificate": Always Trust.</li>
+      <li>Firefox keeps its own list: Settings → Privacy &amp; Security → Certificates → View Certificates → Authorities → Import.</li>
+    </ol></details>
+    <details data-os="windows"><summary>Windows</summary><ol>
+      <li>Open the downloaded file → Install Certificate → Current User.</li>
+      <li>"Place all certificates in the following store" → Trusted Root Certification Authorities → Finish.</li>
+    </ol></details>
+    <details data-os="linux"><summary>Linux</summary><ol>
+      <li>Chrome: Settings → Privacy and security → Security → Manage certificates → Authorities → Import.</li>
+      <li>Firefox: Settings → Privacy &amp; Security → Certificates → View Certificates → Authorities → Import.</li>
+    </ol></details>
+  </div>
+
+  <h2>4. Open the reader</h2>
+  <p><a class="btn" id="open" href="/">Open the reader over HTTPS</a></p>
+  <p>If it opens with no warning, this device trusts the hub and you are done. If the browser still warns, the authority is not installed yet (on iPhone, step 3's last line is the one most often missed); close and reopen the browser after installing.</p>
+  <p><small>Next the reader asks for a pairing code, which is a separate step: the certificate proves the hub to your device, the code proves your device to the hub.</small></p>
+</main>
+<script src="/trust.js"></script>
+</body>
+</html>
