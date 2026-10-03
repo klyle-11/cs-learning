@@ -257,6 +257,25 @@
   .type.cur span { font-weight: 600; }
   #types > button { margin-top: 6px; border: 0; padding: 0; color: var(--accent); font-size: 12px; }
   .editFront { float: right; margin-top: 8px; }
+  /* front page: what is in here, by kind */
+  .browse { margin-top: 1.6em; font-family: var(--head); }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+  .tile { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 14px 8px; border: 1px solid var(--rule); background: none; font: 14px var(--head); color: var(--ink); }
+  .tile svg { width: 34px; height: 34px; color: var(--muted); }
+  .tile small { color: var(--muted); }
+  .tile[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 -3px 0 var(--accent); }
+  .tile[aria-pressed="true"] svg { color: var(--accent); }
+  .tile:disabled { opacity: .45; cursor: default; }
+  .listing { margin-top: 14px; font-size: 14.5px; }
+  .listing h5 { margin: 16px 0 4px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 400; }
+  .listing .item { display: flex; gap: 8px; align-items: baseline; padding: 4px 2px; border-top: 1px solid var(--rule); cursor: pointer; }
+  .listing .item span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .listing .item small { color: var(--muted); }
+  .thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
+  .thumb { display: block; padding: 0; border: 1px solid var(--rule); background: var(--shade); aspect-ratio: 1; overflow: hidden; position: relative; }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .thumb b { position: absolute; left: 0; right: 0; bottom: 0; padding: 3px 5px; background: color-mix(in srgb, var(--paper) 88%, transparent); font: 11px var(--head); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+  .thumb i { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font: 600 12px var(--head); color: var(--muted); font-style: normal; }
   .frontEditor { max-width: 720px; margin: 0 auto; padding: 16px 0; }
   .frontEditor textarea { width: 100%; min-height: 55vh; padding: 12px; border: 1px solid var(--rule); background: var(--field); font: 14px/1.5 Menlo, Consolas, monospace; }
   .frontEditor button { margin: 8px 8px 0 0; padding: 4px 12px; }
@@ -404,6 +423,9 @@ const isImage = (path) => /\.(png|jpe?g|gif|webp|svg)$/i.test(path);
 const isVideo = (path) => /\.(mp4|m4v|mov|webm|ogv)$/i.test(path);
 const isAudio = (path) => /\.(mp3|m4a|wav|ogg)$/i.test(path);
 const isMedia = (path) => isImage(path) || isVideo(path) || isAudio(path);
+// A front page: the workspace's own, or one inside a folder.
+const isFront = (path) => !!path && (path === 'FRONTPAGE.md' || path.endsWith('/FRONTPAGE.md'));
+const folderOf = (path) => path.split('/').slice(0, -1).join('/');
 const rawUrl = (path) => '/raw/' + path.split('/').map(encodeURIComponent).join('/');
 const activeDoc = () => state.panes[state.active]?.active || null;
 const types = () => config.highlights || [];
@@ -587,11 +609,27 @@ function offerUpload(files) {
   const ok = files.filter(({ rel, file }) => !rel.split('/').some((x) => x.startsWith('.') || x === 'node_modules') && file.size <= 50 * 1024 * 1024);
   box.hidden = false;
   box.replaceChildren(el('p', '', `“${folder}”: ${ok.length} file${ok.length === 1 ? '' : 's'}` + (ok.length < files.length ? ` (${files.length - ok.length} hidden or oversized files left out)` : '')));
+  // Every folder gets a front page. Use one it already has, pick one of its
+  // top-level markdown files, or have one made.
+  const tops = ok.filter(({ rel }) => rel.split('/').length === 2 && /\.md$/i.test(rel));
+  const own = tops.find(({ rel }) => rel.endsWith('/FRONTPAGE.md'));
+  const pick = el('select');
+  pick.title = 'The front page for this folder';
+  if (own) pick.append(new Option('Front page: use its FRONTPAGE.md', '-'));
+  else {
+    pick.append(new Option('Front page: make a new one', ''));
+    for (const { rel } of tops) pick.append(new Option('Front page: copy ' + rel.split('/')[1], rel));
+    const readme = tops.find(({ rel }) => /\/readme\.md$/i.test(rel));
+    if (readme) pick.value = readme.rel;
+  }
+  pick.style.cssText = 'width: 100%; margin-bottom: 4px;';
+  const front = () => (pick.value === '-' ? null : { from: ok.find((f) => f.rel === pick.value)?.file || null });
   const add = el('button', '', `Add to this workspace, as the folder “${folder}”`);
-  add.onclick = () => runUpload(ok, null, folder);
+  add.onclick = () => runUpload(ok, null, folder, front());
   const fresh = el('button', '', 'Open as its own workspace, in place of this one');
   fresh.title = 'Nothing is deleted: the current workspace stays on disk and in the workspace menu';
-  fresh.onclick = () => runUpload(ok, folder, folder);
+  fresh.onclick = () => runUpload(ok, folder, folder, front());
+  box.append(pick);
   const cancel = el('button', '', 'Cancel');
   cancel.onclick = () => { box.hidden = true; };
   box.append(add, fresh, cancel);
@@ -600,7 +638,7 @@ function offerUpload(files) {
 
 // Send the files one at a time. `workspace` set: they become a workspace of
 // their own (the top folder name is dropped); otherwise they join this one.
-async function runUpload(files, workspace, folder) {
+async function runUpload(files, workspace, folder, front) {
   const box = $('upload'), line = el('p');
   box.replaceChildren(line);
   let saved = 0, skipped = 0, failed = 0, root = '';
@@ -617,11 +655,17 @@ async function runUpload(files, workspace, folder) {
   const done = el('button', '', 'OK');
   done.onclick = () => { box.hidden = true; };
   box.append(done);
+  // The folder's front page: a copy of the chosen file, or a new one with the
+  // folder's name as its title. Never replaces one that is already there.
+  const frontText = async () => (front.from ? await front.from.text() : `# ${folder}\n\nWhat this folder is for. Press "edit front page" to change this.\n`);
   if (workspace && root) {
     await api('/api/workspace', 'POST', { root });
+    if (front && !(await api('/api/config')).front) await api('/api/front', 'PUT', { markdown: await frontText() });
     location.href = '/';
   } else {
     await loadDocs();
+    if (front && !docOf(folder + '/FRONTPAGE.md')) { await api('/api/front', 'PUT', { markdown: await frontText(), folder }); await loadDocs(); }
+    if (docOf(folder + '/FRONTPAGE.md')) openDoc(folder + '/FRONTPAGE.md');
     done.focus();
   }
 }
@@ -744,7 +788,7 @@ async function rememberDoc(path, text) {
 }
 async function keepCopy(path, quiet) {
   try {
-    const r = await call(isHtml(path) ? rawUrl(path) : '/api/doc?path=' + encodeURIComponent(path));
+    const r = await call(isHtml(path) || isAudio(path) ? rawUrl(path) : '/api/doc?path=' + encodeURIComponent(path));
     if (r.ok) {
       const body = isAudio(path) ? { blob: await r.blob() } : { text: await r.text() };
       await idb.put('docs', { key: keyOf(path), root: config.root, path, ...body, ts: Date.now() });
@@ -871,6 +915,9 @@ function renderTree() {
   const front = docs.find((d) => d.front);
   if (front) treeEl.append(fileRow(front, 'Front page'));
   (function draw(node, parent, prefix) {
+    // A folder's own front page comes first, under that name.
+    const fp = prefix ? node.files.find((f) => isFront(f.path)) : null;
+    if (fp) parent.append(fileRow(fp, 'Front page'));
     for (const [name, sub] of Object.entries(node.dirs)) {
       const det = el('details');
       det.open = !state.closed.includes(prefix + name);
@@ -885,7 +932,7 @@ function renderTree() {
       draw(sub, kids, prefix + name + '/');
       parent.append(det);
     }
-    for (const f of node.files) parent.append(fileRow(f));
+    for (const f of node.files) if (f !== fp) parent.append(fileRow(f));
   })(root, treeEl, '');
   treeEl.scrollTop = y;
 }
@@ -1021,7 +1068,7 @@ function renderTabs(pane) {
     tab.setAttribute('role', 'button');
     tab.title = path + (path === p.preview ? '\n(double-click to keep open)' : '');
     tab.ondblclick = () => { if (p.preview === path) { p.preview = null; renderTabs(pane); save(); } };
-    tab.append(el('span', '', d ? (d.front ? 'Front page' : d.title) : path));
+    tab.append(el('span', '', d ? (d.front ? 'Front page' : isFront(path) ? d.title + ' (front page)' : d.title) : path));
     const x = el('button', '', '×');
     x.title = 'Close';
     x.onclick = (e) => { e.stopPropagation(); closeTab(pane, path); };
@@ -1214,9 +1261,10 @@ async function showDoc(pane, hash, keepScroll) {
   }
   colourCode(article);
   hideAnswers(article);
-  if (path === config.front) {
+  if (isFront(path)) appendBrowse(article, pane, folderOf(path));
+  if (isFront(path)) {
     const b = el('button', 'editFront', 'edit front page');
-    b.onclick = () => editFront(pane, md);
+    b.onclick = () => editFront(pane, md, folderOf(path));
     article.prepend(b);
   }
   highlightAll(article, path);
@@ -1323,10 +1371,16 @@ function renderPlayers() {
   const name = music.path ? music.path.split('/').pop() : 'Nothing playing', dir = music.path ? music.path.split('/').slice(0, -1).join(' / ') || 'top level' : '';
   for (const box of document.querySelectorAll('.player')) {
     box.replaceChildren(el('div', 'now', name), el('div', 'where', dir), transport(true));
+    // One list of everything, unless "group by folder" is chosen.
+    const grouped = !!state.grouped;
+    const mode = el('button', '', grouped ? 'show all together' : 'group by folder');
+    mode.style.cssText = 'border: 0; padding: 0; color: var(--accent); text-decoration: underline; margin: 6px 0;';
+    mode.onclick = () => { state.grouped = !grouped; save(); renderPlayers(); };
+    box.append(mode);
     let group = null;
     for (const t of tracks()) {
       const folder = t.path.split('/').slice(0, -1).join(' / ') || 'top level';
-      if (folder !== group) { group = folder; box.append(el('h5', '', folder)); }
+      if (grouped && folder !== group) { group = folder; box.append(el('h5', '', folder)); }
       const here = kept.has(t.path), ok = playable(t.path);
       const row = el('div', 'track' + (t.path === music.path ? ' cur' : '') + (ok ? '' : ' gone'));
       row.tabIndex = 0;
@@ -1335,7 +1389,9 @@ function renderPlayers() {
       st.title = here ? 'On this device. Press to remove the copy.' : 'On the server only. Press to keep a copy on this device.';
       st.setAttribute('aria-label', st.title);
       st.onclick = (e) => { e.stopPropagation(); if (here) dropCopy(t.path); else keepCopy(t.path); };
-      row.append(st, el('span', '', t.path.split('/').pop()), el('small', '', here ? 'on this device' : ok ? 'server only' : 'not available offline'));
+      row.append(st, el('span', '', t.path.split('/').pop()));
+      if (!grouped) row.append(el('small', '', folder));
+      row.append(el('small', '', here ? 'on this device' : ok ? 'server only' : 'not available offline'));
       row.onclick = () => ok && playTrack(t.path);
       box.append(row);
     }
@@ -1422,14 +1478,106 @@ function hideAnswers(root) {
   }
 }
 
+// Under a front page's description: a row of tiles, one per kind of file in
+// that folder (the whole workspace for the main front page). Pressing a tile
+// lists what is there; pressing it again closes the list.
+const ICONS = {
+  all: '<path d="M3 4h7v7H3zM14 4h7v7h-7zM3 15h7v7H3zM14 15h7v7h-7z"/>',
+  docs: '<path d="M6 2h9l5 5v15H6zM15 2v5h5M9 12h8M9 16h8M9 8h3"/>',
+  media: '<path d="M3 4h18v16H3zM3 16l5-5 4 4 3-3 6 6"/><circle cx="16" cy="9" r="1.6"/>',
+  music: '<path d="M9 18V5l11-2v13"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/>',
+};
+const KINDS = [
+  ['all', 'Everything', () => true],
+  ['docs', 'Documents', (p) => !isMedia(p)],
+  ['media', 'Pictures and video', (p) => isImage(p) || isVideo(p)],
+  ['music', 'Music', (p) => isAudio(p)],
+];
+function appendBrowse(article, pane, folder) {
+  const inside = docs.filter((d) => !isFront(d.path) && (!folder || d.path.startsWith(folder + '/')));
+  const box = el('div', 'browse'), tiles = el('div', 'tiles'), listing = el('div', 'listing');
+  const key = 'browse:' + folder;
+  const draw = () => {
+    const open = state.browse?.[key];
+    for (const t of tiles.children) t.setAttribute('aria-pressed', t.dataset.kind === open);
+    listing.replaceChildren();
+    const kind = KINDS.find((k) => k[0] === open);
+    if (!kind) return;
+    const files = inside.filter((d) => kind[2](d.path));
+    // Everything is listed together unless "group by folder" is chosen.
+    const grouped = !!state.grouped;
+    const mode = el('button', '', grouped ? 'show all together' : 'group by folder');
+    mode.style.cssText = 'border: 0; padding: 0; color: var(--accent); text-decoration: underline;';
+    mode.onclick = () => { state.grouped = !grouped; save(); draw(); renderPlayers(); };
+    listing.append(mode);
+    const whereOf = (d) => (folderOf(d.path).slice(folder ? folder.length + 1 : 0) || 'here').replace(/\//g, ' / ');
+    const section = (title, items, build) => { if (items.length) { listing.append(el('h5', '', title)); build(items); } };
+    const rows = (items) => {
+      let group = null;
+      for (const d of items) {
+        const where = whereOf(d);
+        if (grouped && where !== group) { group = where; listing.append(el('h5', '', where)); }
+        const row = el('div', 'item');
+        row.tabIndex = 0;
+        row.setAttribute('role', 'button');
+        row.append(el('span', '', isMedia(d.path) ? d.path.split('/').pop() : d.title));
+        if (!grouped && where !== 'here') row.append(el('small', '', where));
+        if (kept.has(d.path)) row.append(el('small', '', 'on this device'));
+        row.onclick = (e) => openDoc(d.path, { pane, side: e.metaKey || e.ctrlKey || e.altKey });
+        listing.append(row);
+      }
+    };
+    const thumbs = (items) => {
+      if (grouped) {
+        const by = new Map();
+        for (const d of items) by.set(whereOf(d), [...(by.get(whereOf(d)) || []), d]);
+        for (const [where, group] of by) { listing.append(el('h5', '', where)); thumbGrid(group); }
+      } else thumbGrid(items);
+    };
+    const thumbGrid = (items) => {
+      const grid = el('div', 'thumbs');
+      for (const d of items) {
+        const t = el('button', 'thumb');
+        t.title = d.path;
+        if (isImage(d.path)) { const img = el('img'); img.loading = 'lazy'; img.alt = ''; img.src = rawUrl(d.path); t.append(img); }
+        else t.append(el('i', '', 'video'));
+        t.append(el('b', '', d.path.split('/').pop()));
+        t.onclick = (e) => openDoc(d.path, { pane, side: e.metaKey || e.ctrlKey || e.altKey });
+        grid.append(t);
+      }
+      listing.append(grid);
+    };
+    if (open === 'all') {
+      section('Pictures and video', files.filter((d) => isImage(d.path) || isVideo(d.path)), thumbs);
+      section('Music', files.filter((d) => isAudio(d.path)), rows);
+      section('Documents', files.filter((d) => !isMedia(d.path)), rows);
+    } else if (open === 'media') thumbs(files);
+    else rows(files);
+    if (!files.length) listing.append(el('p', 'empty', 'Nothing of this kind here yet.'));
+  };
+  for (const [id, label, test] of KINDS) {
+    const n = inside.filter((d) => test(d.path)).length;
+    const t = el('button', 'tile');
+    t.dataset.kind = id;
+    t.disabled = !n;
+    t.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true">${ICONS[id]}</svg>`;
+    t.append(el('span', '', label), el('small', '', String(n)));
+    t.onclick = () => { state.browse = { ...(state.browse || {}), [key]: state.browse?.[key] === id ? null : id }; save(); draw(); };
+    tiles.append(t);
+  }
+  box.append(tiles, listing);
+  article.append(box);
+  draw();
+}
+
 // The front page can be edited in place; it is saved back to FRONTPAGE.md.
-function editFront(pane, md) {
+function editFront(pane, md, folder = '') {
   editing = true;
   const box = el('div', 'frontEditor'), ta = el('textarea');
   ta.value = md;
   const done = async () => { editing = false; await showDoc(pane); chrome(); };
   const saveBtn = el('button', '', 'Save');
-  saveBtn.onclick = async () => { await api('/api/front', 'PUT', { markdown: ta.value }); await loadConfig(); done(); };
+  saveBtn.onclick = async () => { await api('/api/front', 'PUT', { markdown: ta.value, folder }); await loadConfig(); await loadDocs(); done(); };
   const cancel = el('button', '', 'Cancel');
   cancel.onclick = done;
   box.append(el('p', '', 'Markdown. The first "# Heading" is the title; everything after it is the description.'), ta, saveBtn, cancel);

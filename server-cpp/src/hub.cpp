@@ -633,8 +633,15 @@ static http::Response route(http::Request &req) {
     if (!has_str(body.p, "markdown")) return http::error(400, "markdown required");
     string md = str_of(body.p, "markdown");
     if (md.empty() || md.back() != '\n') md += '\n';
+    // With "folder", it is that folder's own front page; without, the workspace's.
+    string dir = ROOT, folder = str_of(body.p, "folder");
+    if (!folder.empty()) {
+      Strings parts;
+      if (!clean_parts(folder, parts, true) || !is_dir(ROOT + "/" + join(parts))) return http::error(400, "no such folder");
+      dir = ROOT + "/" + join(parts);
+    }
     std::lock_guard<std::mutex> g(store_lock);
-    if (!write_file(ROOT + "/" + FRONT, md)) return http::error(500, "could not save");
+    if (!write_file(dir + "/" + FRONT, md)) return http::error(500, "could not save");
     Json cfg(read_config());
     return json_response(cfg.p);
   }

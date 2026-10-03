@@ -271,7 +271,14 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/front' && req.method === 'PUT') {
       const b = await readBody(req);
       if (typeof b.markdown !== 'string') return send(res, 400, { error: 'markdown required' });
-      fs.writeFileSync(path.join(ROOT, FRONT), b.markdown.endsWith('\n') ? b.markdown : b.markdown + '\n');
+      // With "folder", it is that folder's own front page; without, the workspace's.
+      let dir = ROOT;
+      if (typeof b.folder === 'string' && b.folder !== '') {
+        const parts = cleanRel(b.folder);
+        dir = parts && path.join(ROOT, ...parts);
+        if (!dir || !fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return send(res, 400, { error: 'no such folder' });
+      }
+      fs.writeFileSync(path.join(dir, FRONT), b.markdown.endsWith('\n') ? b.markdown : b.markdown + '\n');
       return send(res, 200, readConfig());
     }
     if (p === '/api/notes' && req.method === 'GET') return send(res, 200, readNotes());

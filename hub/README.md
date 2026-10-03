@@ -19,6 +19,9 @@ PORT=4400 npm start                       # run two environments at once
 - **On a phone** (screens under 760px): one document at a time. "☰ Files" and "Notes" in the top bar slide the sidebar and the notes in over the page; tap outside to close. The "+" on a file row opens it as an extra tab beside what is already open. The note box stays at the bottom at the height you leave it; drag the small handle above it to resize, or press the handle to switch between small and about a quarter of the screen. Selecting text shows the highlight menu just below the selection.
 - **Contents dial**: whenever the sidebar is hidden (always on a phone), a small icon sits at the top right of the page. It opens a short scrolling list of the document's headings in tiny text; the one at the centre is selected and drawn large. Scroll to turn the dial, tap the selected heading to jump to it, or tap another heading to bring it to the centre. Tap the icon, outside the list, or press Escape to close.
 - **HTML pages** open in a frame, looking as their author made them. Headings feed the outline and the contents dial, and selecting text gives the same highlight menu and notes as markdown, with highlights drawn in the page. A page's own scripts are off until you press "scripts: off" in the tab bar for that file (remembered per file); turn them on only for pages you trust, since a script can use the hub's API.
+- **Pictures and video** appear in the file list and open in a viewer. A picture fits the pane; click it, or press "full size", to see it at its real size, and "open in new tab" hands it to the browser. A picture inside a document opens in the viewer when clicked.
+- **Music**: any sound file opens the player, whose playlist is every sound file in the folder grouped by where it lives. "previous" restarts the track, and goes to the one before if pressed again; music keeps playing while you read, with small controls in the sidebar. On a phone, volume is the device's own.
+- **Without the server**: the box at the top of the sidebar says whether the server is in reach. Documents you open are copied to this device (● in the file list; ○ means server only; press the mark to keep or remove a copy, or "keep all"). If the server goes away you can keep reading those, and notes and highlights you make wait in a queue and are sent when it returns. "add files…" (or dragging files onto the sidebar) puts files in `inbox/`; added while disconnected, they show ↑ until sent. The page must already be open: starting it with the server off needs HTTPS and is not built yet.
 - **Theme and font**: the menu and button under the title. Themes are Plain, Selenized Light, Pale Lime, Pale Sky, Eva Dark and Triple-M; each is a block of colour tokens at the top of `index.html`.
 - **Outline** (left, below the files): headings of the document that has focus; click to jump.
 - **Highlighting**: select text and a small menu appears. Click a colour to highlight (that colour stays in use until you pick another), or "note" to highlight and write about it. Click an existing highlight to change its type, annotate it or remove it.
@@ -48,7 +51,13 @@ Only `FRONTPAGE.md`, `hub.json` and `notes/` are fixed names. Every markdown and
 
 ### FRONTPAGE.md
 
-Optional. Shown when the hub opens and whenever you close a document. Editable in the reader with the "edit front page" button (the only file the reader writes besides notes). Its first `# Heading` is the title in the sidebar and browser tab (renaming the title in the sidebar rewrites that line); everything after it is the description. A list of every document, with note counts, is added underneath automatically.
+Optional. The one at the top of the workspace is shown when the hub opens and whenever you close the last document. Its first `# Heading` is the title in the sidebar and browser tab (renaming the title in the sidebar rewrites that line); everything after it is the description.
+
+Any folder can have its own `FRONTPAGE.md` as well. It appears first in that folder in the file list, as "Front page". Uploading a folder offers to use the one it has, copy one of its markdown files, or make a new one.
+
+Under the description, every front page shows a row of tiles (Everything, Documents, Pictures and video, Music) counting what is in that folder; pressing one lists it. Lists show everything together with each item's folder beside it; "group by folder" splits them up.
+
+All front pages are editable in the reader with "edit front page". They are the only documents the reader writes.
 
 ### hub.json
 

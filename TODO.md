@@ -1,26 +1,79 @@
 # Hub — to do
 
-## Current plan, in order
+## From the review (`REVIEW.md`), in order
+
+The review found the reader is not private yet. This order replaces the old one where they differ.
+
+1. [ ] Retire the Node server: workspaces and streamed files in C++, then delete `hub/server.js`
+2. [ ] Split `hub/index.html` into modules; commit a browser test suite
+3. [ ] Content cannot act: sanitise markdown, Content-Security-Policy on the reader, serve `/raw/` sandboxed, block loading from the internet
+4. [ ] The server knows who is asking: allowed host names, device pairing and tokens, storage quota; body cap in Node, catch-all and connection limits in C++, outbox keeps changes the server refused
+5. [ ] Encrypted connection: TLS with a trust step in the interface; then the service worker
+6. [ ] Encrypted copies on the device
+7. [ ] Decide: devices encrypt before upload (the board only holds ciphertext), or the board encrypts the card itself
+8. [ ] Performance pass for the board: index file, notes per document, incremental rendering
+
+## Annotations that link (after review steps 1 to 3)
+
+- [ ] A note can refer, inline, to another document or file, to a heading in it, and to another note or highlight. Suggested form: `[[path/to/file.md]]`, `[[path/to/file.md#heading]]`, `[[note:<id>]]`; shown as a link that opens the target (a note link opens its document and selects that highlight)
+- [ ] Typing `[[` in the note box offers documents and recent highlights to pick from
+- [ ] Each note shows what refers to it ("mentioned in")
+- [ ] Notes on pictures, video and sound: already possible as a note on the whole file; show them beside the viewer and the player
+- [ ] Notes at a moment in a video or track: one extra field, the time in seconds (and optionally an end time). Pressing the note seeks to it; notes light up as playback passes them. Cheap to store and to draw
+- [ ] Notes on a region of a picture (a rectangle), later
+- Depends on: note ids that never change (done: ids are made on the device), sanitised note text (review step 3), and a position as well as a quote for highlights (review, data model)
+
+## Earlier plan, in order
 
 **0. Restructure (done, except the last item)**
 - [x] Tracked starter content lives in `sample/`; the live workspace is `data/`, which git ignores. Notes, highlights, uploads and edits all happen in `data/`
 - [x] The Node server reads `data/` by default and fills it from `sample/` on first run
 - [x] Uploaded files and notes that were in git moved to `data/` and are no longer tracked
-- [ ] Remove those files from git history as well (needs the restructure committed first; rewrites history, so GitHub needs a force-push afterwards)
+- [x] Those files removed from git history on this machine (backup of the old history: `../cs-learning-before-history-rewrite.bundle`)
+- [ ] Force-push `main` to GitHub so the old history there is replaced, and push `c-server` (not done: it overwrites what is on GitHub)
 
 **1. Media and partial files**
 - [x] Both servers list pictures, video and sound, know their types, and send part of a file on request (HTTP Range), which video playback and large PDFs need
-- [ ] Viewer in the reader for images and video: smooth, fits the pane, zoom to full size, button to open in a new tab / the default browser
-- [ ] Relative `<video>` and `<audio>` paths inside markdown load from storage, as images already do
+- [x] Picture viewer: fits the pane, click or button for full size with the clicked spot held in place, "open in new tab"
+- [x] Video viewer with a full-screen button; sound files open in the music player
+- [x] Clicking a picture inside a markdown document opens it in the viewer
+- [x] Relative `<video>` and `<audio>` paths inside markdown load from storage, as images already do
+- [ ] Try a real video file (only partial-file sending was tested, not playback)
+- [ ] Pinch-zoom and drag-to-pan in the picture viewer on a phone
 
-**2. Working without the board (before HTTPS)**
+**1b. Music player**
+- [x] One player for the whole reader: music keeps playing while you read; small controls sit in the sidebar
+- [x] Playlist of every sound file in the folder, grouped by folder and sub-folder, each marked on this device / server only
+- [x] Previous (first press restarts the track, second goes back), play / pause, next; moves on at the end of a track
+- [x] Volume slider on a computer; on a phone the device's own volume buttons are used
+- [x] A track kept on the device plays with the server out of reach; tracks not kept are marked unavailable
+- [x] Lock-screen / headset next and previous (media session), untested on a phone
+- [ ] Try real mp3 files (tested with generated .wav tones)
+- [ ] Shuffle and repeat; remember the last track and position
+
+**1c. Front pages**
+- [x] Under a front page's description: tiles for Everything, Documents, Pictures and video, Music, each with a count; pressing one lists what is there
+- [x] Lists show everything together by default, with the folder beside each item; "group by folder" splits them (the music playlist follows the same choice)
+- [x] Every folder can have its own `FRONTPAGE.md`: shown first in that folder in the file list, with tiles scoped to the folder, and editable in the reader
+- [x] Uploading a folder asks for its front page: use the one it has, copy one of its top-level markdown files (its README by default), or make a new one
+- [ ] Front pages for folders that are already in the workspace (only made on upload, or by adding a `FRONTPAGE.md` by hand)
+- [ ] Video thumbnails (videos show as a labelled tile)
+- [ ] The C++ server cannot yet open an upload as its own workspace, so that path is Node-only
+
+**2. Working without the server (before HTTPS)**
 - [x] Both servers accept a note id and time made on the device, and ignore a repeat of the same note
-- [ ] Documents kept in the browser's own storage on the device
-- [ ] Outbox: notes and highlights made while disconnected are held and sent when the board answers again
-- [ ] Adding files from the device while disconnected: held locally, uploaded on reconnect. Removing a local copy is one tap
-- [ ] Every file shows its state clearly: on this device, on the board only, or waiting to upload
-- [ ] A status line: connected / not reachable, and how many changes are waiting
-- [ ] Pictures and video kept offline, opt-in per file (after documents work)
+- [x] Documents you open are copied into the browser's own storage; "keep all" copies the rest
+- [x] Outbox: notes, highlights, edits and deletions made while disconnected are held and sent, in order, when the server answers again
+- [x] Adding files from the device ("add files…", or drag onto the sidebar): they go to `inbox/`, open straight away, and upload on reconnect
+- [x] Every file shows its state: ● on this device, ○ server only, ↑ waiting to be sent; pressing the mark keeps, removes or discards
+- [x] Status box: connected / not reachable, how many changes are waiting, how many documents are on the device
+- [ ] Cold start with the server off still needs step 3 (the page itself cannot load without it)
+- [ ] HTML pages kept offline lose their pictures and styles that live in separate files
+- [ ] Pictures and video kept offline, opt-in per file
+- [ ] If two devices edit the same note while both are offline, the later one to reconnect wins; no merge
+- [ ] Editing the front page, settings and folder uploads are refused while offline (with a message), not queued
+- [ ] Remove a file from the server from inside the reader (only local copies can be removed today)
+- [ ] The C++ server has not been run with the page for a full session
 
 **3. HTTPS and opening with no board at all (once the ESP32 build exists)**
 - [ ] HTTPS on the board with a certificate each device trusts once
