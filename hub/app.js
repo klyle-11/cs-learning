@@ -1031,7 +1031,8 @@ async function addFiles(fileList) {
     await idb.put('files', { key: keyOf(path), root: config.root, path, blob: file });
     pendingFiles.push({ path });
     outbox.push({ kind: 'file', path });
-    docs.push({ path, group: 'inbox', title: name, side: false, front: false });
+    allDocs.push({ path, group: 'inbox', title: name, side: false, front: false });
+    applyLocks();
   }
   saveLocal();
   renderTree();
