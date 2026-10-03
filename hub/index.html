@@ -169,6 +169,55 @@
   #dial .d.sel { font-size: 16px; font-weight: 700; color: var(--accent); padding-left: 10px; border-left: 3px solid var(--accent); }
   #dial .none { padding: 0 10px; font-size: 12px; color: var(--muted); }
 
+  /* connection and device-copy status */
+  #net { margin: 0 10px 10px 0; padding: 6px 8px; border: 1px solid var(--rule); font-size: 12.5px; line-height: 1.45; }
+  #net b { font-weight: 600; }
+  #net .dot, #mobileBar .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #3f8f4f; margin-right: 6px; }
+  body.offline #net .dot, body.offline #mobileBar .dot { background: #c0392b; }
+  body.offline #net { border-color: #c0392b; }
+  #net .sub { color: var(--muted); }
+  #net button { border: 0; padding: 0; color: var(--accent); font-size: 12.5px; text-decoration: underline; }
+  #net .say { color: #c0392b; }
+  .file .st { visibility: visible !important; display: inline-block !important; border: 0; padding: 0 2px; font-size: 11px; color: var(--muted); }
+  .file .st.kept { color: #3f8f4f; }
+  .file .st.wait { color: #b9770e; font-weight: 700; }
+  #side.drop { outline: 3px dashed var(--accent); outline-offset: -3px; }
+
+  /* music player: one player for the whole reader, with the playlist as a document */
+  .player { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 24px 80px; font: 14px/1.4 var(--head); }
+  .player .now { font-size: 17px; font-weight: 700; margin-bottom: 2px; }
+  .player .where { color: var(--muted); margin-bottom: 12px; }
+  .pl-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+  .pl-row button { padding: 6px 14px; font-size: 14px; }
+  .pl-seek { flex: 1; min-width: 140px; accent-color: var(--accent); }
+  .pl-vol { width: 110px; accent-color: var(--accent); }
+  .pl-time { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .player h5 { margin: 18px 0 4px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 400; }
+  .track { display: flex; gap: 10px; align-items: baseline; padding: 6px 6px; border-top: 1px solid var(--rule); cursor: pointer; }
+  .track.cur { color: var(--accent); font-weight: 700; background: var(--shade); }
+  .track.gone { color: var(--muted); cursor: default; }
+  .track span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .track .st { border: 0; padding: 0 4px; font-size: 12px; color: var(--muted); }
+  .track .st.kept { color: #3f8f4f; }
+  #mini { margin: 0 10px 10px 0; padding: 6px 8px; border: 1px solid var(--rule); font-size: 12.5px; }
+  #mini[hidden] { display: none; }
+  #mini a { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; text-decoration: underline; margin-bottom: 4px; }
+  #mini button { margin-right: 4px; }
+
+  /* picture, video and sound viewer */
+  .viewer { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .viewbar { flex: none; display: flex; gap: 10px; align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--rule); font: 13px var(--head); }
+  .viewbar span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+  .viewbar a { color: var(--accent); white-space: nowrap; }
+  .stage { flex: 1; min-height: 0; overflow: auto; display: flex; background: var(--shade); overscroll-behavior: contain; }
+  .stage img, .stage video, .stage audio { display: block; margin: auto; }
+  .stage.fit img, .stage.fit video { max-width: 100%; max-height: 100%; object-fit: contain; }
+  .stage.fit img { cursor: zoom-in; }
+  .stage:not(.fit) img { cursor: zoom-out; max-width: none; }
+  .stage video { background: #000; }
+  .stage audio { width: min(90%, 480px); }
+  .md img { cursor: zoom-in; }
+
   /* a rendered document */
   .md { max-width: 40em; margin: 0 auto; padding: 16px 0 120px; }
   .md h1, .md h2, .md h3, .md h4 { font-family: var(--head); line-height: 1.25; scroll-margin-top: 12px; }
@@ -278,13 +327,15 @@
 </head>
 <body>
 <div id="app">
-  <header id="mobileBar"><button id="mFiles" aria-label="Files and outline">☰ Files</button><b id="mTitle"></b><button id="mNotes">Notes</button></header>
+  <header id="mobileBar"><button id="mFiles" aria-label="Files and outline">☰ Files</button><b><span class="dot"></span><span id="mTitle"></span></b><button id="mNotes">Notes</button></header>
   <button id="sideEdge" aria-label="Show sidebar" title="Sidebar (hover to peek, click to keep open)">›</button>
   <nav id="side" aria-label="Files and outline">
     <h1 id="hubTitle" contenteditable="plaintext-only" spellcheck="false" title="Click to rename"></h1>
     <div id="sideTools"><select id="theme" title="Theme"><option value="plain">Plain</option><option value="selenized">Selenized Light</option><option value="lime">Pale Lime</option><option value="sky">Pale Sky</option><option value="eva">Eva Dark</option><option value="triple-m">Triple-M</option></select><button id="fontToggle"></button><button id="notesToggle"></button><button id="sideToggle" title="Tuck the sidebar away; it returns when you hover the left edge"></button><button id="focusToggle" title="Fade everything except the paragraph you are reading">reading focus</button><button id="roomyToggle" title="More space between lines and words">roomy text</button><button id="smaller" aria-label="Smaller text" title="Smaller text">A−</button><button id="bigger" aria-label="Larger text" title="Larger text">A+</button></div>
-    <div id="wsRow"><select id="workspace" title="Workspace" hidden></select><button id="uploadBtn" title="Bring a folder from your computer into the hub">upload a folder…</button><input id="folderInput" type="file" webkitdirectory multiple hidden></div>
+    <div id="wsRow"><select id="workspace" title="Workspace" hidden></select><button id="addBtn" title="Add files from this device. If the server is out of reach they are held here and sent later.">add files…</button><input id="fileInput" type="file" multiple hidden><button id="uploadBtn" title="Bring a folder from your computer into the hub">upload a folder…</button><input id="folderInput" type="file" webkitdirectory multiple hidden></div>
     <div id="upload" hidden role="status"></div>
+    <div id="net" role="status" aria-live="polite"></div>
+    <div id="mini" hidden></div>
     <div class="label">Files</div>
     <div id="tree"></div>
     <div class="label">Outline</div>
@@ -327,9 +378,21 @@ const views = [];            // DOM for each pane: { root, tabsEl, body, scrolle
                              // surface: the element highlights are drawn in (the article, or a framed page's body)
 const scrollMem = new Map(); // "pane:path" -> scrollTop
 
+// Every request goes through call(), which is how the page knows whether the
+// server is in reach. A failed request throws an error marked `offline`.
+async function call(url, opts = {}) {
+  try {
+    const r = await fetch(url, opts);
+    setOnline(true);
+    return r;
+  } catch {
+    setOnline(false);
+    throw Object.assign(new Error('The server is not reachable.'), { offline: true, method: opts.method || 'GET' });
+  }
+}
 const api = (url, method = 'GET', body) =>
-  fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) })
-    .then((r) => (r.headers.get('content-type').includes('json') ? r.json() : r.text()));
+  call(url, { method, headers: { 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) })
+    .then((r) => ((r.headers.get('content-type') || '').includes('json') ? r.json() : r.text()));
 const store = {
   get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
@@ -337,6 +400,11 @@ const store = {
 const save = () => store.set('layout:' + config.root, state);
 const docOf = (path) => docs.find((d) => d.path === path);
 const isHtml = (path) => /\.html?$/.test(path);
+const isImage = (path) => /\.(png|jpe?g|gif|webp|svg)$/i.test(path);
+const isVideo = (path) => /\.(mp4|m4v|mov|webm|ogv)$/i.test(path);
+const isAudio = (path) => /\.(mp3|m4a|wav|ogg)$/i.test(path);
+const isMedia = (path) => isImage(path) || isVideo(path) || isAudio(path);
+const rawUrl = (path) => '/raw/' + path.split('/').map(encodeURIComponent).join('/');
 const activeDoc = () => state.panes[state.active]?.active || null;
 const types = () => config.highlights || [];
 const typeOf = (id) => types().find((t) => t.id === id) || types()[0];
@@ -478,7 +546,9 @@ function setTabTitle() {
   document.title = (d && !d.front ? d.title + ' · ' : '') + config.title;
 }
 async function loadConfig() {
-  config = await api('/api/config');
+  // Without the server, fall back to the settings seen last time.
+  try { config = await api('/api/config'); store.set('hub:config', config); }
+  catch (e) { const last = store.get('hub:config'); if (!last) throw e; config = last; }
   if (document.activeElement !== titleEl) titleEl.textContent = config.title;
   setTabTitle();
 }
@@ -496,7 +566,9 @@ titleEl.addEventListener('blur', async () => {
 
 // ---- workspaces and folder upload ---------------------------------------------
 async function loadWorkspaces() {
-  const list = await api('/api/workspaces'), sel = $('workspace');
+  let list;
+  try { list = await api('/api/workspaces'); } catch { return; }
+  const sel = $('workspace');
   sel.innerHTML = '';
   for (const w of list) sel.append(new Option((w.home ? '' : '↳ ') + w.name, w.root, w.current, w.current));
   sel.hidden = list.length < 2;
@@ -564,8 +636,227 @@ $('mFiles').onclick = () => drawer('side');
 $('mNotes').onclick = () => drawer('right');
 $('backdrop').onclick = () => drawer(null);
 
+// ---- working without the server ------------------------------------------------
+// Documents you open are copied into this browser's own storage, so they still
+// open when the server is out of reach. Notes and highlights made meanwhile, and
+// files added from this device, wait in an outbox and are sent when it answers.
+const net = { online: true, said: '' };
+let outbox = [], pendingFiles = [], kept = new Set(), flushing = false;
+const keyOf = (path) => config.root + '|' + path;
+const isPending = (path) => pendingFiles.some((f) => f.path === path);
+const canKeep = (path) => !isMedia(path) || isAudio(path);   // text documents, HTML pages and music
+function saveLocal() {
+  store.set('notes:' + config.root, notes);
+  store.set('outbox:' + config.root, outbox);
+  store.set('pending:' + config.root, pendingFiles);
+}
+
+// A very small wrapper over IndexedDB. If the browser refuses storage, every
+// call quietly does nothing and the reader simply keeps no copies.
+const idb = {
+  open() {
+    return (this.db ||= new Promise((resolve) => {
+      try {
+        const req = indexedDB.open('hub', 1);
+        req.onupgradeneeded = () => { req.result.createObjectStore('docs', { keyPath: 'key' }); req.result.createObjectStore('files', { keyPath: 'key' }); };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => resolve(null);
+      } catch { resolve(null); }
+    }));
+  },
+  async run(name, mode, fn) {
+    const db = await this.open();
+    if (!db) return null;
+    return new Promise((resolve) => {
+      const tx = db.transaction(name, mode), req = fn(tx.objectStore(name));
+      tx.oncomplete = () => resolve(req ? req.result : null);
+      tx.onerror = tx.onabort = () => resolve(null);
+    });
+  },
+  get: (name, key) => idb.run(name, 'readonly', (s) => s.get(key)),
+  put: (name, value) => idb.run(name, 'readwrite', (s) => s.put(value)),
+  del: (name, key) => idb.run(name, 'readwrite', (s) => s.delete(key)),
+  keys: (name) => idb.run(name, 'readonly', (s) => s.getAllKeys()),
+};
+
+function setOnline(on) {
+  if (net.online === on) return;
+  net.online = on;
+  document.body.classList.toggle('offline', !on);
+  renderNet();
+  renderPlayers();
+  if (on) cameBack();
+}
+// Back in reach: send what was waiting, then take the server's view of things.
+async function cameBack() {
+  await flush();
+  if (!net.online) return;
+  await loadDocs();
+  await loadNotes();
+}
+// While out of reach, look for the server every few seconds.
+setInterval(() => { if (!net.online) call('/api/config', { cache: 'no-store' }).catch(() => {}); }, 4000);
+window.addEventListener('online', () => call('/api/config', { cache: 'no-store' }).catch(() => {}));
+window.addEventListener('unhandledrejection', (e) => {
+  if (!e.reason?.offline) return;
+  e.preventDefault();
+  if (e.reason.method !== 'GET') { net.said = 'That change was not saved: the server is not reachable.'; renderNet(); setTimeout(() => { net.said = ''; renderNet(); }, 6000); }
+});
+
+function renderNet() {
+  const box = $('net');
+  if (!box) return;
+  box.textContent = '';
+  box.append(el('span', 'dot'), el('b', '', net.online ? 'Connected to the server' : 'Server not reachable'));
+  if (!net.online) box.append(el('div', 'sub', 'Working from the copies on this device. New notes and files are held here and sent when it is back.'));
+  if (outbox.length) box.append(el('div', 'sub', `${outbox.length} change${outbox.length > 1 ? 's' : ''} waiting to be sent`));
+  const keepable = docs.filter((d) => canKeep(d.path) && !isPending(d.path)), have = keepable.filter((d) => kept.has(d.path)).length;
+  const line = el('div', 'sub', `${have} of ${keepable.length} documents copied to this device `);
+  if (net.online && have < keepable.length) {
+    const all = el('button', '', 'keep all');
+    all.onclick = async () => { all.disabled = true; for (const d of keepable) { if (!kept.has(d.path)) await keepCopy(d.path, true); } renderTree(); renderNet(); };
+    line.append(all);
+  }
+  box.append(line, el('div', 'sub', '● on this device   ○ server only   ↑ waiting to be sent'));
+  if (net.said) box.append(el('div', 'say', net.said));
+}
+
+// The text of a document: one added here and not yet sent, else from the
+// server (keeping a copy), else the copy on this device. null if none.
+async function docText(path) {
+  if (isPending(path)) { const f = await idb.get('files', keyOf(path)); return f ? f.blob.text() : null; }
+  try {
+    const r = await call('/api/doc?path=' + encodeURIComponent(path));
+    if (!r.ok) return '# Not found\n\nThis file is no longer in the folder.\n';
+    const text = await r.text();
+    rememberDoc(path, text);
+    return text;
+  } catch {
+    const copy = await idb.get('docs', keyOf(path));
+    return copy ? copy.text : null;
+  }
+}
+async function rememberDoc(path, text) {
+  const had = kept.has(path);
+  await idb.put('docs', { key: keyOf(path), root: config.root, path, text, ts: Date.now() });
+  kept.add(path);
+  if (!had) { renderTree(); renderNet(); }
+}
+async function keepCopy(path, quiet) {
+  try {
+    const r = await call(isHtml(path) ? rawUrl(path) : '/api/doc?path=' + encodeURIComponent(path));
+    if (r.ok) {
+      const body = isAudio(path) ? { blob: await r.blob() } : { text: await r.text() };
+      await idb.put('docs', { key: keyOf(path), root: config.root, path, ...body, ts: Date.now() });
+      kept.add(path);
+    }
+  } catch {}
+  if (!quiet) { renderTree(); renderNet(); renderPlayers(); }
+}
+async function dropCopy(path) {
+  await idb.del('docs', keyOf(path));
+  kept.delete(path);
+  renderTree();
+  renderNet();
+  renderPlayers();
+}
+
+// ---- the outbox: changes are applied here first, then sent ------------------------
+const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+const makeNote = (fields) => ({ id: newId(), heading: '', headingText: '', quote: '', type: '', text: '', ...fields, ts: new Date().toISOString(), status: fields.text ? 'open' : 'highlight' });
+async function noteOp(op) {
+  if (op.kind === 'add') notes.push(op.note);
+  if (op.kind === 'set') {
+    const n = notes.find((x) => x.id === op.id);
+    if (n) { Object.assign(n, op.fields); if (n.status === 'highlight' && n.text) n.status = 'open'; }
+  }
+  if (op.kind === 'del') notes = notes.filter((x) => x.id !== op.id);
+  outbox.push(op);
+  saveLocal();
+  renderNotes();
+  renderTree();
+  renderNet();
+  await flush();
+}
+// Send waiting changes in the order they were made. Any answer from the server,
+// even a refusal, settles that change; only silence keeps it waiting.
+async function flush() {
+  if (flushing) return;
+  flushing = true;
+  const json = (method, body) => ({ method, headers: { 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) });
+  let sentFile = false;
+  try {
+    while (outbox.length) {
+      const op = outbox[0];
+      if (op.kind === 'add') await call('/api/notes', json('POST', op.note));
+      else if (op.kind === 'set') await call('/api/notes/' + op.id, json('PUT', op.fields));
+      else if (op.kind === 'del') await call('/api/notes/' + op.id, json('DELETE'));
+      else if (op.kind === 'file') {
+        const f = await idb.get('files', keyOf(op.path));
+        if (f) await call('/api/upload?path=' + encodeURIComponent(op.path), { method: 'POST', body: f.blob });
+        await idb.del('files', keyOf(op.path));
+        pendingFiles = pendingFiles.filter((x) => x.path !== op.path);
+        sentFile = true;
+      }
+      outbox.shift();
+      saveLocal();
+    }
+  } catch { /* still out of reach: everything left stays in the outbox */ }
+  flushing = false;
+  renderNet();
+  if (sentFile && net.online) loadDocs();
+}
+
+// ---- adding files from this device -------------------------------------------------
+// They go to the folder "inbox". With the server in reach they are sent at once;
+// without it they wait here, already openable, and are sent later.
+async function addFiles(fileList) {
+  for (const file of fileList) {
+    const name = file.name.replace(/[\\/]/g, ' ').replace(/^\.+/, '').trim();
+    if (!name || file.size > 50 * 1024 * 1024) continue;
+    let path = 'inbox/' + name;
+    for (let n = 2; docs.some((d) => d.path === path); n++) path = 'inbox/' + name.replace(/(\.[^.]*)?$/, ` ${n}$1`);
+    await idb.put('files', { key: keyOf(path), root: config.root, path, blob: file });
+    pendingFiles.push({ path });
+    outbox.push({ kind: 'file', path });
+    docs.push({ path, group: 'inbox', title: name, side: false, front: false });
+  }
+  saveLocal();
+  renderTree();
+  renderNet();
+  await flush();
+  renderTree();
+}
+async function discardPending(path) {
+  await idb.del('files', keyOf(path));
+  pendingFiles = pendingFiles.filter((f) => f.path !== path);
+  outbox = outbox.filter((op) => !(op.kind === 'file' && op.path === path));
+  docs = docs.filter((d) => d.path !== path || serverDocs.some((x) => x.path === path));
+  for (const [i, p] of state.panes.entries()) if (p.tabs.includes(path)) await closeTab(i, path);
+  saveLocal();
+  renderTree();
+  renderNet();
+}
+$('addBtn').onclick = () => $('fileInput').click();
+$('fileInput').onchange = (e) => { const files = [...e.target.files]; e.target.value = ''; addFiles(files); };
+const sideEl = $('side');
+sideEl.addEventListener('dragover', (e) => { if (e.dataTransfer?.types.includes('Files')) { e.preventDefault(); sideEl.classList.add('drop'); } });
+sideEl.addEventListener('dragleave', () => sideEl.classList.remove('drop'));
+sideEl.addEventListener('drop', (e) => { if (!e.dataTransfer?.files.length) return; e.preventDefault(); sideEl.classList.remove('drop'); addFiles([...e.dataTransfer.files]); });
+
 // ---- file browser -----------------------------------------------------------
-async function loadDocs() { docs = await api('/api/docs'); renderTree(); }
+let serverDocs = [];
+async function loadDocs() {
+  try { serverDocs = await api('/api/docs'); store.set('docs:' + config.root, serverDocs); }
+  catch { serverDocs = store.get('docs:' + config.root) || serverDocs; }
+  // Files added on this device and not yet sent appear in the list too.
+  const waiting = pendingFiles.filter((f) => !serverDocs.some((d) => d.path === f.path))
+    .map((f) => ({ path: f.path, group: f.path.split('/').slice(0, -1).join('/'), title: f.path.split('/').pop(), side: false, front: false }));
+  docs = serverDocs.concat(waiting);
+  renderTree();
+  renderNet();
+  renderPlayers();
+}
 
 function renderTree() {
   const y = treeEl.scrollTop;
@@ -615,6 +906,17 @@ function fileRow(d, label) {
   plus.setAttribute('aria-label', 'Open alongside what is already open');
   plus.onclick = (e) => { e.stopPropagation(); openDoc(d.path, { keep: true }); };
   row.append(plus);
+  // Where this file is: waiting to be sent, copied to this device, or on the server only.
+  if (isPending(d.path) || canKeep(d.path)) {
+    const pend = isPending(d.path), here = kept.has(d.path);
+    const st = el('button', 'st ' + (pend ? 'wait' : here ? 'kept' : ''), pend ? '↑' : here ? '●' : '○');
+    st.title = pend ? 'Added on this device, waiting to be sent to the server. Press to discard it.'
+      : here ? 'A copy is on this device, so it opens without the server. Press to remove the copy.'
+      : 'On the server only. Press to keep a copy on this device.';
+    st.setAttribute('aria-label', st.title);
+    st.onclick = (e) => { e.stopPropagation(); if (pend) discardPending(d.path); else if (here) dropCopy(d.path); else keepCopy(d.path); };
+    row.append(st);
+  }
   const side = el('button', 'sideBtn', 'side');
   side.title = 'Open to the side';
   side.onclick = (e) => { e.stopPropagation(); openDoc(d.path, { side: true }); };
@@ -770,7 +1072,8 @@ function setScripts(path, on) {
 // Source files are shown as one fenced code block, tagged with their language.
 const LANG = { c: 'c', h: 'c', cpp: 'cpp', hpp: 'cpp', cc: 'cpp', py: 'python', js: 'javascript', ts: 'typescript', rs: 'rust', go: 'go', java: 'java', sh: 'bash', Makefile: 'makefile' };
 async function fetchDoc(path) {
-  const text = await api('/api/doc?path=' + encodeURIComponent(path));
+  let text = await docText(path);
+  if (text == null) return '# Not on this device\n\nThe server is not reachable, and no copy of this document was kept here.\n';
   if (path.endsWith('.md')) return text;
   const fence = '`'.repeat(Math.max(3, ...(text.match(/`+/g) || []).map((t) => t.length + 1)));
   const name = path.split('/').pop();
@@ -783,6 +1086,13 @@ async function showDoc(pane, hash, keepScroll) {
   Object.assign(v, { heads: [], cur: null, article: null, surface: null, scroller: null, frame: null });
   if (!path) { v.body.replaceChildren(el('p', 'empty', 'Nothing open. Pick a file on the left.')); return; }
 
+  if (isAudio(path)) { showPlayer(pane, path); return; }
+  if (isMedia(path)) {
+    if (net.online) showMedia(pane, path);
+    else v.body.replaceChildren(el('p', 'empty', 'The server is not reachable. Pictures, video and sound are not kept on this device yet.'));
+    return;
+  }
+
   // HTML files are shown as they are, in a frame.
   if (isHtml(path)) {
     const frame = el('iframe');
@@ -791,7 +1101,15 @@ async function showDoc(pane, hash, keepScroll) {
     if (!scriptsOn(path)) frame.setAttribute('sandbox', 'allow-same-origin');
     frame.referrerPolicy = 'no-referrer';
     let bounced = false;
-    frame.src = '/raw/' + path.split('/').map(encodeURIComponent).join('/');
+    if (net.online && !isPending(path)) {
+      frame.src = rawUrl(path);
+      call(rawUrl(path)).then((r) => (r.ok ? r.text() : null)).then((t) => t != null && rememberDoc(path, t)).catch(() => {});
+    } else {
+      // No server: show the copy kept on this device, if there is one.
+      const copy = await docText(path);
+      if (copy == null) { v.body.replaceChildren(el('p', 'empty', 'The server is not reachable, and no copy of this page was kept on this device.')); return; }
+      frame.srcdoc = copy;
+    }
     frame.onload = () => {
       try {
         const d = frame.contentDocument, used = new Set();
@@ -888,9 +1206,11 @@ async function showDoc(pane, hash, keepScroll) {
     h.id = `p${pane}-${h.dataset.slug}`;
     v.heads.push(h);
   }
-  for (const img of article.querySelectorAll('img')) {
-    const src = img.getAttribute('src') || '';
-    if (!/^([a-z]+:|\/)/i.test(src)) img.src = '/raw/' + resolve(path, src);
+  // Relative picture, video and sound paths load from the same storage.
+  for (const m of article.querySelectorAll('img, video, audio, source')) {
+    const src = m.getAttribute('src') || '';
+    if (src && !/^([a-z]+:|\/)/i.test(src)) { m.dataset.path = resolve(path, src); m.src = rawUrl(m.dataset.path); }
+    if (m.tagName === 'VIDEO') { m.controls = true; m.playsInline = true; m.preload = 'metadata'; }
   }
   colourCode(article);
   hideAnswers(article);
@@ -925,6 +1245,169 @@ function colourCode(root) {
     if (!lang || !hljs.getLanguage(lang)) continue;
     code.innerHTML = hljs.highlight(code.textContent, { language: lang, ignoreIllegals: true }).value;
   }
+}
+
+// ---- music ---------------------------------------------------------------------------
+// One player for the whole reader, so music carries on while you read. Its
+// playlist is every sound file in the folder, grouped by where it lives.
+const player = new Audio();
+player.preload = 'metadata';
+const music = { path: null, url: null };
+const tracks = () => docs.filter((d) => isAudio(d.path));
+const playable = (path) => net.online || kept.has(path);
+const clock = (t) => (isFinite(t) ? Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0') : '0:00');
+
+async function playTrack(path, start = true) {
+  if (!playable(path)) { net.said = 'That track is not on this device, and the server is not reachable.'; renderNet(); return; }
+  if (music.url) URL.revokeObjectURL(music.url);
+  music.url = null;
+  let src = rawUrl(path);
+  if (kept.has(path)) { const copy = await idb.get('docs', keyOf(path)); if (copy?.blob) src = music.url = URL.createObjectURL(copy.blob); }
+  music.path = path;
+  player.src = src;
+  if (start) player.play().catch(() => {});
+  if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({ title: path.split('/').pop(), album: path.split('/').slice(0, -1).join(' / ') });
+  renderPlayers();
+}
+// Next, or previous. "Previous" first goes back to the start of the track; a
+// second press within three seconds goes to the track before.
+function stepTrack(dir) {
+  const list = tracks().filter((t) => playable(t.path));
+  if (!list.length) return;
+  if (dir < 0 && player.currentTime > 3) { player.currentTime = 0; return; }
+  const at = list.findIndex((t) => t.path === music.path);
+  playTrack(list[(at + dir + list.length) % list.length].path);
+}
+const togglePlay = () => { if (!music.path) { const first = tracks().find((t) => playable(t.path)); if (first) playTrack(first.path); } else if (player.paused) player.play().catch(() => {}); else player.pause(); };
+player.addEventListener('ended', () => stepTrack(1));
+for (const ev of ['play', 'pause', 'timeupdate', 'loadedmetadata', 'emptied']) player.addEventListener(ev, tickPlayers);
+if ('mediaSession' in navigator) {
+  navigator.mediaSession.setActionHandler('previoustrack', () => stepTrack(-1));
+  navigator.mediaSession.setActionHandler('nexttrack', () => stepTrack(1));
+}
+if (view.volume != null) player.volume = view.volume;
+
+function transport(withSeek) {
+  const row = el('div', 'pl-row');
+  const prev = el('button', '', 'previous'), play = el('button', 'pl-play', 'play'), next = el('button', '', 'next');
+  prev.title = 'Back to the start; press again for the track before';
+  prev.onclick = () => stepTrack(-1);
+  play.onclick = togglePlay;
+  next.onclick = () => stepTrack(1);
+  row.append(prev, play, next);
+  if (!withSeek) return row;
+  const seek = el('input', 'pl-seek');
+  seek.type = 'range'; seek.min = 0; seek.max = 1000; seek.value = 0;
+  seek.setAttribute('aria-label', 'Position in the track');
+  seek.oninput = () => { if (isFinite(player.duration)) player.currentTime = (seek.value / 1000) * player.duration; };
+  row.append(seek, el('span', 'pl-time', '0:00 / 0:00'));
+  // On a phone the device's own volume buttons do this job.
+  if (!touch.matches) {
+    const vol = el('input', 'pl-vol');
+    vol.type = 'range'; vol.min = 0; vol.max = 100; vol.value = Math.round(player.volume * 100);
+    vol.title = 'Volume';
+    vol.setAttribute('aria-label', 'Volume');
+    vol.oninput = () => { player.volume = vol.value / 100; view.volume = player.volume; store.set('view', view); };
+    row.append(vol);
+  }
+  return row;
+}
+function showPlayer(pane, path) {
+  const v = views[pane];
+  const box = el('div', 'player');
+  v.bar.style.width = '0%';
+  v.body.replaceChildren(box);
+  if (path !== music.path) playTrack(path); else renderPlayers();
+}
+function renderPlayers() {
+  const name = music.path ? music.path.split('/').pop() : 'Nothing playing', dir = music.path ? music.path.split('/').slice(0, -1).join(' / ') || 'top level' : '';
+  for (const box of document.querySelectorAll('.player')) {
+    box.replaceChildren(el('div', 'now', name), el('div', 'where', dir), transport(true));
+    let group = null;
+    for (const t of tracks()) {
+      const folder = t.path.split('/').slice(0, -1).join(' / ') || 'top level';
+      if (folder !== group) { group = folder; box.append(el('h5', '', folder)); }
+      const here = kept.has(t.path), ok = playable(t.path);
+      const row = el('div', 'track' + (t.path === music.path ? ' cur' : '') + (ok ? '' : ' gone'));
+      row.tabIndex = 0;
+      row.setAttribute('role', 'button');
+      const st = el('button', 'st' + (here ? ' kept' : ''), here ? '●' : '○');
+      st.title = here ? 'On this device. Press to remove the copy.' : 'On the server only. Press to keep a copy on this device.';
+      st.setAttribute('aria-label', st.title);
+      st.onclick = (e) => { e.stopPropagation(); if (here) dropCopy(t.path); else keepCopy(t.path); };
+      row.append(st, el('span', '', t.path.split('/').pop()), el('small', '', here ? 'on this device' : ok ? 'server only' : 'not available offline'));
+      row.onclick = () => ok && playTrack(t.path);
+      box.append(row);
+    }
+    if (!tracks().length) box.append(el('p', 'empty', 'No sound files in this folder yet.'));
+  }
+  const mini = $('mini');
+  mini.hidden = !music.path;
+  if (music.path) {
+    const title = el('a', '', '♪ ' + name);
+    title.title = 'Open the player and playlist';
+    title.onclick = () => openDoc(music.path);
+    mini.replaceChildren(title, transport(false));
+  }
+  tickPlayers();
+}
+function tickPlayers() {
+  for (const b of document.querySelectorAll('.pl-play')) b.textContent = player.paused ? 'play' : 'pause';
+  for (const t of document.querySelectorAll('.pl-time')) t.textContent = clock(player.currentTime) + ' / ' + clock(player.duration);
+  for (const sk of document.querySelectorAll('.pl-seek')) if (document.activeElement !== sk) sk.value = isFinite(player.duration) && player.duration ? (player.currentTime / player.duration) * 1000 : 0;
+}
+
+// Pictures, video and sound. A picture starts fitted to the pane; clicking it
+// (or the button) switches to its real size, keeping the clicked spot in place.
+function showMedia(pane, path) {
+  const v = views[pane], url = rawUrl(path);
+  const box = el('div', 'viewer'), bar = el('div', 'viewbar'), stage = el('div', 'stage fit');
+  bar.append(el('span', '', path.split('/').pop()));
+  const open = el('a', '', 'open in new tab');
+  open.href = url;
+  open.target = '_blank';
+  open.rel = 'noopener';
+  if (isImage(path)) {
+    const img = el('img');
+    img.alt = path.split('/').pop();
+    img.decoding = 'async';
+    const size = el('button', '', 'full size');
+    const setFit = (fit, at) => {
+      // Where the pointer is, as a fraction of the picture, so that spot stays put.
+      const r = img.getBoundingClientRect(), s = stage.getBoundingClientRect();
+      const fx = at ? (at.clientX - r.left) / r.width : 0.5, fy = at ? (at.clientY - r.top) / r.height : 0.5;
+      const px = at ? at.clientX - s.left : s.width / 2, py = at ? at.clientY - s.top : s.height / 2;
+      stage.classList.toggle('fit', fit);
+      size.textContent = fit ? 'full size' : 'fit to window';
+      if (!fit) { stage.scrollLeft = fx * img.naturalWidth - px; stage.scrollTop = fy * img.naturalHeight - py; }
+    };
+    img.onload = () => { bar.firstChild.textContent = `${img.alt}  ·  ${img.naturalWidth} × ${img.naturalHeight}`; };
+    img.onclick = (e) => setFit(!stage.classList.contains('fit'), e);
+    size.onclick = () => setFit(!stage.classList.contains('fit'));
+    img.src = url;
+    stage.append(img);
+    bar.append(size);
+  } else if (isVideo(path)) {
+    const video = el('video');
+    video.controls = true;
+    video.playsInline = true;
+    video.preload = 'metadata';
+    video.src = url;
+    const full = el('button', '', 'full screen');
+    full.onclick = () => (video.requestFullscreen || video.webkitEnterFullscreen)?.call(video);
+    stage.append(video);
+    bar.append(full);
+  } else {
+    const audio = el('audio');
+    audio.controls = true;
+    audio.preload = 'metadata';
+    audio.src = url;
+    stage.append(audio);
+  }
+  bar.append(open);
+  box.append(bar, stage);
+  v.bar.style.width = '0%';
+  v.body.replaceChildren(box);
 }
 
 // "Check Yourself" blocks: hide the answer until asked for.
@@ -966,6 +1449,9 @@ function goTo(pane, slug) {
 function onDocClick(e, pane) {
   const mark = e.target.closest('mark');
   if (mark) return selectHighlight(mark.dataset.note, mark.getBoundingClientRect());
+  // A picture in a document opens in the viewer, where it can be seen full size.
+  const pic = e.target.closest('img[data-path]');
+  if (pic && !e.target.closest('a') && docOf(pic.dataset.path)) return openDoc(pic.dataset.path, { pane, side: e.metaKey || e.ctrlKey || e.altKey });
   const a = e.target.closest('a');
   if (!a) return;
   const href = a.getAttribute('href') || '';
@@ -1145,7 +1631,14 @@ function renderContext() {
 }
 
 // ---- notes ---------------------------------------------------------------------
-async function loadNotes() { notes = await api('/api/notes'); renderNotes(); renderTree(); }
+async function loadNotes() {
+  // While changes are still waiting to be sent, this device's copy is the newer one.
+  if (!outbox.some((op) => op.kind !== 'file')) {
+    try { notes = await api('/api/notes'); saveLocal(); } catch { notes = store.get('notes:' + config.root) || notes; }
+  }
+  renderNotes();
+  renderTree();
+}
 
 $('composer').onsubmit = async (e) => {
   e.preventDefault();
@@ -1153,8 +1646,8 @@ $('composer').onsubmit = async (e) => {
   if (!text || !doc) return;
   input.value = '';
   const hl = hlNote();
-  if (hl && !hl.text) await api('/api/notes/' + hl.id, 'PUT', { text });
-  else if (hl) await api('/api/notes', 'POST', { doc: hl.doc, text, quote: hl.quote, type: hl.type, heading: hl.heading, headingText: hl.headingText });
+  if (hl && !hl.text) await noteOp({ kind: 'set', id: hl.id, fields: { text } });
+  else if (hl) await noteOp({ kind: 'add', note: makeNote({ doc: hl.doc, text, quote: hl.quote, type: hl.type, heading: hl.heading, headingText: hl.headingText }) });
   else await createNote(text);
   pendingQuote = '';
   activeHl = null;
@@ -1169,12 +1662,14 @@ input.addEventListener('keydown', (e) => {
 
 // A note or highlight on the current selection (or, with no selection, on the
 // section being read).
-function createNote(text) {
+async function createNote(text) {
   const head = (pendingQuote && pendingHead) || views[state.active].cur;
-  return api('/api/notes', 'POST', {
+  const note = makeNote({
     doc: activeDoc(), text, quote: pendingQuote, type: pendingQuote ? curType().id : '',
     heading: head?.dataset?.slug || '', headingText: head?.textContent || '',
   });
+  await noteOp({ kind: 'add', note });
+  return note;
 }
 
 // ---- highlights -------------------------------------------------------------------
@@ -1199,7 +1694,7 @@ function showFlyout(rect, below) {
   f.append(note);
   if (hl) {
     const rm = el('button', '', hl.text ? 'delete' : 'remove');
-    rm.onclick = async () => { await api('/api/notes/' + hl.id, 'DELETE'); activeHl = null; hideFlyout(); renderContext(); loadNotes(); };
+    rm.onclick = async () => { await noteOp({ kind: 'del', id: hl.id }); activeHl = null; hideFlyout(); renderContext(); loadNotes(); };
     f.append(rm);
   }
   f.hidden = false;
@@ -1228,7 +1723,7 @@ async function pickType(typeId) {
   store.set('hlType', typeId);
   hideFlyout();
   if (!hl) return highlightSelection(typeId);
-  await api('/api/notes/' + hl.id, 'PUT', { type: typeId });
+  await noteOp({ kind: 'set', id: hl.id, fields: { type: typeId } });
   await loadNotes();
   renderContext();
 }
@@ -1344,11 +1839,11 @@ function renderNotes(rehighlight = true) {
     }
     if (pendingQuote) {
       const attach = el('button', '', n.quote ? 'move to selection' : 'attach selection');
-      attach.onclick = async () => { await api('/api/notes/' + n.id, 'PUT', { quote: pendingQuote }); pendingQuote = ''; renderContext(); loadNotes(); };
+      attach.onclick = async () => { await noteOp({ kind: 'set', id: n.id, fields: { quote: pendingQuote } }); pendingQuote = ''; renderContext(); loadNotes(); };
       meta.append(attach);
     }
     const del = el('button', '', 'delete');
-    del.onclick = async () => { if (del.textContent === 'delete') return (del.textContent = 'really delete?'); await api('/api/notes/' + n.id, 'DELETE'); loadNotes(); };
+    del.onclick = async () => { if (del.textContent === 'delete') return (del.textContent = 'really delete?'); await noteOp({ kind: 'del', id: n.id }); loadNotes(); };
     meta.append(del);
     div.append(meta);
 
@@ -1418,7 +1913,10 @@ function highlight(article, quote, id, color) {
 }
 
 // ---- live reload when files change on disk --------------------------------------
-new EventSource('/api/events').onmessage = async (e) => {
+const events = new EventSource('/api/events');
+events.onerror = () => call('/api/config', { cache: 'no-store' }).catch(() => {});
+events.onopen = () => setOnline(true);
+events.onmessage = async (e) => {
   const { file } = JSON.parse(e.data);
   if (file.endsWith('notes.json')) return loadNotes();
   if (file === 'hub.json' || file === config.front || file === 'FRONTPAGE.md') await loadConfig();
@@ -1435,7 +1933,11 @@ new EventSource('/api/events').onmessage = async (e) => {
 (async function init() {
   await loadConfig();
   loadWorkspaces();
-  notes = await api('/api/notes');
+  outbox = store.get('outbox:' + config.root) || [];
+  pendingFiles = store.get('pending:' + config.root) || [];
+  kept = new Set(((await idb.keys('docs')) || []).filter((k) => k.startsWith(config.root + '|')).map((k) => k.slice(config.root.length + 1)));
+  try { notes = outbox.some((op) => op.kind !== 'file') ? store.get('notes:' + config.root) || [] : await api('/api/notes'); }
+  catch { notes = store.get('notes:' + config.root) || []; }
   await loadDocs();
 
   const saved = store.get('layout:' + config.root);
@@ -1460,6 +1962,8 @@ new EventSource('/api/events').onmessage = async (e) => {
   const hash = decodeURIComponent(location.hash.slice(1));
   if (want && docOf(want) && want !== activeDoc()) await openDoc(want, { hash });
   else { if (want && hash) goTo(state.active, hash); chrome(); }
+  renderNet();
+  flush(); // anything left waiting from last time
 })();
 </script>
 </body>
