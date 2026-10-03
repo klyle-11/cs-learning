@@ -28,6 +28,16 @@
     --accent: #0072d4; --mark: #f1dc9a; --reply: #e6ebcb; --field: #fffaea; --quote: #53676d;
     --c-kw: #8762c6; --c-str: #009c8f; --c-com: #909995; --c-num: #c25d1e; --c-fn: #0072d4; --c-type: #ad8900;
   }
+  :root[data-theme="lime"] { /* pale lime green */
+    --paper: #f4fae6; --shade: #e8f2d3; --ink: #26301a; --muted: #5f6b4e; --rule: #cfdcb4;
+    --accent: #4a7410; --mark: #f6e58d; --reply: #dcecc6; --field: #fbfef3; --quote: #3f4a30;
+    --c-kw: #8a3b6b; --c-str: #2e7d4f; --c-com: #66725a; --c-num: #a35a00; --c-fn: #1e5fa8; --c-type: #6b3fa0;
+  }
+  :root[data-theme="sky"] { /* pale sky blue */
+    --paper: #eef7fd; --shade: #dfeef9; --ink: #1b2a38; --muted: #55687a; --rule: #c3d9ea;
+    --accent: #1668a8; --mark: #fbe9a6; --reply: #dcefe6; --field: #fafdff; --quote: #34485a;
+    --c-kw: #8a3fa0; --c-str: #1f7a5c; --c-com: #5d7082; --c-num: #b25a00; --c-fn: #1668a8; --c-type: #5a4fc0;
+  }
   :root[data-theme="eva"] { /* Eva Dark */
     color-scheme: dark;
     --paper: #282c34; --shade: #21252b; --ink: #b7c5d3; --muted: #8391a2; --rule: #3b414d;
@@ -64,7 +74,8 @@
   #theme { font: 13px var(--head); color: inherit; background: var(--paper); border: 1px solid var(--rule); padding: 1px 4px; margin: 0 4px 8px 0; }
   button { background: none; border: 1px solid var(--rule); padding: 1px 8px; cursor: pointer; font: 13px var(--head); }
 
-  #app { display: grid; grid-template-columns: 250px minmax(0, 1fr) auto; height: 100vh; }
+  #app { display: grid; grid-template-columns: 250px minmax(0, 1fr) auto; height: 100vh; height: 100dvh; }
+  #mobileBar, #backdrop { display: none; }
 
   /* right column: the second document (when split) stacked with the notes */
   #right { position: relative; width: var(--right-w, 300px); display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--rule); }
@@ -110,7 +121,8 @@
   .file.active { color: var(--accent); background: var(--shade); }
   .file small { color: var(--muted); }
   .file button { visibility: hidden; border: 0; padding: 0 2px; color: var(--accent); font-size: 11px; }
-  .file:hover button { visibility: visible; }
+  .file:hover button, .file:focus-within button { visibility: visible; }
+  .file .plus { font-size: 15px; font-weight: 700; }
   #toc a { display: block; padding: 3px 0 3px 8px; color: var(--muted); text-decoration: none; border-left: 2px solid transparent; }
   #toc a.l1 { color: var(--ink); font-weight: 600; margin-top: 8px; }
   #toc a.l3 { padding-left: 22px; font-size: 13px; }
@@ -199,18 +211,55 @@
   /* composer: along the bottom, like talking to the open document */
   #composer { flex: none; border-top: 1px solid var(--rule); padding: 8px 32px 12px; }
   #composer .inner { max-width: 720px; margin: 0 auto; }
+  #grip { display: block; width: 64px; height: 16px; margin: -4px auto 2px; padding: 0; border: 0; cursor: ns-resize; touch-action: none; }
+  #grip::before { content: ''; display: block; width: 40px; height: 4px; margin: 6px auto; border-radius: 2px; background: var(--rule); }
+  #grip:hover::before, #grip:focus-visible::before { background: var(--muted); }
   #context { font: 13px var(--head); color: var(--muted); margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #context b { color: var(--ink); font-weight: 600; }
   #context button { border: 0; padding: 0 4px; color: var(--accent); }
-  #input { display: block; width: 100%; height: 56px; resize: vertical; padding: 8px 10px; border: 1px solid var(--rule); background: var(--field); font: 16px/1.4 var(--body); }
+  #input { display: block; width: 100%; height: 56px; resize: none; padding: 8px 10px; border: 1px solid var(--rule); background: var(--field); font: 16px/1.4 var(--body); }
+
+  /* ---- phone: one column; files and notes become slide-over drawers ---- */
+  @media (max-width: 760px) {
+    #app { grid-template-columns: minmax(0, 1fr) !important; grid-template-rows: auto minmax(0, 1fr); }
+    #mobileBar { display: flex; grid-row: 1; align-items: center; gap: 8px; padding: 6px 8px; background: var(--shade); border-bottom: 1px solid var(--rule); font: 14px var(--head); }
+    #mobileBar b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
+    #mobileBar button { padding: 8px 12px; font-size: 14px; background: var(--paper); }
+    #work { grid-row: 2; padding-left: 0 !important; }
+
+    #side { position: fixed; z-index: 8; left: 0; top: 0; bottom: 0; width: min(86vw, 330px); background: var(--paper); box-shadow: 4px 0 16px rgba(0, 0, 0, .25); transform: translateX(-105%) !important; font-size: 15px; }
+    body.m-side #side { transform: none !important; }
+    #right { display: flex !important; position: fixed; z-index: 8; right: 0; top: 0; bottom: 0; width: min(92vw, 430px) !important; background: var(--paper); box-shadow: -4px 0 16px rgba(0, 0, 0, .25); transform: translateX(105%); }
+    body.m-right #right { transform: none; }
+    #right.no-notes #notes { display: block; flex: 1 1 0; }
+    body.m-side #backdrop, body.m-right #backdrop { display: block; position: fixed; inset: 0; z-index: 7; background: rgba(0, 0, 0, .4); }
+    #sideEdge, #sideToggle, #notesToggle, #rightGrip, .tabs > button, .file .sideBtn { display: none !important; }
+    .file .plus { visibility: visible; font-size: 22px; line-height: 1; padding: 0 10px; }
+
+    .file { padding: 8px 6px; }
+    #tree summary { padding: 7px 0; }
+    #toc a { padding: 7px 0 7px 8px; }
+    .scroller { padding: 0 16px; }
+    .md { padding: 8px 0 60px; }
+    .md h1 { font-size: 1.45em; }
+    .tab { padding: 9px 8px 8px 12px; }
+
+    /* the input sits in the lower part of the screen and grows while typing */
+    #composer { padding: 6px 10px calc(8px + env(safe-area-inset-bottom)); }
+    #input { height: 46px; }
+    #flyout { gap: 12px; padding: 9px 12px; }
+    #flyout .sw { width: 28px; height: 28px; }
+    #flyout button:not(.sw) { font-size: 15px; padding: 4px; }
+  }
 </style>
 </head>
 <body>
 <div id="app">
+  <header id="mobileBar"><button id="mFiles" aria-label="Files and outline">☰ Files</button><b id="mTitle"></b><button id="mNotes">Notes</button></header>
   <button id="sideEdge" aria-label="Show sidebar" title="Sidebar (hover to peek, click to keep open)">›</button>
   <nav id="side" aria-label="Files and outline">
     <h1 id="hubTitle" contenteditable="plaintext-only" spellcheck="false" title="Click to rename"></h1>
-    <div id="sideTools"><select id="theme" title="Theme"><option value="plain">Plain</option><option value="selenized">Selenized Light</option><option value="eva">Eva Dark</option><option value="triple-m">Triple-M</option></select><button id="fontToggle"></button><button id="notesToggle"></button><button id="sideToggle" title="Tuck the sidebar away; it returns when you hover the left edge"></button><button id="focusToggle" title="Fade everything except the paragraph you are reading">reading focus</button><button id="roomyToggle" title="More space between lines and words">roomy text</button><button id="smaller" aria-label="Smaller text" title="Smaller text">A−</button><button id="bigger" aria-label="Larger text" title="Larger text">A+</button></div>
+    <div id="sideTools"><select id="theme" title="Theme"><option value="plain">Plain</option><option value="selenized">Selenized Light</option><option value="lime">Pale Lime</option><option value="sky">Pale Sky</option><option value="eva">Eva Dark</option><option value="triple-m">Triple-M</option></select><button id="fontToggle"></button><button id="notesToggle"></button><button id="sideToggle" title="Tuck the sidebar away; it returns when you hover the left edge"></button><button id="focusToggle" title="Fade everything except the paragraph you are reading">reading focus</button><button id="roomyToggle" title="More space between lines and words">roomy text</button><button id="smaller" aria-label="Smaller text" title="Smaller text">A−</button><button id="bigger" aria-label="Larger text" title="Larger text">A+</button></div>
     <div id="wsRow"><select id="workspace" title="Workspace" hidden></select><button id="uploadBtn" title="Bring a folder from your computer into the hub">upload a folder…</button><input id="folderInput" type="file" webkitdirectory multiple hidden></div>
     <div id="upload" hidden role="status"></div>
     <div class="label">Files</div>
@@ -222,6 +271,7 @@
     <div id="panes"></div>
     <form id="composer">
       <div class="inner">
+        <button type="button" id="grip" aria-label="Make the note box taller or shorter" title="Drag up to make the note box taller, or press to switch between small and tall"></button>
         <div id="context"></div>
         <textarea id="input" placeholder="Write a note or a question…  (Enter to save, Shift+Enter for a new line)"></textarea>
       </div>
@@ -234,6 +284,7 @@
     <aside id="notes"></aside>
   </div>
 </div>
+<div id="backdrop"></div>
 <div id="flyout" hidden></div>
 
 <script src="/vendor/marked.js"></script>
@@ -300,6 +351,28 @@ $('focusToggle').onclick = () => { view.focus = !view.focus; applyView(); };
 $('smaller').onclick = () => { view.fs = Math.max(14, view.fs - 1); applyView(); };
 $('bigger').onclick = () => { view.fs = Math.min(28, view.fs + 1); applyView(); };
 applyView();
+
+// The note box keeps its height. The handle above it resizes it: drag, or
+// press to switch between small and about a quarter of the screen.
+function setInputH(px) {
+  const h = Math.round(Math.max(46, Math.min(px, innerHeight * 0.6)));
+  input.style.height = h + 'px';
+  view.inputH = h;
+  store.set('view', view);
+}
+if (view.inputH) input.style.height = view.inputH + 'px';
+const toggleInputH = () => setInputH(input.offsetHeight > 110 ? 46 : innerHeight * 0.25);
+$('grip').addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  const grip = $('grip'), y0 = e.clientY, h0 = input.offsetHeight;
+  let moved = false;
+  grip.setPointerCapture(e.pointerId);
+  const move = (ev) => { if (Math.abs(ev.clientY - y0) > 4) moved = true; if (moved) setInputH(h0 + y0 - ev.clientY); };
+  const up = () => { grip.removeEventListener('pointermove', move); grip.removeEventListener('pointerup', up); if (!moved) toggleInputH(); };
+  grip.addEventListener('pointermove', move);
+  grip.addEventListener('pointerup', up);
+});
+$('grip').addEventListener('click', (e) => { if (e.detail === 0) toggleInputH(); }); // keyboard
 
 // The block being read: under the pointer, or at the reading line after a scroll.
 function setHere(pane, node) {
@@ -455,6 +528,16 @@ async function runUpload(files, workspace, folder) {
   }
 }
 
+// ---- phone: drawers for the sidebar and the notes -------------------------------
+const phone = matchMedia('(max-width: 760px)'), touch = matchMedia('(pointer: coarse)');
+function drawer(name) {
+  document.body.classList.toggle('m-side', name === 'side' && !document.body.classList.contains('m-side'));
+  document.body.classList.toggle('m-right', name === 'right' && !document.body.classList.contains('m-right'));
+}
+$('mFiles').onclick = () => drawer('side');
+$('mNotes').onclick = () => drawer('right');
+$('backdrop').onclick = () => drawer(null);
+
 // ---- file browser -----------------------------------------------------------
 async function loadDocs() { docs = await api('/api/docs'); renderTree(); }
 
@@ -501,7 +584,12 @@ function fileRow(d, label) {
   row.append(el('span', 'name', label || d.path.split('/').pop()));
   const n = notes.filter((x) => x.doc === d.path).length;
   if (n) row.append(el('small', '', n));
-  const side = el('button', '', 'side');
+  const plus = el('button', 'plus', '+');
+  plus.title = 'Open alongside what is already open';
+  plus.setAttribute('aria-label', 'Open alongside what is already open');
+  plus.onclick = (e) => { e.stopPropagation(); openDoc(d.path, { keep: true }); };
+  row.append(plus);
+  const side = el('button', 'sideBtn', 'side');
   side.title = 'Open to the side';
   side.onclick = (e) => { e.stopPropagation(); openDoc(d.path, { side: true }); };
   row.append(side);
@@ -516,6 +604,7 @@ function fileRow(d, label) {
 // `side` puts it in the right-hand pane, splitting if needed.
 async function openDoc(path, { pane = state.active, side = false, hash, keep = false } = {}) {
   if (!docOf(path)) return;
+  if (phone.matches) { side = false; drawer(null); }   // one document at a time on a phone
   let rebuilt = false;
   if (side) {
     if (state.panes.length < 2) { state.panes.push({ tabs: [], active: null, preview: null }); rebuilt = true; pane = 1; }
@@ -801,6 +890,7 @@ function renderOutline() {
     a.onclick = (e) => {
       e.preventDefault();
       h.scrollIntoView();
+      drawer(null);
       if (h.dataset?.slug) history.replaceState(null, '', '?doc=' + encodeURIComponent(activeDoc()) + '#' + h.dataset.slug);
     };
     tocEl.append(a);
@@ -828,6 +918,8 @@ function chrome() {
   renderContext();
   renderNotes(false);
   setTabTitle();
+  const here = docOf(activeDoc());
+  $('mTitle').textContent = here ? (here.front ? config.title : here.title) : config.title;
   if (activeDoc()) history.replaceState(null, '', '?doc=' + encodeURIComponent(activeDoc()));
   save();
 }
@@ -849,7 +941,16 @@ document.addEventListener('selectionchange', () => {
   if (sel.isCollapsed || !sel.rangeCount) return;
   const node = sel.getRangeAt(0).commonAncestorContainer;
   const pane = views.findIndex((v) => v.article?.contains(node));
-  if (pane >= 0) takeSelection(sel.toString(), pane, sel.getRangeAt(0).startContainer);
+  if (pane < 0) return;
+  takeSelection(sel.toString(), pane, sel.getRangeAt(0).startContainer);
+  if (!touch.matches) return;
+  clearTimeout(touchTimer);
+  touchTimer = setTimeout(() => {
+    const s = window.getSelection();
+    if (s.isCollapsed || !s.rangeCount || !pendingQuote) return;
+    activeHl = null;
+    showFlyout(s.getRangeAt(0).getBoundingClientRect(), true);
+  }, 400);
 });
 
 function renderContext() {
@@ -913,7 +1014,9 @@ function createNote(text) {
 // ---- highlights -------------------------------------------------------------------
 // The flyout: one swatch per highlight type. On a fresh selection a swatch
 // highlights it; on an existing highlight it changes the type.
-function showFlyout(rect) {
+let touchTimer;
+// `below`: on touch screens the system's own selection menu sits above the text.
+function showFlyout(rect, below) {
   const f = $('flyout'), hl = hlNote();
   const cur = hl ? typeOf(hl.type).id : curType().id;
   f.innerHTML = '';
@@ -936,7 +1039,9 @@ function showFlyout(rect) {
   f.hidden = false;
   const w = f.offsetWidth;
   f.style.left = Math.max(8, Math.min(rect.left + rect.width / 2 - w / 2, innerWidth - w - 8)) + 'px';
-  f.style.top = (rect.top > 52 ? rect.top - 42 : rect.bottom + 8) + 'px';
+  const h = f.offsetHeight, under = rect.bottom + 14;
+  if (below && under + h < innerHeight - 8) f.style.top = under + 'px';
+  else f.style.top = (rect.top > h + 14 ? rect.top - h - 8 : rect.bottom + 8) + 'px';
 }
 function hideFlyout() { $('flyout').hidden = true; }
 $('flyout').addEventListener('mousedown', (e) => e.preventDefault()); // keep the selection
@@ -1022,6 +1127,7 @@ function flash(node) {
 
 function renderNotes(rehighlight = true) {
   const doc = activeDoc(), mine = notes.filter((n) => n.doc === doc);
+  $('mNotes').textContent = 'Notes' + (mine.length ? ` (${mine.length})` : '');
   notesEl.innerHTML = '';
   if (state.panes.length > 1) {
     const flip = el('button', 'flip', state.notesTop ? 'move notes below' : 'move notes above');
@@ -1038,6 +1144,7 @@ function renderNotes(rehighlight = true) {
       if (n.type) q.style.borderLeftColor = typeOf(n.type).color;
       q.onclick = () => {
         const mark = views[state.active].article?.querySelector(`mark[data-note="${n.id}"]`);
+        drawer(null);
         if (mark) flash(mark); else goTo(state.active, n.heading);
         selectHighlight(n.id);
       };
