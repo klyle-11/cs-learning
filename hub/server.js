@@ -161,6 +161,13 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   const p = url.pathname;
   try {
+    // A page on another website must not be able to change anything here. Browsers
+    // put the calling site in the Origin header; if it is not this server, refuse.
+    const origin = req.headers.origin;
+    if (req.method !== 'GET' && origin && origin !== 'null' && new URL(origin).host !== req.headers.host) {
+      return send(res, 403, { error: 'requests from other sites are not allowed' });
+    }
+    if (req.method !== 'GET' && origin === 'null') return send(res, 403, { error: 'requests from other sites are not allowed' });
     if (p === '/') return send(res, 200, fs.readFileSync(path.join(__dirname, 'index.html')), 'text/html');
     if (p === '/vendor/marked.js') {
       return send(res, 200, fs.readFileSync(path.join(__dirname, 'node_modules/marked/lib/marked.umd.js')), 'text/javascript');

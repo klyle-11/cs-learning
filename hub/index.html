@@ -28,14 +28,14 @@
     --accent: #0072d4; --mark: #f1dc9a; --reply: #e6ebcb; --field: #fffaea; --quote: #53676d;
     --c-kw: #8762c6; --c-str: #009c8f; --c-com: #909995; --c-num: #c25d1e; --c-fn: #0072d4; --c-type: #ad8900;
   }
-  :root[data-theme="lime"] { /* pale lime green */
-    --paper: #f4fae6; --shade: #e8f2d3; --ink: #26301a; --muted: #5f6b4e; --rule: #cfdcb4;
-    --accent: #4a7410; --mark: #f6e58d; --reply: #dcecc6; --field: #fbfef3; --quote: #3f4a30;
+  :root[data-theme="lime"] { /* pale lime, a touch cool; golden-sepia ink and accents */
+    --paper: #eff9e9; --shade: #e1f0d9; --ink: #4d3c1f; --muted: #7b6535; --rule: #c6dbbb;
+    --accent: #8f6a14; --mark: #f6e58d; --reply: #d6ead0; --field: #f9fdf5; --quote: #5f4c2a;
     --c-kw: #8a3b6b; --c-str: #2e7d4f; --c-com: #66725a; --c-num: #a35a00; --c-fn: #1e5fa8; --c-type: #6b3fa0;
   }
-  :root[data-theme="sky"] { /* pale sky blue */
-    --paper: #eef7fd; --shade: #dfeef9; --ink: #1b2a38; --muted: #55687a; --rule: #c3d9ea;
-    --accent: #1668a8; --mark: #fbe9a6; --reply: #dcefe6; --field: #fafdff; --quote: #34485a;
+  :root[data-theme="sky"] { /* pale sky blue, a touch warm; golden-sepia ink and accents */
+    --paper: #f1f6f9; --shade: #e4edf3; --ink: #4d3c1f; --muted: #7b6535; --rule: #cbd9e3;
+    --accent: #8f6a14; --mark: #fbe9a6; --reply: #e2ede4; --field: #fcfdfe; --quote: #5f4c2a;
     --c-kw: #8a3fa0; --c-str: #1f7a5c; --c-com: #5d7082; --c-num: #b25a00; --c-fn: #1668a8; --c-type: #5a4fc0;
   }
   :root[data-theme="eva"] { /* Eva Dark */
@@ -53,7 +53,7 @@
   :root[data-font="sans"] { --body: var(--sans); --head: var(--serif); }
 
   * { box-sizing: border-box; }
-  html, body { height: 100%; }
+  html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
   body { margin: 0; overflow: hidden; background: var(--paper); color: var(--ink); font: var(--fs, 18px)/1.65 var(--body); }
 
   /* Keyboard focus is always obvious. */
@@ -144,12 +144,30 @@
   .tab.active { background: var(--paper); color: var(--ink); }
   .pane.active .tab.active { border-top-color: var(--accent); }
   .tab button, .tabs > button { border: 0; padding: 0 4px; color: var(--muted); }
+  .tabs > button + button { margin-left: 0 !important; }
+  .tabs > button[aria-pressed="true"] { color: var(--accent); }
   .tabs > button { margin-left: auto; padding: 0 10px; white-space: nowrap; flex: none; position: sticky; right: 0; background: var(--shade); }
   .tab { flex: none; }
   .body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-  .scroller { flex: 1; overflow-y: auto; padding: 0 32px; }
+  /* a document scrolls up and down only; wide tables and code scroll inside themselves */
+  .scroller { flex: 1; overflow-y: auto; overflow-x: hidden; overscroll-behavior-x: none; padding: 0 32px; }
   .body iframe { flex: 1; width: 100%; border: 0; background: #fff; }
   .empty { color: var(--muted); font: 14px var(--head); padding: 24px 32px; }
+
+  /* contents dial: shown when the sidebar is not. A bare icon over the page;
+     it opens a small scrolling list where the centred heading is the big one. */
+  #work { position: relative; }
+  #tocBtn { display: none; position: absolute; z-index: 4; top: 44px; right: 14px; width: 34px; height: 34px; padding: 6px; border: 0; background: transparent; color: var(--muted); }
+  #tocBtn svg { display: block; width: 100%; height: 100%; }
+  #tocBtn[aria-expanded="true"] { color: var(--accent); }
+  body.side-closed #tocBtn { display: block; }
+  #dial { position: absolute; z-index: 4; top: 82px; right: 10px; width: min(72%, 300px); height: 46vh; overflow-y: auto; overscroll-behavior: contain; scroll-snap-type: y mandatory; padding: calc(23vh - 13px) 0; background: color-mix(in srgb, var(--paper) 93%, transparent); border: 1px solid var(--rule); font-family: var(--head); }
+  #dial[hidden] { display: none; }
+  #dial .d { height: 26px; line-height: 26px; padding: 0 10px; font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; scroll-snap-align: center; cursor: pointer; }
+  #dial .d.l2 { padding-left: 20px; }
+  #dial .d.l3 { padding-left: 30px; }
+  #dial .d.sel { font-size: 16px; font-weight: 700; color: var(--accent); padding-left: 10px; border-left: 3px solid var(--accent); }
+  #dial .none { padding: 0 10px; font-size: 12px; color: var(--muted); }
 
   /* a rendered document */
   .md { max-width: 40em; margin: 0 auto; padding: 16px 0 120px; }
@@ -166,7 +184,8 @@
   .hljs-number, .hljs-symbol, .hljs-meta, .hljs-attr, .hljs-variable { color: var(--c-num); }
   .hljs-title, .hljs-section, .hljs-name { color: var(--c-fn); }
   .hljs-type, .hljs-built_in, .hljs-class .hljs-title { color: var(--c-type); }
-  .md table { border-collapse: collapse; font-size: .92em; }
+  .md { overflow-wrap: anywhere; }
+  .md table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; font-size: .92em; }
   .md td, .md th { border: 1px solid var(--rule); padding: 6px 10px; vertical-align: top; }
   .md img { max-width: 100%; }
   .md hr { border: 0; border-top: 1px solid var(--rule); margin: 2em 0; }
@@ -226,14 +245,18 @@
     #mobileBar b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
     #mobileBar button { padding: 8px 12px; font-size: 14px; background: var(--paper); }
     #work { grid-row: 2; padding-left: 0 !important; }
+    #tocBtn { display: block; right: 6px; }
+    #dial { right: 6px; }
 
     #side { position: fixed; z-index: 8; left: 0; top: 0; bottom: 0; width: min(86vw, 330px); background: var(--paper); box-shadow: 4px 0 16px rgba(0, 0, 0, .25); transform: translateX(-105%) !important; font-size: 15px; }
-    body.m-side #side { transform: none !important; }
+    body.m-side #side { transform: none !important; visibility: visible; }
+    #side, #right { visibility: hidden; }   /* closed drawers take no part in scrolling */
+    #app { overflow: hidden; }
     #right { display: flex !important; position: fixed; z-index: 8; right: 0; top: 0; bottom: 0; width: min(92vw, 430px) !important; background: var(--paper); box-shadow: -4px 0 16px rgba(0, 0, 0, .25); transform: translateX(105%); }
-    body.m-right #right { transform: none; }
+    body.m-right #right { transform: none; visibility: visible; }
     #right.no-notes #notes { display: block; flex: 1 1 0; }
     body.m-side #backdrop, body.m-right #backdrop { display: block; position: fixed; inset: 0; z-index: 7; background: rgba(0, 0, 0, .4); }
-    #sideEdge, #sideToggle, #notesToggle, #rightGrip, .tabs > button, .file .sideBtn { display: none !important; }
+    #sideEdge, #sideToggle, #notesToggle, #rightGrip, .tabs > button:not(.keep), .file .sideBtn { display: none !important; }
     .file .plus { visibility: visible; font-size: 22px; line-height: 1; padding: 0 10px; }
 
     .file { padding: 8px 6px; }
@@ -269,6 +292,8 @@
   </nav>
   <div id="work" role="main">
     <div id="panes"></div>
+    <button id="tocBtn" type="button" aria-label="Contents of this document" aria-expanded="false" title="Contents"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="square"><path d="M3 5h3M9 5h12M3 12h3M9 12h9M3 19h3M9 19h6"/></svg></button>
+    <div id="dial" hidden></div>
     <form id="composer">
       <div class="inner">
         <button type="button" id="grip" aria-label="Make the note box taller or shorter" title="Drag up to make the note box taller, or press to switch between small and tall"></button>
@@ -298,7 +323,8 @@ let docs = [], config = { title: '' }, notes = [], pendingQuote = '', pendingHea
 // Layout: one or two panes, each with its open tabs. Saved per folder.
 // Pane 0 is the main reader; pane 1, when present, sits in the right column above or below the notes.
 let state = { panes: [{ tabs: [], active: null, preview: null }], active: 0, notesOpen: true, sideOpen: true, notesW: 300, notesH: 40, notesTop: false, closed: [] };
-const views = [];            // DOM for each pane: { root, tabsEl, body, scroller, article, frame, heads, cur }
+const views = [];            // DOM for each pane: { root, tabsEl, body, scroller, article, frame, surface, heads, cur }
+                             // surface: the element highlights are drawn in (the article, or a framed page's body)
 const scrollMem = new Map(); // "pane:path" -> scrollTop
 
 const api = (url, method = 'GET', body) =>
@@ -708,6 +734,14 @@ function renderTabs(pane) {
     };
     bar.append(tab);
   }
+  if (p.active && isHtml(p.active)) {
+    const on = scriptsOn(p.active);
+    const sc = el('button', 'keep', on ? 'scripts: on' : 'scripts: off');
+    sc.title = on ? 'This page\'s own scripts are running. Press to turn them off.' : 'This page\'s own scripts are switched off. Press to let them run (only for pages you trust).';
+    sc.setAttribute('aria-pressed', on);
+    sc.onclick = async () => { setScripts(p.active, !on); renderTabs(pane); await showDoc(pane); chrome(); };
+    bar.append(sc);
+  }
   if (p.active) {
     const split = el('button', '', state.panes.length > 1 ? 'to other side' : 'open on right');
     split.title = 'Open this document in the other pane';
@@ -725,6 +759,14 @@ function slugify(text, used) {
   return out;
 }
 
+// HTML files: whether a page's own scripts may run, remembered per file.
+const scriptsOn = (path) => !!(view.scripts && view.scripts[path]);
+function setScripts(path, on) {
+  view.scripts = { ...(view.scripts || {}) };
+  if (on) view.scripts[path] = true; else delete view.scripts[path];
+  store.set('view', view);
+}
+
 // Source files are shown as one fenced code block, tagged with their language.
 const LANG = { c: 'c', h: 'c', cpp: 'cpp', hpp: 'cpp', cc: 'cpp', py: 'python', js: 'javascript', ts: 'typescript', rs: 'rust', go: 'go', java: 'java', sh: 'bash', Makefile: 'makefile' };
 async function fetchDoc(path) {
@@ -738,21 +780,94 @@ async function fetchDoc(path) {
 async function showDoc(pane, hash, keepScroll) {
   const v = views[pane], path = state.panes[pane].active;
   const y = v.scroller ? v.scroller.scrollTop : 0;
-  Object.assign(v, { heads: [], cur: null, article: null, scroller: null, frame: null });
+  Object.assign(v, { heads: [], cur: null, article: null, surface: null, scroller: null, frame: null });
   if (!path) { v.body.replaceChildren(el('p', 'empty', 'Nothing open. Pick a file on the left.')); return; }
 
   // HTML files are shown as they are, in a frame.
   if (isHtml(path)) {
     const frame = el('iframe');
+    // The page's own scripts stay off unless turned on for this file. Without
+    // them the reader can still reach in to read headings and draw highlights.
+    if (!scriptsOn(path)) frame.setAttribute('sandbox', 'allow-same-origin');
+    frame.referrerPolicy = 'no-referrer';
+    let bounced = false;
     frame.src = '/raw/' + path.split('/').map(encodeURIComponent).join('/');
     frame.onload = () => {
       try {
-        const d = frame.contentDocument;
+        const d = frame.contentDocument, used = new Set();
         v.heads = [...d.querySelectorAll('h1, h2, h3')];
-        d.addEventListener('pointerdown', () => setActive(pane));
-        d.addEventListener('selectionchange', () => takeSelection(d.getSelection().toString(), pane));
-      } catch {}
-      if (pane === state.active) renderOutline();
+        for (const h of v.heads) h.dataset.slug = slugify(h.textContent, used);
+        v.surface = d.body;
+        // No sideways sliding: the page scrolls up and down only. Images shrink
+        // to fit; code blocks and tables that are too wide scroll inside themselves.
+        const lock = d.createElement('style');
+        lock.textContent = 'html, body { overflow-x: hidden !important; overscroll-behavior-x: none; max-width: 100%; }' +
+          ' body { overflow-wrap: anywhere; } img, video, svg, canvas, iframe { max-width: 100%; height: auto; }' +
+          ' pre { max-width: 100%; overflow-x: auto; }';
+        d.head.append(lock);
+        const wide = d.documentElement.clientWidth;
+        for (const t of d.querySelectorAll('table')) {
+          if (t.scrollWidth > wide) Object.assign(t.style, { display: 'block', maxWidth: '100%', overflowX: 'auto' });
+        }
+        const where = (r) => { const f = frame.getBoundingClientRect(); return { left: r.left + f.left, top: r.top + f.top, bottom: r.bottom + f.top, width: r.width, height: r.height }; };
+        const offerFlyout = (below) => {
+          const sel = d.getSelection();
+          if (sel.isCollapsed || !sel.rangeCount || !pendingQuote) return;
+          activeHl = null;
+          showFlyout(where(sel.getRangeAt(0).getBoundingClientRect()), below);
+        };
+        d.addEventListener('pointerdown', (e) => {
+          setActive(pane);
+          hideFlyout();
+          closeDial();
+          if (e.target.closest?.('mark[data-note]') || (!activeHl && !pendingQuote)) return;
+          activeHl = null;
+          pendingQuote = '';
+          renderContext();
+          renderNotes(false);
+          markActive();
+        });
+        d.addEventListener('selectionchange', () => {
+          const sel = d.getSelection();
+          if (sel.isCollapsed || !sel.rangeCount) return;
+          takeSelection(sel.toString(), pane, sel.getRangeAt(0).startContainer);
+          if (touch.matches) { clearTimeout(touchTimer); touchTimer = setTimeout(() => offerFlyout(true), 400); }
+        });
+        d.addEventListener('pointerup', () => setTimeout(() => offerFlyout(false)));
+        d.addEventListener('click', (e) => {
+          const mark = e.target.closest?.('mark[data-note]');
+          if (mark) { e.preventDefault(); return selectHighlight(mark.dataset.note, where(mark.getBoundingClientRect())); }
+          // Links never take the frame somewhere else. Another document in the
+          // folder opens in the reader; anything on another site opens in a new
+          // browser tab, outside the hub.
+          const a = e.target.closest?.('a[href], area[href]');
+          if (!a) return;
+          let url;
+          try { url = new URL(a.href, d.baseURI); } catch { return e.preventDefault(); }
+          const here = new URL(d.location.href);
+          if (url.origin === location.origin && url.pathname === here.pathname && url.hash) return; // a jump within this page
+          e.preventDefault();
+          if (url.origin !== location.origin) {
+            if (/^https?:$/.test(url.protocol) || url.protocol === 'mailto:') window.open(url.href, '_blank', 'noopener,noreferrer');
+            return;
+          }
+          const rel = url.pathname.startsWith('/raw/') ? decodeURIComponent(url.pathname.slice(5)) : null;
+          if (rel && docOf(rel)) openDoc(rel, { pane, hash: decodeURIComponent(url.hash.slice(1)), side: e.metaKey || e.ctrlKey || e.altKey });
+          else if (rel) window.open(url.href, '_blank', 'noopener');
+        }, true);
+        frame.contentWindow.addEventListener('scroll', () => { track(pane); hideFlyout(); }, { passive: true });
+        highlightAll(v.surface, path);
+        if (hash) goTo(pane, hash);
+        track(pane);
+      } catch {
+        // The frame has left for another site (a redirect or a script, not a click).
+        // Bring the saved page back; if it leaves again, stop and say so.
+        v.heads = [];
+        v.surface = null;
+        if (!bounced) { bounced = true; frame.src = '/raw/' + path.split('/').map(encodeURIComponent).join('/'); }
+        else v.body.replaceChildren(el('p', 'empty', 'This page keeps trying to leave for another site, so it was stopped. Turn its scripts off, or open the file in a browser tab instead.'));
+      }
+      if (pane === state.active) { renderOutline(); renderContext(); }
     };
     v.frame = frame;
     v.body.replaceChildren(frame);
@@ -765,7 +880,7 @@ async function showDoc(pane, hash, keepScroll) {
   article.innerHTML = marked.parse(md);
   scroller.append(article);
   v.body.replaceChildren(scroller);
-  Object.assign(v, { scroller, article });
+  Object.assign(v, { scroller, article, surface: article });
 
   const used = new Set();
   for (const h of article.querySelectorAll('h1, h2, h3')) {
@@ -868,13 +983,23 @@ function onDocClick(e, pane) {
 // ---- outline, and which heading the reader is under ---------------------------
 function track(pane) {
   const v = views[pane];
-  if (!v.scroller) return;
-  const box = v.scroller.getBoundingClientRect(), top = box.top;
-  const room = v.scroller.scrollHeight - v.scroller.clientHeight;
-  v.bar.style.width = (room > 0 ? Math.round((v.scroller.scrollTop / room) * 100) : 100) + '%';
-  if (view.focus && v.article) setHere(pane, document.elementFromPoint(box.left + box.width / 2, top + box.height * 0.35));
+  let top, scrolled, room;
+  if (v.scroller) {
+    const box = v.scroller.getBoundingClientRect();
+    top = box.top;
+    scrolled = v.scroller.scrollTop;
+    room = v.scroller.scrollHeight - v.scroller.clientHeight;
+    if (view.focus && v.article) setHere(pane, document.elementFromPoint(box.left + box.width / 2, top + box.height * 0.35));
+  } else if (v.frame && v.surface) {
+    // A framed page: positions are measured inside the frame's own window.
+    const w = v.frame.contentWindow;
+    top = 0;
+    scrolled = w.scrollY;
+    room = v.surface.ownerDocument.documentElement.scrollHeight - w.innerHeight;
+  } else return;
+  v.bar.style.width = (room > 0 ? Math.round((scrolled / room) * 100) : 100) + '%';
   let cur = v.heads[0] || null;
-  for (const h of v.heads) { if (h.getBoundingClientRect().top - top < 110) cur = h; else break; }
+  for (const h of v.heads) { if (h.getBoundingClientRect().top - top < 48) cur = h; else break; }
   if (cur === v.cur) return;
   v.cur = cur;
   if (pane === state.active) { markOutline(); renderContext(); }
@@ -903,6 +1028,46 @@ function markOutline() {
   tocEl.querySelector('.active')?.scrollIntoView({ block: 'nearest' });
 }
 
+// ---- contents dial ----------------------------------------------------------------
+// Scroll the list: the heading nearest its centre is selected (and drawn big).
+// Tap the selected heading to go there; tap another to bring it to the centre.
+const dial = $('dial'), tocBtn = $('tocBtn');
+function closeDial() { dial.hidden = true; tocBtn.setAttribute('aria-expanded', 'false'); }
+function markDial() {
+  const box = dial.getBoundingClientRect(), mid = box.top + box.height / 2;
+  let best = null, gap = Infinity;
+  for (const d of dial.querySelectorAll('.d')) {
+    const r = d.getBoundingClientRect(), g = Math.abs(r.top + r.height / 2 - mid);
+    if (g < gap) { gap = g; best = d; }
+  }
+  for (const d of dial.querySelectorAll('.d')) d.classList.toggle('sel', d === best);
+}
+function openDial() {
+  const v = views[state.active];
+  dial.innerHTML = '';
+  if (!v || !v.heads.length) dial.append(el('div', 'none', 'No headings in this document.'));
+  const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  (v ? v.heads : []).forEach((h) => {
+    const d = el('div', 'd l' + h.tagName[1], h.textContent);
+    d.tabIndex = 0;
+    d.setAttribute('role', 'button');
+    d.onclick = () => {
+      if (d.classList.contains('sel')) { h.scrollIntoView(); closeDial(); }
+      else d.scrollIntoView({ block: 'center', behavior: calm ? 'auto' : 'smooth' });
+    };
+    dial.append(d);
+  });
+  dial.hidden = false;
+  tocBtn.setAttribute('aria-expanded', 'true');
+  const at = v ? v.heads.indexOf(v.cur) : -1;
+  if (at >= 0) dial.querySelectorAll('.d')[at].scrollIntoView({ block: 'center', behavior: 'auto' });
+  markDial();
+}
+tocBtn.onclick = () => (dial.hidden ? openDial() : closeDial());
+dial.addEventListener('scroll', markDial, { passive: true });
+document.addEventListener('pointerdown', (e) => { if (!dial.hidden && !e.target.closest('#dial, #tocBtn')) closeDial(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !dial.hidden) { closeDial(); tocBtn.focus(); } });
+
 // Everything outside the panes that depends on which document has focus.
 function chrome() {
   views.forEach((v, i) => v.root.classList.toggle('active', i === state.active));
@@ -914,6 +1079,7 @@ function chrome() {
   pendingQuote = '';
   activeHl = null;
   hideFlyout();
+  closeDial();
   renderOutline();
   renderContext();
   renderNotes(false);
@@ -1052,6 +1218,7 @@ async function highlightSelection(typeId) {
   const n = await createNote('');
   pendingQuote = '';
   window.getSelection().removeAllRanges();
+  views[state.active].surface?.ownerDocument.getSelection()?.removeAllRanges();
   activeHl = n.id;
   await loadNotes();
   renderContext();
@@ -1075,7 +1242,15 @@ function selectHighlight(id, rect) {
   flash(notesEl.querySelector(`.note[data-id="${id}"]`));
 }
 function markActive() {
-  for (const m of document.querySelectorAll('mark[data-note]')) m.classList.toggle('on', m.dataset.note === activeHl);
+  for (const v of views) {
+    if (!v.surface) continue;
+    const framed = v.surface.ownerDocument !== document; // a framed page has none of the reader's styles
+    for (const m of v.surface.querySelectorAll('mark[data-note]')) {
+      const on = m.dataset.note === activeHl;
+      m.classList.toggle('on', on);
+      if (framed) m.style.boxShadow = on ? '0 0 0 2px #8c2f1b' : '';
+    }
+  }
 }
 // Clicking elsewhere in a document drops the flyout and the active highlight.
 document.addEventListener('pointerdown', (e) => {
@@ -1121,6 +1296,11 @@ function renderTypes() {
 function flash(node) {
   if (!node) return;
   node.scrollIntoView({ block: 'center' });
+  if (node.ownerDocument !== document) { // inside a framed page: no stylesheet to lean on
+    node.style.outline = '2px solid #8c2f1b';
+    setTimeout(() => { node.style.outline = ''; }, 1200);
+    return;
+  }
   node.classList.add('flash');
   setTimeout(() => node.classList.remove('flash'), 1200);
 }
@@ -1143,7 +1323,7 @@ function renderNotes(rehighlight = true) {
       const q = el('div', 'quote', n.quote.length > 160 ? n.quote.slice(0, 160) + '…' : n.quote);
       if (n.type) q.style.borderLeftColor = typeOf(n.type).color;
       q.onclick = () => {
-        const mark = views[state.active].article?.querySelector(`mark[data-note="${n.id}"]`);
+        const mark = views[state.active].surface?.querySelector(`mark[data-note="${n.id}"]`);
         drawer(null);
         if (mark) flash(mark); else goTo(state.active, n.heading);
         selectHighlight(n.id);
@@ -1185,7 +1365,7 @@ function renderNotes(rehighlight = true) {
     }
     notesEl.append(div);
   }
-  if (rehighlight) views.forEach((v, i) => v.article && highlightAll(v.article, state.panes[i].active));
+  if (rehighlight) views.forEach((v, i) => v.surface && highlightAll(v.surface, state.panes[i].active));
 }
 
 // Wrap each note's quote in <mark>. Matching ignores whitespace so a selection
@@ -1197,7 +1377,10 @@ function highlightAll(article, path) {
   markActive();
 }
 function highlight(article, quote, id, color) {
-  const walker = document.createTreeWalker(article, NodeFilter.SHOW_TEXT);
+  const doc = article.ownerDocument, framed = doc !== document;
+  // Text inside <script> and <style> is not part of what the reader sees.
+  const visible = { acceptNode: (n) => (/^(SCRIPT|STYLE|NOSCRIPT)$/.test(n.parentNode.nodeName) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT) };
+  const walker = doc.createTreeWalker(article, NodeFilter.SHOW_TEXT, visible);
   const at = [];
   let flat = '', node;
   while ((node = walker.nextNode())) {
@@ -1215,18 +1398,21 @@ function highlight(article, quote, id, color) {
   }
   // Whitespace-only text between the first and last piece is part of the span too.
   const first = at[start][0], last = at[start + needle.length - 1][0];
-  const between = document.createTreeWalker(article, NodeFilter.SHOW_TEXT);
+  const between = doc.createTreeWalker(article, NodeFilter.SHOW_TEXT, visible);
   between.currentNode = first;
-  for (let nd = between.nextNode(); nd && nd !== last; nd = between.nextNode()) {
+  for (let nd = first === last ? null : between.nextNode(); nd && nd !== last; nd = between.nextNode()) {
     if (!spans.has(nd) && nd.data.length && !nd.data.includes('\n\n')) spans.set(nd, [0, nd.data.length - 1]);
   }
-  for (const [nd, [a, b]] of spans) {
-    const range = document.createRange();
+  for (const [nd, [a0, b0]] of spans) {
+    // Pieces in the middle are covered whole, so spaces at their edges are not left as gaps.
+    const a = nd === first ? a0 : 0, b = nd === last ? b0 : nd.data.length - 1;
+    const range = doc.createRange();
     range.setStart(nd, a);
     range.setEnd(nd, b + 1);
-    const mark = el('mark');
+    const mark = doc.createElement('mark');
     mark.dataset.note = id;
     if (color) mark.style.background = color;
+    if (framed) { mark.style.background = color || '#fbeeb0'; mark.style.color = '#1d1b16'; mark.style.cursor = 'pointer'; }
     range.surroundContents(mark);
   }
 }

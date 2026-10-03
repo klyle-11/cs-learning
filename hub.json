@@ -1,5 +1,12 @@
 {
   "title": "CS Learning",
-  "side": ["references.md", "responses/"],
-  "ignore": ["CLAUDE.md", "build/"]
+  "side": [
+    "references.md",
+    "responses/"
+  ],
+  "ignore": [
+    "CLAUDE.md",
+    "build/",
+    "server-cpp/"
+  ]
 }

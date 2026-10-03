@@ -12,7 +12,8 @@
 - [x] Choose a highlight colour in the flyout; the choice sticks until changed
 - [x] Highlight types: each type has its own colour and a name the user can set (e.g. "definition", "question", "don't understand yet")
 - [x] Highlights are saved and persist across sessions — markdown and code files
-- [ ] Same for HTML, EPUB and PDF
+- [x] Same for HTML pages (drawn inside the frame)
+- [ ] Same for EPUB and PDF
 
 **Annotating**
 - [x] The existing bottom text input stays where it is and is also the annotation input
@@ -45,20 +46,29 @@
 - [ ] Dyslexia-friendly font option; line-by-line reading ruler
 - [ ] Session aids: "where I stopped" bookmark per document, optional timer
 
-## Next: a C server that also runs on an ESP32
+## The C++ server (branch `c-server`, folder `server-cpp/`)
 
-Goal: serve the same `index.html` from an ESP32 with the documents on a microSD card, for one or two people.
+Goal: serve the same `index.html` from an ESP32 with the documents on a microSD card, for one or two people. One C++ server for both desktop and board; the Node server goes once this one fully matches it.
 
-- [ ] Write the HTTP API down as the contract (routes, request and response shapes) so two servers can be checked against it
-- [ ] One portable C server in `server-c/`: POSIX sockets and plain file I/O, which ESP-IDF also provides (lwIP sockets, FAT on SD through its file layer). Build and test it on the Mac first, against the existing page
-- [ ] Small platform layer for what differs: Wi-Fi start-up and SD mount on the ESP32; file-change events on desktop, polling on the ESP32
-- [ ] Streaming file reads, one notes file per document, cached file index, write-to-temp-then-rename for saves
-- [ ] ESP32 build (ESP-IDF project in `server-c/esp32/`), tried on a board with PSRAM
-- [ ] HTTP Range requests and long cache headers, so the browser's PDF reader can fetch a large PDF a piece at a time and the reader's own scripts load from the card only once
-- [ ] EPUB and PDF are parsed in the browser (the board only serves the bytes); keep those libraries on the card, gzipped
-- [ ] When the C server passes the same checks as the Node one on desktop, delete the Node server
+Done:
+- [x] API written down as the contract: `server-cpp/API.md`
+- [x] Desktop server `hubd` (C++17, POSIX sockets, cJSON): pages, files, document list, settings, front page, notes and highlights, folder upload into the workspace, live reload by polling
+- [x] `test/contract.sh`: 36 requests sent to both servers, answers identical
+- [x] `make check` build with memory-error detection; clean on the contract test and on malformed requests
+- [x] Device profiles (desktop / small / esp32) picked at start-up, with caching of the page, scripts and document list
+- [x] Write-up: `docs/08-server-migration/node-to-cpp-server.md`
 
-Do the work on a branch and merge it; do not keep two long-lived branches. One C server for both targets, not C on the board and Node on the desktop, and C not C++ (nothing here needs C++, and C keeps it closer to the systems track).
+Still to do:
+- [ ] Upload as its own workspace, and switching workspaces (answers 501 for now)
+- [ ] Send files in pieces instead of reading them whole (needed on the board; also lifts the memory cost of big files on desktop)
+- [ ] HTTP Range requests and cache headers, so the browser's PDF reader can fetch a large PDF a piece at a time
+- [ ] Keep connections open between requests (each request currently opens a new one)
+- [ ] ESP-IDF project in `server-cpp/esp32/`: Wi-Fi start-up, SD mount, the same handlers registered with ESP-IDF's own HTTP server
+- [ ] One notes file per document, so a save on the board rewrites a small file
+- [ ] Try it on the board; measure SD read speed and how long the document list takes
+- [ ] Copy the page and its two scripts to the card (`www/`), gzipped
+- [ ] Run the page against `hubd` in a browser for a full session (only the API has been compared so far)
+- [ ] When all of the above passes on desktop, delete `hub/server.js`
 
 ## Idea: a C/C++ document parser for highlight continuity (EPUB and PDF)
 
@@ -71,6 +81,13 @@ Parse EPUB and PDF into a stable structure of pages / sections / paragraphs with
 - [ ] Per-person highlight files, so two readers of one document do not overwrite each other
 - Open question: how this relates to the browser-side EPUB/PDF rendering planned above. One option is the browser renders, the parser only produces the paragraph map used for anchoring
 
+## Using it like an app on a phone
+
+- [ ] "Add to Home Screen" polish: a web manifest, an icon and a theme colour, so it opens full-screen from an icon. No reinstall is needed after changes; it loads the current page from the server each time
+- [ ] Offline is the hard part on the ESP32: the browser feature that lets an installed web app work offline (a service worker) only runs on HTTPS or localhost, and the board serves plain HTTP on a local address
+- [ ] Alternative for offline reading: "export a snapshot", one self-contained HTML file holding the reader, the documents and the notes at that moment
+- [ ] Keep documents and unsent notes in the browser's own storage, and send notes to the board when it is reachable again
+
 ## Project structure
 
 - [ ] Decide whether the hub becomes its own code project (own branch or repo), using this repo's markdown files and folders as example content to develop with
@@ -79,7 +96,7 @@ Parse EPUB and PDF into a stable structure of pages / sections / paragraphs with
 ## Carried over from the first brainstorm
 
 - [ ] Notes can be deleted but not edited
-- [ ] Notes pinned inside HTML documents are saved but not highlighted in the page
+- [x] Notes pinned inside HTML documents are highlighted in the page; per-file switch for the page's own scripts
 - [ ] Concept map as a home view
 - [ ] Interactive visualisations (function arrow diagrams, pigeonhole, truth tables), proof stepper
 - [ ] Maths ↔ code side by side per concept
