@@ -105,7 +105,7 @@
   body.side-closed #sideEdge { display: block; }
   body.side-closed #work { padding-left: 14px; }
   @media (prefers-reduced-motion: no-preference) { body.side-closed #side { transition: transform .12s; } }
-  #workspace { font: 13px var(--head); color: inherit; background: var(--paper); border: 1px solid var(--rule); padding: 1px 4px; margin: 0 10px 8px 0; }
+  #workspace, #hubSel { font: 13px var(--head); color: inherit; background: var(--paper); border: 1px solid var(--rule); padding: 1px 4px; margin: 0 10px 8px 0; }
   #sideTools { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 10px 8px 0; }
   #sideTools button, #sideTools select { margin: 0 !important; }
   #sideTools button[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
@@ -245,6 +245,15 @@
   /* privacy: connection, this device, copies kept here */
   #privacy { margin: 0 10px 10px 0; padding: 6px 8px; border: 1px solid var(--rule); font-size: 12.5px; line-height: 1.5; }
   #privacy:empty { display: none; }
+  /* hubs: this one and the others this device can look at */
+  #hubsBox { margin: 0 10px 10px 0; padding: 6px 8px; border: 1px solid var(--rule); font-size: 12.5px; line-height: 1.6; }
+  #hubsBox b { font-weight: 600; }
+  #hubsBox .sub { color: var(--muted); }
+  #hubsBox button { border: 0; padding: 0; color: var(--accent); font-size: 12.5px; text-decoration: underline; }
+  #panes > button.link { display: block; margin: 0 32px; border: 0; padding: 0; color: var(--accent); text-decoration: underline; font-size: 14px; }
+  #gate h5 { margin: 16px 0 2px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 400; }
+  #gate .dev.go { cursor: pointer; }
+  #gate .dev.go:hover span { color: var(--accent); }
   #privacy b { font-weight: 600; }
   #privacy button { border: 0; padding: 0; color: var(--accent); font-size: 12.5px; text-decoration: underline; }
   #privacy .say, .say { color: #c0392b; }
@@ -425,7 +434,7 @@
     #mini { font-size: 13.5px; }
     #sideTools { gap: 6px; }
     #sideTools button, #sideTools select { padding: 6px 10px; font-size: 14px; }
-    #net, #privacy, #net button, #privacy button, #netBrief { font-size: 13.5px; }
+    #net, #privacy, #hubsBox, #net button, #privacy button, #hubsBox button, #netBrief { font-size: 13.5px; }
     #gate { padding: 5vh 12px; }
     #gate button:not(.x):not(.link) { padding: 9px 14px; }
     #gate button.link { padding: 9px 0; }
@@ -464,8 +473,11 @@
       <div id="net" role="status" aria-live="polite"></div>
       <div class="label">This device</div>
       <div id="privacy" role="status"></div>
+      <div class="label">Hubs</div>
+      <div id="hubsBox"></div>
     </div>
     <button id="netBrief" hidden title="Open the settings for the details"></button>
+    <select id="hubSel" title="Which hub to look at" hidden></select>
     <select id="workspace" title="Workspace" hidden></select>
     <div class="label row">Files<button id="addBtn" class="ic" aria-label="Add files" title="Add files from this device. If the server is out of reach they are held here and sent later."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></button><input id="fileInput" type="file" multiple hidden><button id="uploadBtn" class="ic" aria-label="Upload a folder" title="Bring a folder from your computer into the hub"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h6l2 2h10v11H3z"/><path d="M12 17v-6M9.5 13.5L12 11l2.5 2.5"/></svg></button><input id="folderInput" type="file" webkitdirectory multiple hidden></div>
     <div id="tree"></div>

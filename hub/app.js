@@ -21,16 +21,40 @@ const scrollMem = new Map(); // "pane:path" -> scrollTop
 // answer in a few seconds counts as failed. The wait is only for the answer
 // to start: a long download is not cut short, and an upload is given time
 // for its size.
+// ---- hubs ------------------------------------------------------------------------------
+// The reader is loaded from one hub ("this hub") and can be pointed at another:
+// a hub on a different machine that this device has paired with as well. Every
+// request then goes to that hub, with the token it gave this device. The list
+// of other hubs is kept by this hub, so all its devices see the same list.
+// What this device keeps from a hub is stored under that hub's address, so
+// copies from all of them sit side by side (see showKept).
+const HOME = { name: 'This hub', url: '' };
+let hubs = [], hub = HOME;
+const hubToken = (url) => (store.get('hub:tokens') || {})[url] || '';
+// Settings as a hub sent them, marked with the hub they came from: `root` is
+// what everything kept on this device is filed under.
+const ours = (c) => { if (hub.url) c.root = hub.url + ' ' + c.root; return c; };
+const configSlot = () => 'hub:config' + (hub.url ? ':' + hub.url : '');
+function switchHub(url, doc) {
+  store.set('hub:at', url);
+  Promise.resolve(local.whenSaved()).then(() => { location.href = doc ? '/?doc=' + encodeURIComponent(doc) : '/'; });
+}
+
 const unreachable = (opts) => Object.assign(new Error('The server is not reachable.'), { offline: true, method: opts.method || 'GET' });
 async function call(url, opts = {}) {
   // Known to be out of reach: nothing waits on it. Only the regular look for
   // the server (`probe`) goes out, and everything resumes when that succeeds.
   if (!net.online && !opts.probe) throw unreachable(opts);
+  // Another hub answers only to the token it gave this device when they paired.
+  if (hub.url && !hubToken(hub.url)) {
+    if (!opts.quiet) askToPair();
+    return new Response('{"error":"pairing required"}', { status: 401, headers: { 'Content-Type': 'application/json' } });
+  }
   const ctl = new AbortController();
   const wait = opts.wait || (opts.body instanceof Blob ? 30000 + opts.body.size / 20 : net.online ? 8000 : 4000);
   const timer = setTimeout(() => ctl.abort(), wait);
   try {
-    const r = await fetch(url, { ...opts, signal: ctl.signal });
+    const r = await fetch(hub.url + url, { ...opts, headers: hub.url ? { ...opts.headers, Authorization: 'Bearer ' + hubToken(hub.url) } : opts.headers, signal: ctl.signal });
     clearTimeout(timer);
     setOnline(true);
     // 401: this device is not (or no longer) paired with the server.
@@ -41,6 +65,15 @@ async function call(url, opts = {}) {
     setOnline(false);
     throw unreachable(opts);
   }
+}
+// A request to the hub this page was loaded from, whichever hub is being
+// viewed. It says nothing about whether the viewed hub is in reach.
+async function homeCall(url, opts = {}) {
+  if (!hub.url) return call(url, opts);
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 4000);
+  try { return await fetch(url, { ...opts, signal: ctl.signal }); }
+  catch { throw unreachable(opts); }
+  finally { clearTimeout(timer); }
 }
 // Answers that are not a success become errors that say why, in the server's words.
 const api = async (url, method = 'GET', body) => {
@@ -231,8 +264,8 @@ function setTabTitle() {
 }
 async function loadConfig() {
   // Without the server, fall back to the settings seen last time.
-  try { config = await api('/api/config'); store.set('hub:config', config); }
-  catch (e) { const last = store.get('hub:config'); if (!last) throw e; config = last; }
+  try { config = ours(await api('/api/config')); store.set(configSlot(), config); }
+  catch (e) { const last = store.get(configSlot()); if (!last) throw e; config = last; }
   if (document.activeElement !== titleEl) titleEl.textContent = config.title;
   setTabTitle();
 }
@@ -243,7 +276,7 @@ titleEl.addEventListener('keydown', (e) => {
 titleEl.addEventListener('blur', async () => {
   const t = titleEl.textContent.trim();
   if (!t || t === config.title) return (titleEl.textContent = config.title);
-  config = await api('/api/config', 'PUT', { title: t });
+  config = ours(await api('/api/config', 'PUT', { title: t }));
   titleEl.textContent = config.title;
   setTabTitle();
 });
@@ -506,7 +539,8 @@ function askToPair() {
   pairing = true;
   events?.close();
   showGate('Pair this device', (card) => {
-    const plain = location.protocol !== 'https:' && !/^(localhost|127\.|\[::1\])/.test(location.host);
+    const at = new URL(hub.url || location.href);
+    const plain = at.protocol !== 'https:' && !/^(localhost|127\.|\[::1\])/.test(at.host);
     const [codeWrap, code] = field('Pairing code'), [nameWrap, name] = field('A name for this device'), msg = el('p', 'say'), go = el('button', 'main', 'Pair');
     code.autocapitalize = 'characters';
     code.placeholder = 'XXXX-XXXX';
@@ -515,30 +549,152 @@ function askToPair() {
       go.disabled = true;
       msg.textContent = '';
       try {
-        const r = await fetch('/api/pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: code.value, name: name.value }) });
-        if (r.ok) return location.reload();
+        const r = await fetch(hub.url + '/api/pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: code.value, name: name.value }) });
+        if (r.ok) {
+          // Another hub hands this device its token to keep; this hub's own page gets a cookie.
+          if (hub.url) { store.set('hub:tokens', { ...(store.get('hub:tokens') || {}), [hub.url]: (await r.json()).token }); await local.whenSaved(); }
+          return location.reload();
+        }
         msg.textContent = r.status === 403 ? 'That code is wrong, already used, or older than ten minutes. Ask for a new one.' : 'The server did not accept that (' + r.status + ').';
-      } catch { msg.textContent = 'The server is not reachable.'; }
+      } catch { msg.textContent = hub.url ? `“${hub.name}” did not answer. It may be off, or this device may not trust its certificate yet (open ${hub.url}/trust on this device).` : 'The server is not reachable.'; }
       go.disabled = false;
     };
     go.onclick = tryIt;
     onEnter(code, tryIt);
     onEnter(name, tryIt);
+    if (hub.url) card.append(el('p', '', `“${hub.name}” (${hub.url}) is another hub, and this device has not been introduced to it yet.`));
     card.append(
       el('p', '', 'This server only answers devices it has been introduced to. It is offering a code: on first start it prints one in its terminal (the board shows it on its screen); after that, any paired device can make one under “devices…”.'),
       codeWrap, nameWrap, go, msg);
     if (plain) card.append(el('p', 'say', 'This connection is not encrypted, so the code and everything after it could be read on the network.'));
-    else if (location.protocol === 'https:') {
+    else if (at.protocol === 'https:') {
       const a = el('a', '', 'About this hub\'s certificate, and how to trust it on this device');
-      a.href = '/trust';
+      a.href = hub.url + '/trust';
       a.target = '_blank';
       card.append(a);
     }
+    if (hub.url) card.append(homeButton());
   });
+}
+
+const homeButton = () => { const b = el('button', 'link', 'Go back to this hub'); b.onclick = () => switchHub(''); return b; };
+// The list of other hubs, from this hub; without it, the list seen last time.
+async function loadHubs() {
+  try {
+    const r = await homeCall('/api/hubs', { quiet: true });
+    if (!r.ok) return;
+    hubs = await r.json();
+    store.set('hub:list', hubs);
+  } catch { return; }
+  if (hub.url && !hubs.some((h) => h.url === hub.url)) return switchHub('');   // it was taken off the list
+  renderHubs();
+}
+async function saveHubs(next) {
+  const r = await homeCall('/api/hubs', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hubs: next }) });
+  if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || 'This hub answered ' + r.status);
+  hubs = await r.json();
+  store.set('hub:list', hubs);
+}
+function renderHubs() {
+  // In the sidebar: which hub to look at. Shown once there is more than one.
+  const sel = $('hubSel');
+  sel.replaceChildren(new Option('This hub', '', false, !hub.url), ...hubs.map((h) => new Option(h.name, h.url, false, h.url === hub.url)));
+  sel.hidden = !hubs.length;
+  sel.onchange = () => switchHub(sel.value);
+  // In the settings: the list, with a way to add to it and take from it.
+  const box = $('hubsBox'), link = (text, fn) => { const b = el('button', '', text); b.onclick = fn; return b; };
+  const row = (h) => {
+    const d = el('div', ''), on = h.url === hub.url;
+    d.append(el('b', '', h.name + ' '), el('span', 'sub', h.url ? new URL(h.url).host + ' ' : ''));
+    if (on) d.append(el('span', 'sub', '(viewing) ')); else d.append(link('view', () => switchHub(h.url)), ' ');
+    if (h.url && !hubToken(h.url)) d.append(el('span', 'sub', 'not paired here yet '));
+    if (h.url) d.append(link('remove', async () => {
+      try { await saveHubs(hubs.filter((x) => x.url !== h.url)); } catch (e) { net.said = e.offline ? 'This hub is not reachable, and it keeps the list of hubs.' : e.message; return renderNet(); }
+      const { [h.url]: gone, ...rest } = store.get('hub:tokens') || {};
+      store.set('hub:tokens', rest);
+      if (on) switchHub(''); else renderHubs();
+    }));
+    return d;
+  };
+  box.replaceChildren(row(HOME), ...hubs.map(row), link('add a hub…', addHub));
+}
+function addHub() {
+  showGate('Add a hub', (card) => {
+    const [nameWrap, name] = field('A name for it (for example: Desktop)'), [addrWrap, addr] = field('Its address'), say = el('p', 'say'), go = el('button', 'main', 'Add');
+    addr.placeholder = 'https://192.168.1.20:4321';
+    addr.inputMode = 'url';
+    addr.autocapitalize = 'off';
+    const run = async () => {
+      say.textContent = '';
+      let url = addr.value.trim();
+      if (url && !/^[a-z]+:\/\//i.test(url)) url = 'https://' + url;
+      try { url = new URL(url).origin; } catch { url = ''; }
+      if (!/^https?:\/\//.test(url)) { say.textContent = 'That does not look like an address.'; return; }
+      if (url === location.origin) { say.textContent = 'That is this hub.'; return; }
+      if (location.protocol === 'https:' && url.startsWith('http:')) { say.textContent = 'This page is encrypted, so it can only talk to hubs that are too (https://).'; return; }
+      if (!name.value.trim()) { say.textContent = 'Give it a name.'; return; }
+      go.disabled = true;
+      try { await saveHubs([...hubs.filter((h) => h.url !== url), { name: name.value.trim(), url }]); }
+      catch (e) { go.disabled = false; say.textContent = e.offline ? 'This hub is not reachable, and it keeps the list of hubs.' : e.message; return; }
+      switchHub(url);   // a fresh load: the page is then allowed to talk to it, and it asks for its pairing code
+    };
+    go.onclick = run;
+    onEnter(name, run);
+    onEnter(addr, run);
+    card.append(
+      el('p', '', 'Another hub is a reader server on a different machine. Once it is added, this device can look at either one, and what you keep from each stays on this device side by side.'),
+      nameWrap, addrWrap, go, say,
+      el('p', 'sub', 'Next, that hub asks this device for a pairing code. Make one on that machine: open its reader, then settings, then “devices…”.'),
+      el('p', 'sub', 'If its address starts with https, this device must trust its certificate first: open its address followed by /trust on this device.'));
+  }, true);
+}
+// Everything kept on this device, from every hub and workspace, in one list that says where each came from.
+async function showKept() {
+  const groups = new Map();
+  for (const key of (await idb.keys('docs')) || []) {
+    const bar = key.indexOf('|');
+    if (bar < 0) continue;
+    const root = key.slice(0, bar), path = key.slice(bar + 1), m = /^(https?:\/\/\S+) (.*)$/.exec(root);
+    const url = m ? m[1] : '', folder = (m ? m[2] : root).split('/').filter(Boolean).pop() || '';
+    const from = url ? hubs.find((h) => h.url === url)?.name || new URL(url).host : 'This hub';
+    const label = from + ' · ' + folder;
+    if (!groups.has(label)) groups.set(label, { url, root, items: [] });
+    groups.get(label).items.push(path);
+  }
+  showGate('On this device', (card) => {
+    if (!groups.size) card.append(el('p', '', 'Nothing is kept on this device yet. Documents are kept as you open them; press ○ beside a file, or “keep all”, for the rest.'));
+    for (const [label, g] of groups) {
+      const here = g.root === config.root, reach = here || g.url !== hub.url;
+      card.append(el('h5', '', label + (here ? ' (viewing)' : '')));
+      if (!reach) card.append(el('p', 'sub', 'Another workspace of this hub: switch to it in the workspace menu to open these.'));
+      for (const path of g.items.sort()) {
+        const row = el('div', 'dev' + (reach ? ' go' : ''));
+        row.append(el('span', '', path.split('/').pop()), el('small', '', path.split('/').slice(0, -1).join(' / ')));
+        if (reach) {
+          row.tabIndex = 0;
+          row.setAttribute('role', 'button');
+          row.onclick = () => { if (here) { closeGate(); openDoc(path); } else switchHub(g.url, path); };
+        }
+        card.append(row);
+      }
+    }
+  }, true);
 }
 
 // ---- privacy: connection, this device, copies kept here ----------------------------
 let session = null;
+// What is stored on this device (the page itself, the copies, the notes still
+// to be sent) has no expiry of its own. A browser may still clear a site's
+// storage when the device runs short of space, unless it has agreed to keep
+// it; so, once there is something worth keeping, it is asked to.
+let durable = null;   // true, false, or null while unknown or when the browser cannot say
+let askedDurable = false;
+async function askDurable() {
+  if (askedDurable || !navigator.storage?.persist) return;
+  askedDurable = true;
+  try { durable = (await navigator.storage.persisted()) || (await navigator.storage.persist()); } catch { return; }
+  renderPrivacy();
+}
 const mb = (n) => (n >= 1 << 30 ? (n / (1 << 30)).toFixed(1) + ' GB' : Math.max(1, Math.round(n / (1 << 20))) + ' MB');
 let storage = null, storageAt = 0;
 function renderPrivacy() {
@@ -548,10 +704,11 @@ function renderPrivacy() {
   const link = (text, fn, title) => { const b = el('button', '', text); b.onclick = fn; if (title) b.title = title; return b; };
   const rows = [];
   // How the page reached the server.
-  const here = /^(localhost|127\.|\[::1\])/.test(location.host);
-  if (location.protocol === 'https:') {
+  const at = new URL(hub.url || location.href), here = /^(localhost|127\.|\[::1\])/.test(at.host);
+  if (hub.url) rows.push(line('Viewing', `${hub.name} (${at.host})`));
+  if (at.protocol === 'https:') {
     const d = line('Connection', 'encrypted (HTTPS) ');
-    d.append(link('certificate…', () => window.open('/trust', '_blank', 'noopener'), 'How to make a device trust this hub'));
+    d.append(link('certificate…', () => window.open(hub.url + '/trust', '_blank', 'noopener'), 'How to make a device trust this hub'));
     rows.push(d);
   } else if (here) rows.push(line('Connection', 'this computer only'));
   else rows.push(line('Connection', 'not encrypted: others on this network can read it', 'say'));
@@ -568,6 +725,12 @@ function renderPrivacy() {
   else if (local.mode === 'open') copies.append(link('lock', () => local.lock()), ' ', link('turn off', turnOffProtection));
   else copies.append(link('unlock', () => location.reload()));
   rows.push(copies);
+  // Whether the browser has agreed to keep what is stored here until it is removed by hand.
+  if (durable != null) {
+    const d = line('Kept here', durable ? 'until you remove it' : 'for now: the browser may clear it if the device runs short of space', durable ? '' : 'sub');
+    if (!durable) d.title = 'Browsers keep an installed app\'s storage (Add to Home Screen, or Install) and that of sites you use often. Nothing here expires by itself.';
+    rows.push(d);
+  }
   if (storage) rows.push(line('Server storage', mb(storage.used) + ' used' + (storage.quota ? ' of ' + mb(storage.quota) : '')));
   box.replaceChildren(...rows);
   // How full the server is: asked for at most twice a minute.
@@ -677,7 +840,10 @@ function renderNet() {
   keepLine('music files', keepable.filter((d) => isAudio(d.path)));
   keepLine('pictures and videos', keepable.filter((d) => isImage(d.path) || isVideo(d.path)));
   paintKeepBtns();
-  box.append(el('div', 'sub', '● on this device   ○ server only   ↑ waiting to be sent'));
+  const everything = el('button', '', 'everything on this device…');
+  everything.title = 'What is kept here from every hub and workspace';
+  everything.onclick = showKept;
+  box.append(el('div', 'sub', '● on this device   ○ server only   ↑ waiting to be sent'), everything);
   if (net.said) box.append(el('div', 'say', net.said));
   // With the settings folded away, anything that needs attention still shows, in one line.
   const brief = net.said || stuck || (refused.length ? `${refused.length} change${refused.length > 1 ? 's' : ''} refused by the server` : '') || (!net.online ? 'Server not reachable' : '');
@@ -708,6 +874,7 @@ async function rememberDoc(path, text) {
   const had = kept.has(path);
   await idb.put('docs', { key: keyOf(path), root: config.root, path, text, ts: Date.now() });
   kept.add(path);
+  askDurable();
   if (!had) { renderTree(); renderNet(); }
 }
 async function keepCopy(path, quiet) {
@@ -717,6 +884,7 @@ async function keepCopy(path, quiet) {
       const body = isMedia(path) ? { blob: await r.blob() } : { text: await r.text() };
       await idb.put('docs', { key: keyOf(path), root: config.root, path, ...body, ts: Date.now() });
       kept.add(path);
+      askDurable();
     }
   } catch {}
   if (!quiet) { renderTree(); renderNet(); renderPlayers(); }
@@ -738,13 +906,26 @@ async function keepAll(label, items) {
   renderNet();
   renderPlayers();
 }
+// What to give an element as the address of a file in the workspace. On this
+// hub that is its address on the server. From another hub the browser cannot
+// be given an address (it would not send this device's token), so the file
+// is fetched here, whole, and handed over as a blob.
+const remoteBlobs = new Map();
+async function srcOf(path) {
+  if (!hub.url) return rawUrl(path);
+  if (!remoteBlobs.has(path)) {
+    try { const r = await call(rawUrl(path)); if (!r.ok) return ''; remoteBlobs.set(path, URL.createObjectURL(await r.blob())); }
+    catch { return ''; }
+  }
+  return remoteBlobs.get(path);
+}
 // Where a picture or video is read from: the copy on this device if there is one, else the server.
 const blobUrls = new Map();
 async function mediaSrc(path) {
-  if (!kept.has(path)) return rawUrl(path);
+  if (!kept.has(path)) return srcOf(path);
   if (!blobUrls.has(path)) {
     const copy = await idb.get('docs', keyOf(path));
-    if (!copy?.blob) return rawUrl(path);
+    if (!copy?.blob) return srcOf(path);
     blobUrls.set(path, URL.createObjectURL(copy.blob));
   }
   return blobUrls.get(path);
@@ -921,8 +1102,8 @@ async function locksChanged() {
   chrome();
 }
 async function saveLocks(next) {
-  config = await api('/api/config', 'PUT', { locks: next });
-  store.set('hub:config', config);
+  config = ours(await api('/api/config', 'PUT', { locks: next }));
+  store.set(configSlot(), config);
 }
 async function lockHash(password, salt) {
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password.normalize('NFKC')), 'PBKDF2', false, ['deriveBits']);
@@ -1308,7 +1489,7 @@ async function drawDoc(pane, hash, keepScroll) {
     frame.setAttribute('sandbox', 'allow-same-origin');
     frame.referrerPolicy = 'no-referrer';
     let bounced = false;
-    if (net.online && !isPending(path)) {
+    if (net.online && !isPending(path) && !hub.url) {
       frame.src = rawUrl(path);
       call(rawUrl(path)).then((r) => (r.ok ? r.text() : null)).then((t) => t != null && rememberDoc(path, t)).catch(() => {});
     } else {
@@ -1389,7 +1570,7 @@ async function drawDoc(pane, hash, keepScroll) {
         // Bring the saved page back; if it leaves again, stop and say so.
         v.heads = [];
         v.surface = null;
-        if (!bounced) { bounced = true; frame.src = rawUrl(path); }
+        if (!bounced && !hub.url) { bounced = true; frame.src = rawUrl(path); }
         else v.body.replaceChildren(el('p', 'empty', 'This page keeps trying to leave for another site, so it was stopped.'));
       }
       if (pane === state.active) { renderOutline(); renderContext(); }
@@ -1416,7 +1597,7 @@ async function drawDoc(pane, hash, keepScroll) {
   // Relative picture, video and sound paths load from the same storage.
   for (const m of article.querySelectorAll('img, video, audio, source')) {
     const src = m.getAttribute('src') || '';
-    if (src && !/^([a-z]+:|\/)/i.test(src)) { m.dataset.path = resolve(path, src); m.src = rawUrl(m.dataset.path); }
+    if (src && !/^([a-z]+:|\/)/i.test(src)) { m.dataset.path = resolve(path, src); m.removeAttribute('src'); srcOf(m.dataset.path).then((u) => { if (u) m.src = u; }); }
     if (m.tagName === 'VIDEO') { m.controls = true; m.playsInline = true; m.preload = 'metadata'; }
   }
   colourCode(article);
@@ -1602,8 +1783,9 @@ async function playTrack(path, start = true) {
   if (!playable(path)) { net.said = 'That track is not on this device, and the server is not reachable.'; renderNet(); return; }
   if (music.url) URL.revokeObjectURL(music.url);
   music.url = null;
-  let src = rawUrl(path);
+  let src = '';
   if (kept.has(path)) { const copy = await idb.get('docs', keyOf(path)); if (copy?.blob) src = music.url = URL.createObjectURL(copy.blob); }
+  if (!src) src = await srcOf(path);
   music.path = path;
   player.src = src;
   if (start) player.play().catch(() => {});
@@ -1819,7 +2001,8 @@ function showMedia(pane, path) {
     audio.src = url;
     stage.append(audio);
   }
-  bar.append(keepBtn(path), open);
+  bar.append(keepBtn(path));
+  if (!hub.url) bar.append(open);   // a tab of its own could not show this device's token to another hub
   box.append(bar, stage);
   v.bar.style.width = '0%';
   v.body.replaceChildren(box);
@@ -1972,7 +2155,7 @@ function onDocClick(e, pane) {
   const resolved = resolve(state.panes[pane].active, file);
   const target = docOf(resolved);
   e.preventDefault();
-  if (!target) return window.open(rawUrl(resolved), '_blank', 'noopener');
+  if (!target) { if (!hub.url) window.open(rawUrl(resolved), '_blank', 'noopener'); return; }
   openDoc(resolved, { pane, hash, side: target.side || e.metaKey || e.ctrlKey || e.altKey });
 }
 
@@ -2275,7 +2458,7 @@ function renderTypes() {
   const box = el('div');
   box.id = 'types';
   box.append(el('h4', '', 'Highlight types'));
-  const saveTypes = async () => { config = await api('/api/config', 'PUT', { highlights: types() }); renderNotes(); };
+  const saveTypes = async () => { config = ours(await api('/api/config', 'PUT', { highlights: types() })); renderNotes(); };
   for (const t of types()) {
     const row = el('div', 'type' + (t.id === curType().id ? ' cur' : ''));
     const color = el('input');
@@ -2424,8 +2607,14 @@ function highlight(article, quote, id, color) {
 
 // ---- live reload when files change on disk --------------------------------------
 let events = null;
+let asking = 0;
 function listen() {
   events?.close();
+  if (hub.url) {
+    clearInterval(asking);
+    asking = setInterval(() => { if (net.online && !document.hidden && !gateOpen()) { loadDocs(); loadNotes(); } }, 60000);
+    return;
+  }
   events = new EventSource('/api/events');
   events.onerror = probe;
   events.onopen = () => setOnline(true);
@@ -2452,6 +2641,11 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').cat
 (async function init() {
   // Private copies first: if they are encrypted, ask for the passphrase.
   if (local.start() === 'locked') await askUnlock();
+  // Which hub to look at: this one, or the other one this device was pointed at last.
+  hubs = store.get('hub:list') || [];
+  hub = hubs.find((h) => h.url === store.get('hub:at')) || HOME;
+  renderHubs();
+  loadHubs();
   // Then find out whether the server knows this device.
   try {
     const r = await call('/api/session', { quiet: true, wait: 3000 });
@@ -2461,7 +2655,8 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').cat
   try { await loadConfig(); }
   catch (e) {
     if (pairing) return;
-    $('panes').replaceChildren(problemBox(e, e.offline ? 'The server is not reachable, and nothing from it is kept on this device yet' : 'The reader could not start'));
+    $('panes').replaceChildren(problemBox(e, e.offline ? (hub.url ? `“${hub.name}” is not reachable, and nothing from it is kept on this device yet` : 'The server is not reachable, and nothing from it is kept on this device yet') : 'The reader could not start'));
+    if (hub.url) $('panes').append(homeButton());
     return;
   }
   listen();
@@ -2471,6 +2666,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').cat
   loadQueue();
   pendingFiles = store.get('pending:' + config.root) || [];
   kept = new Set(((await idb.keys('docs')) || []).filter((k) => k.startsWith(config.root + '|')).map((k) => k.slice(config.root.length + 1)));
+  if (kept.size || matchMedia('(display-mode: standalone)').matches) askDurable();
   try { notes = outbox.some((op) => op.kind !== 'file') ? store.get('notes:' + config.root) || [] : await api('/api/notes'); }
   catch { notes = store.get('notes:' + config.root) || []; }
   await loadDocs();

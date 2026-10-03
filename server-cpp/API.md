@@ -39,6 +39,8 @@ All JSON bodies are UTF-8. Errors are `{ "error": "message" }` with a 4xx or 5xx
 
 `PUT /api/config` with any of `{ "title": "…", "highlights": [...] }` → the new config. A title is trimmed and its whitespace collapsed; with a front page it rewrites that file's heading, otherwise it is stored in `hub.json`. Highlight types without an `id` or a `#rrggbb` colour are dropped; an empty name becomes `Untitled`.
 
+`GET /api/hubs` → `[{ "name": "Desktop", "url": "https://192.168.1.20:4321" }]`: other hubs the reader may connect to. `PUT /api/hubs` with `{ "hubs": [ … ] }` replaces the list (at most 12) and answers with it. Each `url` is cut down to its origin (scheme and host in lower case, the port unless it is the usual one, nothing after it); entries with no name, with an address that is not `http(s)`, or repeating an address are dropped. Kept in `hubs.json` in the state folder, not in the workspace: it is about this server, not about a folder. The server never contacts these hubs itself; the list only says what the page may talk to and what the reader offers.
+
 `PUT /api/config` also takes `"locks"`: `{ "some/folder": { "salt": "…", "hash": "…" }, "other": {} }`, the folders the reader asks a password for. The whole set is replaced. `salt` and `hash` are base64 (up to 64 and 128 characters); an entry without both is kept as `{}`, a lock whose password is still to be chosen. Folder names that try to leave the workspace are dropped. The server only stores these: the reader does the asking, and the files are stored as they are.
 
 `DELETE /api/folder?path=some/folder` → `{ "removed": "some/folder" }`. Deletes the folder and everything in it, and any lock on it or inside it. 400 if it is not a folder in the workspace, tries to leave it, or is `notes`.
@@ -113,7 +115,9 @@ Both servers apply the same rules, in this order, to every request.
 
 **3. No other website.** A request with an `Origin` that is not this server, or with `Sec-Fetch-Site` other than `same-origin` or `none`, gets 403 `requests from other sites are not allowed`. This covers reading as well as writing. The page and its scripts are exempt (they hold nothing private).
 
-**4. Paired devices only.** Everything except the page, its scripts, the three trust routes and `POST /api/pair` needs the token of a paired device, sent as the cookie `hub_device=<id>.<token>` (`HttpOnly`, `SameSite=Strict`, `Secure` over HTTPS). Without it: 401 `pairing required`. The server stores only a SHA-256 hash of each token, in `devices.json` in the state folder. Requests from this machine itself (127.0.0.1) count as the device `local` and need no token, unless the server was started with `--pair-local` (`HUB_PAIR_LOCAL=1`).
+The one exception is a reader that was loaded from another hub and is paired with this one. Such a request is let through when it carries `Authorization: Bearer <id>.<token>`, the token this hub gave that device; a cookie counts for nothing on it, and neither does coming from this machine, because a browser would attach those for any website. `POST /api/pair` is let through as well (the code is the proof), and so is the browser's preflight: `OPTIONS` with `Access-Control-Request-Method` is answered 204 with `Access-Control-Allow-Methods: GET, POST, PUT, DELETE` and `Access-Control-Allow-Headers: Authorization, Content-Type, Range`. Answers to such requests carry `Access-Control-Allow-Origin: <that origin>` and `Vary: Origin`. The `Origin` must be a plain `http(s)://host[:port]`.
+
+**4. Paired devices only.** Everything except the page, its scripts, the three trust routes and `POST /api/pair` needs the token of a paired device, sent as the cookie `hub_device=<id>.<token>` (`HttpOnly`, `SameSite=Strict`, `Secure` over HTTPS). A reader loaded from another hub sends the same token as `Authorization: Bearer <id>.<token>` instead (see 3); when it pairs, the answer to `POST /api/pair` carries `"token": "<id>.<token>"` in its body and no cookie. Without a token: 401 `pairing required`. The server stores only a SHA-256 hash of each token, in `devices.json` in the state folder. Requests from this machine itself (127.0.0.1) count as the device `local` and need no token, unless the server was started with `--pair-local` (`HUB_PAIR_LOCAL=1`).
 
 | Request | Answer |
 |---|---|
@@ -128,7 +132,7 @@ With no device paired yet and the server reachable from the network (or `--pair-
 
 **5. What a browser may do with each answer.** Every answer carries `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and `Cross-Origin-Resource-Policy: same-origin`, and a `Content-Security-Policy`:
 
-- the page: scripts from this server only and none inline; pictures, media, styles, fonts and connections to this server only; cannot be framed. So a document cannot make the reader run code, and reading never contacts the internet.
+- the page: scripts from this server only and none inline; pictures, media, styles and fonts from this server only; connections to this server and to the hubs listed in `/api/hubs`, nothing else; cannot be framed. So a document cannot make the reader run code, and reading never contacts the internet.
 - `/raw/…`: `sandbox allow-same-origin` and no script source at all, so a saved HTML page or an SVG never runs code, whether shown in the reader's frame or opened in a tab of its own; pictures, styles and fonts from this server only. (PDFs are sent without it: a browser's PDF viewer does not start in a sandbox.)
 - everything else: `default-src 'none'; sandbox`.
 

@@ -91,7 +91,6 @@ run() { # run <port> <root> <log>: the request script
   anon "made-up token"            body -b 'hub_device=0123456789abcdef.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' "$B/api/config"
   anon "pair with no code"        body -X POST "${J[@]}" -d '{}' "$B/api/pair"
   anon "pair with a wrong code"   body -X POST "${J[@]}" -d '{"code":"AAAA-AAAA","name":"intruder"}' "$B/api/pair"
-  anon "pair from another site"   body -X POST "${J[@]}" -H 'Origin: http://evil.example' -d "{\"code\":\"$(code_in "$LOG")\"}" "$B/api/pair"
   anon "pair"                     body -c "$JAR" -X POST "${J[@]}" -d "{\"code\":\"$(code_in "$LOG")\",\"name\":\"  test   device \"}" "$B/api/pair"
   anon "code works once"          body -X POST "${J[@]}" -d "{\"code\":\"$(code_in "$LOG")\"}" "$B/api/pair"
   req "session"               body "$B/api/session"
@@ -188,6 +187,10 @@ run() { # run <port> <root> <log>: the request script
   echo "## other hub, preflight";     cors -X OPTIONS "${X[@]}" -H 'Access-Control-Request-Method: PUT' -H 'Access-Control-Request-Headers: authorization,content-type' "$B/api/config"
   echo "## other hub, odd origin";    curl -s -o /dev/null -w '%{http_code}\n' -H 'Origin: null' -H "Authorization: Bearer $TOKEN" "$B/api/hubs"
   echo "## other hub, pair no code";  curl -s -o /dev/null -w '%{http_code}\n' "${X[@]}" -X POST "${J[@]}" -d '{"code":"AAAA-AAAA","name":"x"}' "$B/api/pair"
+  CODE=$(curl -s -b "$JAR" -X POST "$B/api/pair/code" | grep -o '[A-Z0-9]\{4\}-[A-Z0-9]\{4\}')
+  T2=$(curl -s "${X[@]}" -X POST "${J[@]}" -d "{\"code\":\"$CODE\",\"name\":\"other reader\"}" "$B/api/pair" | grep -o '"token": *"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/')
+  echo "## other hub, pair with code"; [ -n "$T2" ] && echo "given a token"
+  echo "## other hub, new token";     curl -s -o /dev/null -w '%{http_code}\n' "${X[@]}" -H "Authorization: Bearer $T2" "$B/api/session"
   req "set hubs"              body -X PUT "${J[@]}" -d '{"hubs":[{"name":"  Desk   top ","url":"https://Desk.local:4321/some/path"},{"name":"dup","url":"https://desk.local:4321"},{"name":"usual port","url":"https://pi.local:443"},{"name":"","url":"https://x.local"},{"name":"bad","url":"ftp://x.local"},{"name":"bad2","url":"not a url"}]}' "$B/api/hubs"
   req "hubs"                  body "$B/api/hubs"
   echo "## page policy";              curl -s -o /dev/null -D - -b "$JAR" "$B/" | tr -d '\r' | grep -i '^content-security-policy' | grep -o "connect-src[^;]*"

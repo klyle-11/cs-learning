@@ -369,9 +369,9 @@ async function handle(req, res) {
     if (cross) {
       const asked = m === 'OPTIONS' && req.headers['access-control-request-method'];
       const allowed = asked || /^Bearer \S/.test(req.headers.authorization || '') || (p === '/api/pair' && m === 'POST');
-      if (!allowed || !origin || !/^https?:\/\/[^\s/]+$/i.test(origin)) return send(res, 403, { error: 'requests from other sites are not allowed' });
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Vary', 'Origin');
+      const plain = !!origin && /^https?:\/\/[^\s/]+$/i.test(origin);
+      if (plain) { res.setHeader('Access-Control-Allow-Origin', origin); res.setHeader('Vary', 'Origin'); }   // so the other reader can read the answer, a refusal included
+      if (!allowed || !plain) return send(res, 403, { error: 'requests from other sites are not allowed' });
       if (asked) return send(res, 204, '', 'text/plain', { 'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE', 'Access-Control-Allow-Headers': 'Authorization, Content-Type, Range', 'Access-Control-Max-Age': '600' });
     }
 
