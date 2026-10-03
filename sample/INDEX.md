@@ -147,6 +147,19 @@ These five are written up in full. Start with the arena allocator and work down 
 
 ---
 
+## 9. Network security: certificates, HTTPS and who can reach a server
+
+Written after this project's own certificate authority turned out to be able to vouch for any website. Four short documents, in order; the examples are the hub's own server.
+
+| # | Document | What you'll learn |
+|---|---|---|
+| 9.1 | **[HTTPS and certificates, from zero](docs/09-network-security/01-https-and-certificates.md)** | What TLS gives, what a certificate is, the chain of trust, and what installing an authority really means. Name constraints. |
+| 9.2 | **[Case study: an authority with no limits](docs/09-network-security/02-case-study-an-authority-with-no-limits.md)** | Two real incidents with the same shape, why they were hard to see, how bad they were, and what was done. |
+| 9.3 | **[Who can reach a server](docs/09-network-security/03-who-can-reach-a-server.md)** | Bind addresses, pairing and tokens, cookie flags, cross-site requests, DNS rebinding, content policies. |
+| 9.4 | **[Keeping watch](docs/09-network-security/04-keeping-watch.md)** | The two questions, commands that deserve a pause, a routine for every few months, and what to do when something looks wrong. |
+
+---
+
 ## Sources & further reading per category
 
 - **Allocators**: Andrei Alexandrescu's "Memory Allocation" talks; jemalloc and mimalloc source. Per-Vognsen's allocator videos.

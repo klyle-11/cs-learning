@@ -18,7 +18,7 @@ Status at 14:40 on 3 October:
 | Device | Old authority | New authority |
 |---|---|---|
 | This Mac | In the System keychain, set to deny for every use (checked). Not yet deleted. | **Not needed**: this Mac uses `http://localhost:4321`, which needs no authority (added 3 Oct, evening) |
-| iPhone | **Presumed still installed and trusted: remove it** (I cannot see the phone) | Not installed |
+| iPhone | Removed on 3 October (you confirmed); no mkcert profile was there either | Not installed |
 | Windows laptop | Never had it | Not installed |
 | The hub's server | The one running since this morning is **still presenting the old certificate** (checked) | Takes effect when it is restarted |
 
@@ -308,9 +308,9 @@ Keep this up to date; it is the list to work through when something changes.
 | Device | Authority | Installed | Removed |
 |---|---|---|---|
 | Mac (this one) | Hub local authority (old, no limits) | 3 Oct 2026 | set to deny 3 Oct; not yet deleted |
-| iPhone | Hub local authority (old, no limits) | 3 Oct 2026 | **to do** |
+| iPhone | Hub local authority (old, no limits) | 3 Oct 2026 | removed 3 Oct 2026 |
 | Mac (this one) | mkcert development CA (no limits) | 20 Jul 2025 | decide |
-| iPhone | mkcert development CA (no limits) | possibly 29 Sep 2026: check | |
+| iPhone | mkcert development CA (no limits) | never installed (checked 3 Oct 2026: no such profile) | |
 | Mac (this one) | Hub authority (this hub only) | | |
 | iPhone | Hub authority (this hub only) | | |
 | Windows laptop | Hub authority (this hub only) | | |
@@ -318,9 +318,9 @@ Keep this up to date; it is the list to work through when something changes.
 ## Server commands
 
 ```
-cd hub && HOST=0.0.0.0 npm start   # start on the network; prints the fingerprint (and a pairing code, if no device is paired yet)
-server-cpp/hubd --make-cert        # make or renew certificates, print the fingerprint, stop
-server-cpp/hubd --new-authority    # replace the authority; every device then installs the new one
+cd hub && npm run start:network        # start on the network; prints the fingerprint (and a pairing code, if no device is paired yet)
+cd hub && npm run cert                 # make or renew certificates, print the fingerprint, stop
+cd hub && npm run cert:new-authority   # replace the authority; every device then installs the new one
 openssl x509 -in ~/.config/hub/ca.pem -noout -subject -enddate -fingerprint -sha256
 openssl x509 -in ~/.config/hub/ca.pem -noout -text | grep -A10 "Name Constraints"
 ```
@@ -340,5 +340,7 @@ Each link was opened on 3 October 2026 and is the page its title says.
 - mkcert: [its documentation](https://github.com/FiloSottile/mkcert), including the warning about `rootCA-key.pem` quoted above
 - The standard that defines name constraints: [RFC 5280, section 4.2.1.10](https://www.rfc-editor.org/rfc/rfc5280#section-4.2.1.10)
 - For option 4: [Tailscale, Enabling HTTPS](https://tailscale.com/kb/1153/enabling-https) and [Let's Encrypt, Challenge Types](https://letsencrypt.org/docs/challenge-types/) (the DNS challenge is the one that suits a server only reachable at home)
+
+The background, as lessons: `data/docs/09-network-security/` (what a certificate and an authority are, the case study, who can reach a server, and a routine for keeping watch).
 
 In this repository: `REVIEW.md` (findings 17 and 23), `server-cpp/API.md` ("Security", point 2), `server-cpp/src/secure.hpp` (how the certificates are made), and the hub's own `/trust` page.

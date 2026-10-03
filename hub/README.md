@@ -6,7 +6,14 @@ Reads any folder of `.md` files, however deeply nested. `.html` files are render
 cd hub && npm start                       # http://localhost:4321, reads ../data   (the same as ../start.sh)
 ../start.sh path/to/other/folder          # or point it somewhere else
 PORT=4400 npm start                       # run two environments at once
-HOST=0.0.0.0 npm start                    # reachable from a phone: HTTPS and pairing, see below
+npm run start:network                     # reachable from a phone: HTTPS and pairing, see below (HOST=0.0.0.0)
+npm run start:network:insecure            # the network WITHOUT encryption: only on a network you fully control
+npm run start:https-local                 # HTTPS even on this computer
+npm run start:pair-local                  # this computer's own browser must pair too
+npm run start:scratch                     # the scratch workspace (../data-test) on port 4396, with its own state
+npm run cert                              # make or renew the certificates and print the fingerprint
+npm run cert:new-authority                # replace the authority; every device then installs the new one
+npm run build        npm test             # build the server; run its checks
 ```
 
 `npm start` runs `../start.sh`, which starts the server, `../server-cpp/hubd`, building it first if needed. This folder holds only the page; npm is used for the page's three libraries and nothing else.

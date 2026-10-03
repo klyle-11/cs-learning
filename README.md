@@ -21,7 +21,7 @@ The first run creates `data/` as a copy of `sample/`, fetches the page's three l
 
 The server is `server-cpp/hubd`, one program for a computer, a Raspberry Pi and the ESP32 board, with limits chosen to suit each. `./start.sh` runs it for you; to run it by hand: `server-cpp/hubd data --www hub`. For the board see `server-cpp/esp32/`.
 
-It answers this computer only by default. To reach the reader from a phone: `HOST=0.0.0.0 ./start.sh`, then on the phone open `http://<this computer's address>:4321/`, follow the page to trust the hub's certificate, and type the pairing code the server printed. **Read `CERTIFICATES.md` first:** it says what installing that certificate means, and what the alternatives are. The computer the hub runs on never needs the certificate: `http://localhost:4321` keeps working there.
+It answers this computer only by default. To reach the reader from a phone: `cd hub && npm run start:network` (the same as `HOST=0.0.0.0 ./start.sh`), then on the phone open `http://<this computer's address>:4321/`, follow the page to trust the hub's certificate, and type the pairing code the server printed. **Read `CERTIFICATES.md` first:** it says what installing that certificate means, and what the alternatives are. The computer the hub runs on never needs the certificate: `http://localhost:4321` keeps working there.
 
 ## What the reader does
 
@@ -38,10 +38,11 @@ It answers this computer only by default. To reach the reader from a phone: `HOS
 ## Working on it
 
 ```
-cd server-cpp && make            # build the server (start.sh does this too)
-cd server-cpp && make test       # 143 requests, answers compared with test/expected.txt
+cd hub && npm run build         # build the server (starting it does this too)
+cd hub && npm test              # 143 requests, answers compared with server-cpp/test/expected.txt
+cd hub && npm run               # lists every way of starting it
 ```
 
 After changing `server-cpp/src/`, restart the server. After changing `hub/` (the page), reload the reader; it shows the copy it kept and offers "a newer version is ready" once it has fetched the change. There is no browser test suite in the repository yet; `REVIEW.md` says what was checked by hand.
 
-More: `hub/README.md` (using the reader, folder conventions), `server-cpp/API.md` (the contract between page and server), `CERTIFICATES.md` (the certificate authority: what it is, per-device steps, checklists), `REVIEW.md` (security, efficiency and design findings, and their state), `TODO.md` (the plan), `sample/docs/08-server-migration/node-to-cpp-server.md`.
+More: `hub/README.md` (using the reader, folder conventions), `server-cpp/API.md` (the contract between page and server), `CERTIFICATES.md` (the certificate authority: what it is, per-device steps, checklists), `REVIEW.md` (security, efficiency and design findings, and their state), `TODO.md` (the plan), `data/docs/09-network-security/` (four lessons on certificates, HTTPS and network exposure, written from what went wrong here), `sample/docs/08-server-migration/node-to-cpp-server.md`.
