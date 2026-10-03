@@ -4,7 +4,7 @@ A self-directed CS learning environment. The user works in small steps, irregula
 
 ## Layout
 
-- `hub/` — the reader page and Node server; `server-cpp/` — the C++ server. Code, tracked in git.
+- `hub/` — the reader page; `server-cpp/` — the server (C++, `hubd`); `start.sh` starts it. Code, tracked in git.
 - `sample/` — starter content tracked in git (the C lessons, project guides, discrete-math sources and lessons). Example material to develop the reader against.
 - `data/` — the **live workspace**, ignored by git. It starts as a copy of `sample/`. The user's notes, highlights, uploads and front-page edits are here, and this is what the reader shows. Paths below are relative to `data/`.
   - `FRONTPAGE.md` — landing page; its `# Heading` is the title. The user's to edit.
@@ -12,7 +12,16 @@ A self-directed CS learning environment. The user works in small steps, irregula
   - `responses/` — docs Claude writes in answer to the notes.
   - `references.md` — log of everything cited, with links.
   - `discrete-math/sources/` — do not edit.
-- Run with `cd hub && npm start`, then http://localhost:4321.
+- Run with `cd hub && npm start` (or `./start.sh`), then http://localhost:4321. Both run `server-cpp/hubd`; there is no Node server any more.
+- `REVIEW.md` — findings and their state; `TODO.md` — the plan; `CERTIFICATES.md` — the hub's certificate authority; `server-cpp/API.md` — the contract between page and server. Keep these in step with the code when it changes.
+
+## Working on the hub's code
+
+- Build: `cd server-cpp && make`. Test: `make test` (compares answers with `test/expected.txt`; after an intended change, read the differences, then `UPDATE=1 ./test/contract.sh`).
+- A server change needs the server restarted. A page change (`hub/`) shows one reload late: the reader opens from the copy it kept and then offers "a newer version is ready".
+- Try things on a scratch copy, never on `data/`: `PORT=4396 HUB_STATE=<dir> ./start.sh data-test --workspaces <dir>`. Put scratch state under `server-cpp/build/` (ignored by git).
+- The real state folder is `~/.config/hub` (certificates, paired devices). Do not make, replace or delete certificates there without being asked: every device that trusts the hub has to follow by hand.
+- Any change to who may connect, what is served, or how certificates are made gets a line in `REVIEW.md` and, if it affects devices, in `CERTIFICATES.md`.
 
 New learning material the user should keep goes in `data/` (so they see it) and, if it is meant as part of the starter set, in `sample/` too. Never commit anything from `data/`. For testing, work on a scratch copy (`data-test/`, also ignored), not on `data/`.
 

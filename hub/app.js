@@ -103,7 +103,17 @@ function safeHtml(markdown) {
   return box.content;
 }
 const save = () => store.set('layout:' + config.root, state);
-const docOf = (path) => docs.find((d) => d.path === path);
+let docMap = new Map();   // the list by path, rebuilt with it (applyLocks), so a lookup is not a search
+const docOf = (path) => docMap.get(path);
+// A folder path for a list row: its last two folders, with "…" standing for
+// anything before them. `where` is "a / b / c" or "a/b/c"; the whole path goes in the tooltip.
+function shortPath(where) {
+  const sep = where.includes(' / ') ? ' / ' : '/', parts = where.split(sep);
+  return parts.length > 2 ? '…' + sep + parts.slice(-2).join(sep) : where;
+}
+const pathLabel = (where) => { const e = el('small', '', shortPath(where)); if (shortPath(where) !== where) e.title = where; return e; };
+// Run at most once per frame, however often it is asked for (scrolling asks constantly).
+const perFrame = (fn) => { let waiting = false; return () => { if (waiting) return; waiting = true; requestAnimationFrame(() => { waiting = false; fn(); }); }; };
 const isHtml = (path) => /\.html?$/.test(path);
 const isImage = (path) => /\.(png|jpe?g|gif|webp|svg)$/i.test(path);
 const isVideo = (path) => /\.(mp4|m4v|mov|webm|ogv)$/i.test(path);
@@ -135,7 +145,7 @@ function setTheme(t) {
   store.set('theme', t);
 }
 $('theme').onchange = () => setTheme($('theme').value);
-setTheme(store.get('theme') || 'plain');
+setTheme({ focus: 'sun-sound' }[store.get('theme')] || store.get('theme') || 'plain');   // "Focus Aid" was renamed
 
 // Reading aids: text size, roomier spacing, and a focus mode that fades
 // everything except the block being read.
@@ -207,6 +217,8 @@ $('sideEdge').onclick = () => { setSideOpen(true); save(); };
 $('sideEdge').addEventListener('mouseenter', () => document.body.classList.add('side-peek'));
 $('side').addEventListener('mouseleave', () => document.body.classList.remove('side-peek'));
 
+// Lets a touch screen show the pressed look (iOS only does with a touch listener present).
+document.addEventListener('touchstart', () => {}, { passive: true });
 // Rows and tabs act as buttons from the keyboard too.
 document.addEventListener('keydown', (e) => {
   if ((e.key === 'Enter' || e.key === ' ') && e.target.matches?.('[role="button"]')) { e.preventDefault(); e.target.click(); }
@@ -420,8 +432,18 @@ async function cameBack() {
 }
 // While out of reach, look for the server every few seconds.
 const probe = () => call('/api/config', { cache: 'no-store', probe: true }).catch(() => {});
-setInterval(() => { if (!net.online) probe(); }, 4000);
+let probedAt = 0, misses = 0;
+setInterval(() => {
+  if (net.online) { misses = 0; return; }
+  if (document.hidden) return;
+  const gap = misses < 15 ? 4000 : misses < 30 ? 15000 : 60000;   // every 4 s for a minute, then 15 s, then once a minute
+  if (Date.now() - probedAt < gap) return;
+  probedAt = Date.now();
+  misses++;
+  probe();
+}, 4000);
 window.addEventListener('online', probe);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && !net.online) probe(); });
 window.addEventListener('unhandledrejection', (e) => {
   e.preventDefault();
   if (!e.reason?.offline) return showProblem(e.reason);
@@ -657,6 +679,7 @@ async function showKept() {
     const root = key.slice(0, bar), path = key.slice(bar + 1), m = /^(https?:\/\/\S+) (.*)$/.exec(root);
     const url = m ? m[1] : '', folder = (m ? m[2] : root).split('/').filter(Boolean).pop() || '';
     const from = url ? hubs.find((h) => h.url === url)?.name || new URL(url).host : 'This hub';
+    if (root === config.root && gateOf(path)) continue;   // in a locked folder: not named until it is opened
     const label = from + ' · ' + folder;
     if (!groups.has(label)) groups.set(label, { url, root, items: [] });
     groups.get(label).items.push(path);
@@ -840,13 +863,19 @@ function renderNet() {
   keepLine('music files', keepable.filter((d) => isAudio(d.path)));
   keepLine('pictures and videos', keepable.filter((d) => isImage(d.path) || isVideo(d.path)));
   paintKeepBtns();
+  // Show everything, or only what is on this device (what opens without the server).
+  const only = el('button', '', view.onlyKept ? 'show everything' : 'show only what is on this device');
+  only.title = view.onlyKept ? 'The lists are showing only what is kept on this device' : 'Narrow the file list, the playlist and the front-page lists to what is kept on this device';
+  only.onclick = () => setOnlyKept(!view.onlyKept);
+  box.append(el('div', 'sub', '').appendChild(only).parentNode);
   const everything = el('button', '', 'everything on this device…');
   everything.title = 'What is kept here from every hub and workspace';
   everything.onclick = showKept;
   box.append(el('div', 'sub', '● on this device   ○ server only   ↑ waiting to be sent'), everything);
   if (net.said) box.append(el('div', 'say', net.said));
+  if (local.full) box.append(el('div', 'say', 'This browser\'s storage for the reader is full. Notes waiting to be sent, and the layout, may not survive closing it: connect to the server so they can be sent, or remove some kept copies.'));
   // With the settings folded away, anything that needs attention still shows, in one line.
-  const brief = net.said || stuck || (refused.length ? `${refused.length} change${refused.length > 1 ? 's' : ''} refused by the server` : '') || (!net.online ? 'Server not reachable' : '');
+  const brief = net.said || stuck || (refused.length ? `${refused.length} change${refused.length > 1 ? 's' : ''} refused by the server` : '') || (local.full ? 'Storage on this device is full' : '') || (!net.online ? 'Server not reachable' : '');
   $('netBrief').hidden = !brief;
   $('netBrief').textContent = brief;
   renderPrivacy();
@@ -872,22 +901,23 @@ async function docText(path) {
 }
 async function rememberDoc(path, text) {
   const had = kept.has(path);
-  await idb.put('docs', { key: keyOf(path), root: config.root, path, text, ts: Date.now() });
+  if (!(await idb.put('docs', { key: keyOf(path), root: config.root, path, text, ts: Date.now() }))) return;   // no room: it is simply not marked as kept
   kept.add(path);
   askDurable();
   if (!had) { renderTree(); renderNet(); }
 }
 async function keepCopy(path, quiet) {
+  let stored = true;   // false only when the device had no room
   try {
     const r = await call(isHtml(path) || isMedia(path) ? rawUrl(path) : '/api/doc?path=' + encodeURIComponent(path));
     if (r.ok) {
       const body = isMedia(path) ? { blob: await r.blob() } : { text: await r.text() };
-      await idb.put('docs', { key: keyOf(path), root: config.root, path, ...body, ts: Date.now() });
-      kept.add(path);
-      askDurable();
+      if (await idb.put('docs', { key: keyOf(path), root: config.root, path, ...body, ts: Date.now() })) { kept.add(path); askDurable(); }
+      else { stored = false; net.said = `There was no room on this device to keep “${path.split('/').pop()}”.`; setTimeout(() => { net.said = ''; renderNet(); }, 8000); }
     }
   } catch {}
   if (!quiet) { renderTree(); renderNet(); renderPlayers(); }
+  return stored;
 }
 // "keep all": one after another, saying how far it has got.
 let keeping = null;   // { label, done, total } while it runs
@@ -897,9 +927,9 @@ async function keepAll(label, items) {
   renderNet();
   for (const d of items) {
     if (!net.online) break;
-    await keepCopy(d.path, true);
+    if (!(await keepCopy(d.path, true))) break;   // no room: the rest would fail the same way
     keeping.done++;
-    renderNet();
+    if (keeping.done % 5 === 0) renderNet();   // the count moves in fives; the box is not rebuilt for every file
   }
   keeping = null;
   renderTree();
@@ -995,6 +1025,7 @@ async function flush() {
       else if (op.kind === 'file') {
         const f = await idb.get('files', keyOf(op.path));
         if (f) r = await call('/api/upload?path=' + encodeURIComponent(op.path), { method: 'POST', body: f.blob });
+        else { refused.push({ what: opLabel(op), why: 'its contents were not kept on this device, so it could not be sent', ts: Date.now() }); store.set('refused:' + config.root, refused); }
       }
       if (r && !r.ok) {
         const why = (await r.json().catch(() => null))?.error || 'error ' + r.status;
@@ -1023,17 +1054,20 @@ setInterval(() => { if (stuck && net.online && !gateOpen()) flush(); }, 30000);
 // They go to the folder "inbox". With the server in reach they are sent at once;
 // without it they wait here, already openable, and are sent later.
 async function addFiles(fileList) {
+  const left = [];   // what was not taken, and why: said, not dropped quietly
   for (const file of fileList) {
     const name = file.name.replace(/[\\/]/g, ' ').replace(/^\.+/, '').trim();
-    if (!name || file.size > 50 * 1024 * 1024) continue;
+    if (!name) continue;
+    if (file.size > 50 * 1024 * 1024) { left.push(`“${name}” is over 50 MB`); continue; }
     let path = 'inbox/' + name;
     for (let n = 2; docs.some((d) => d.path === path); n++) path = 'inbox/' + name.replace(/(\.[^.]*)?$/, ` ${n}$1`);
-    await idb.put('files', { key: keyOf(path), root: config.root, path, blob: file });
+    if (!(await idb.put('files', { key: keyOf(path), root: config.root, path, blob: file }))) { left.push(`no room on this device for “${name}”`); continue; }
     pendingFiles.push({ path });
     outbox.push({ kind: 'file', path });
     allDocs.push({ path, group: 'inbox', title: name, side: false, front: false });
     applyLocks();
   }
+  if (left.length) { net.said = 'Not added: ' + left.join('; ') + '.'; setTimeout(() => { net.said = ''; renderNet(); }, 10000); }
   saveLocal();
   renderTree();
   renderNet();
@@ -1084,6 +1118,7 @@ function applyLocks() {
     if (gateOf(frontOf(f)) === f && !docs.some((d) => d.path === frontOf(f)) && allDocs.some((d) => d.path.startsWith(f + '/')))
       docs.push({ path: frontOf(f), group: f, title: f.split('/').pop(), side: false, front: false });
   }
+  docMap = new Map(docs.map((d) => [d.path, d]));
 }
 // After a lock is opened, closed, set or removed: redraw everything that could show the folder.
 async function locksChanged() {
@@ -1211,25 +1246,119 @@ async function loadDocs() {
   renderPlayers();
 }
 
+// ---- only what is on this device ---------------------------------------------------------
+// One switch (in the settings, beside the counts) narrows every list to what
+// is kept here: the file list, the playlist and the front-page lists. A line
+// above the file list says so while it is on, and turns it off.
+const inView = (d) => !view.onlyKept || d.front || kept.has(d.path) || isPending(d.path);
+function setOnlyKept(on) {
+  view.onlyKept = on;
+  store.set('view', view);
+  showOnlyKept();
+  renderTree();
+  renderNet();
+  renderPlayers();
+  for (let i = 0; i < views.length; i++) if (isFront(state.panes[i]?.active || '')) showDoc(i, null, true);   // front-page lists
+}
+function showOnlyKept() {
+  const b = $('keptOnly'), shown = docs.filter(inView).length;
+  b.hidden = !view.onlyKept;
+  b.textContent = `On this device only: ${shown} of ${docs.length}. Show everything`;
+}
+$('keptOnly').onclick = () => setOnlyKept(false);
+
+// ---- find -------------------------------------------------------------------------------
+// The box above the file list. As you type it narrows the list to files whose
+// name or title matches; from three letters on it also looks inside the
+// documents (the server does that; without it, the copies kept here are
+// searched) and in your notes, and lists the lines found.
+let finding = '', findTimer = 0, findRun = 0;
+const findBox = $('find'), foundEl = $('found');
+const matchesFind = (d) => !finding || ((gateOf(d.path) ? '' : d.title + ' ') + d.path).toLowerCase().includes(finding);   // a locked folder's title is not matched
+findBox.addEventListener('input', () => {
+  finding = findBox.value.trim().toLowerCase();
+  renderTree();
+  clearTimeout(findTimer);
+  if (finding.length < 3) { foundEl.hidden = true; foundEl.replaceChildren(); return; }
+  findTimer = setTimeout(runFind, 350);
+});
+findBox.addEventListener('keydown', (e) => { if (e.key === 'Escape') { findBox.value = ''; findBox.dispatchEvent(new Event('input')); findBox.blur(); } });
+async function findInside(q) {
+  try {
+    const r = await call('/api/search?q=' + encodeURIComponent(q), { quiet: true });
+    if (r.ok) return await r.json();
+  } catch { /* out of reach: fall through to what is kept here */ }
+  const hits = [];
+  for (const d of docs) {
+    if (hits.length >= 60) break;
+    if (isMedia(d.path) || !kept.has(d.path) || gateOf(d.path)) continue;
+    const copy = await idb.get('docs', keyOf(d.path));
+    if (!copy?.text) continue;
+    const lines = copy.text.split('\n');
+    let n = 0;
+    for (let i = 0; i < lines.length && n < 3; i++) {
+      const at = lines[i].toLowerCase().indexOf(q);
+      if (at < 0) continue;
+      hits.push({ path: d.path, line: i + 1, text: lines[i].slice(Math.max(0, at - 60), at + q.length + 100).trim() });
+      n++;
+    }
+  }
+  return hits;
+}
+async function runFind() {
+  const q = finding, run = ++findRun;
+  const hits = (await findInside(q)).filter((h) => docOf(h.path) && !gateOf(h.path));   // nothing from a locked folder, its front page included
+  if (run !== findRun || q !== finding) return;                       // typed on since: this answer is out of date
+  const mine = notes.filter((n) => docOf(n.doc) && !gateOf(n.doc) && ((n.text || '') + ' ' + (n.quote || '')).toLowerCase().includes(q)).slice(0, 20);
+  foundEl.replaceChildren();
+  const row = (title, where, text, go) => {
+    const r = el('div', 'hit');
+    r.tabIndex = 0;
+    r.setAttribute('role', 'button');
+    r.append(el('b', '', title), el('small', '', where), el('span', '', text));
+    r.onclick = go;
+    foundEl.append(r);
+  };
+  for (const h of hits) row(docOf(h.path).title, shortPath(h.path) + ', line ' + h.line, h.text.replace(/[*_`#>|]+/g, ' ').replace(/\s+/g, ' ').trim(), async () => { await openDoc(h.path, { keep: true }); showFound(state.active, q); });
+  for (const n of mine) row(docOf(n.doc).title, n.text ? 'your note' : 'your highlight', n.text || n.quote, async () => { await openDoc(n.doc, { keep: true, hash: n.heading || undefined }); if (n.quote) showFound(state.active, n.quote.toLowerCase().slice(0, 40)); });
+  foundEl.prepend(el('div', 'sub', hits.length + mine.length ? `${hits.length} line${hits.length === 1 ? '' : 's'} in documents${hits.length >= 60 ? ' (the first 60)' : ''}, ${mine.length} in notes${net.online ? '' : ' · searched the copies on this device only'}` : `Nothing found for “${q}”${net.online ? '' : ' in the copies on this device'}.`));
+  foundEl.hidden = false;
+}
+// Bring the first place the words appear in an open document into view, and mark it for a moment.
+function showFound(pane, q) {
+  const v = views[pane], root = v?.surface || v?.article;
+  if (!root) return;
+  const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let node; (node = walker.nextNode());) {
+    if (!node.nodeValue.toLowerCase().includes(q)) continue;
+    const block = node.parentElement;
+    block.scrollIntoView({ block: 'center' });
+    block.classList.add('found');
+    setTimeout(() => block.classList.remove('found'), 2500);
+    return;
+  }
+}
+
 function renderTree() {
+  showOnlyKept();
   const y = treeEl.scrollTop;
   treeEl.innerHTML = '';
   const root = { dirs: {}, files: [] };
   for (const d of docs) {
-    if (d.front) continue;
+    if (d.front || !matchesFind(d) || !inView(d)) continue;
     let node = root;
     for (const part of d.path.split('/').slice(0, -1)) node = node.dirs[part] ??= { dirs: {}, files: [] };
     node.files.push(d);
   }
   const front = docs.find((d) => d.front);
-  if (front) treeEl.append(fileRow(front, 'Front page'));
+  if (front && matchesFind(front)) treeEl.append(fileRow(front, 'Front page'));
   (function draw(node, parent, prefix) {
     // A folder's own front page comes first, under that name.
     const fp = prefix ? node.files.find((f) => isFront(f.path)) : null;
     if (fp) parent.append(fileRow(fp, gateOf(fp.path) ? 'Locked: open to unlock' : 'Front page'));
     for (const [name, sub] of Object.entries(node.dirs)) {
       const det = el('details');
-      det.open = state.opened.includes(prefix + name);   // folders start closed
+      det.open = !!finding || state.opened.includes(prefix + name);   // folders start closed; while finding, everything that matches shows
       det.append(el('summary', '', name));
       det.addEventListener('toggle', () => {
         state.opened = state.opened.filter((p) => p !== prefix + name);
@@ -1278,8 +1407,13 @@ function fileRow(d, label) {
   side.title = 'Open to the side';
   side.onclick = (e) => { e.stopPropagation(); openDoc(d.path, { side: true }); };
   row.append(side);
-  row.onclick = (e) => openDoc(d.path, { side: e.metaKey || e.ctrlKey || e.altKey });
+  // A sound file plays without taking the place of what is being read: the
+  // controls appear at the foot of the sidebar, and its name there opens the
+  // player. Everything else opens in the pane.
+  const plays = isAudio(d.path);
+  row.onclick = (e) => (plays && !(e.metaKey || e.ctrlKey || e.altKey) ? (playable(d.path) ? playTrack(d.path) : openDoc(d.path)) : openDoc(d.path, { side: e.metaKey || e.ctrlKey || e.altKey }));
   row.ondblclick = () => openDoc(d.path, { keep: true });
+  if (plays && d.path === music.path) row.classList.add('playing');
   return row;
 }
 
@@ -1374,8 +1508,28 @@ async function closeTab(pane, path) {
 
 function remember(pane) {
   const v = views[pane], path = state.panes[pane]?.active;
-  if (v?.scroller && path) scrollMem.set(pane + ':' + path, v.scroller.scrollTop);
+  if (v?.scroller && path) { scrollMem.set(pane + ':' + path, v.scroller.scrollTop); keepPlace(path, v.scroller.scrollTop); }
 }
+// Where each document was left, kept on this device per workspace, so a
+// document opens where you stopped reading, also after the reader is closed.
+let places = null, placeTimer = 0;
+const placesOf = () => (places ||= store.get('pos:' + config.root) || {});
+function savePlaces() {
+  clearTimeout(placeTimer);
+  placeTimer = 0;
+  if (!places) return;
+  const paths = Object.keys(places);
+  for (const p of paths.slice(0, Math.max(0, paths.length - 300))) delete places[p];   // the 300 most recent
+  store.set('pos:' + config.root, places);
+}
+function keepPlace(path, top) {
+  const all = placesOf();
+  delete all[path];                       // re-added last, so the newest are the ones kept
+  if (top > 40) all[path] = Math.round(top);
+  if (!placeTimer) placeTimer = setTimeout(savePlaces, 1500);
+}
+addEventListener('pagehide', savePlaces);
+document.addEventListener('visibilitychange', () => { if (document.hidden) savePlaces(); });
 
 function setActive(pane) {
   if (state.active === pane) return;
@@ -1562,9 +1716,11 @@ async function drawDoc(pane, hash, keepScroll) {
           if (rel && docOf(rel)) openDoc(rel, { pane, hash: decodeURIComponent(url.hash.slice(1)), side: e.metaKey || e.ctrlKey || e.altKey });
           else if (rel) window.open(url.href, '_blank', 'noopener');
         }, true);
-        frame.contentWindow.addEventListener('scroll', () => { track(pane); hideFlyout(); }, { passive: true });
+        const follow = perFrame(() => track(pane));
+        frame.contentWindow.addEventListener('scroll', () => { follow(); hideFlyout(); keepPlace(path, frame.contentWindow.scrollY); }, { passive: true });
         highlightAll(v.surface, path);
         if (hash) goTo(pane, hash);
+        else if (placesOf()[path]) frame.contentWindow.scrollTo(0, placesOf()[path]);
         track(pane);
       } catch {
         // The frame has left for another site (a redirect or a script, not a click).
@@ -1603,6 +1759,7 @@ async function drawDoc(pane, hash, keepScroll) {
   }
   colourCode(article);
   hideAnswers(article);
+  labelTables(article);
   if (isFront(path)) appendBrowse(article, pane, folderOf(path));
   if (isFront(path)) {
     const acts = el('div', 'editFront'), b = el('button', '', 'edit front page'), folder = folderOf(path);
@@ -1625,17 +1782,29 @@ async function drawDoc(pane, hash, keepScroll) {
     activeHl = null;
     showFlyout(sel.getRangeAt(0).getBoundingClientRect());
   }));
-  scroller.addEventListener('scroll', () => { track(pane); hideFlyout(); }, { passive: true });
+  const follow = perFrame(() => track(pane));   // headings are measured once per frame, not once per scroll event
+  scroller.addEventListener('scroll', () => { follow(); hideFlyout(); keepPlace(path, scroller.scrollTop); }, { passive: true });
   article.addEventListener('mousemove', (e) => { if (view.focus) setHere(pane, e.target); });
 
   if (keepScroll) scroller.scrollTop = y;
   else if (hash) goTo(pane, hash);
-  else scroller.scrollTop = scrollMem.get(pane + ':' + path) || 0;
+  else scroller.scrollTop = scrollMem.get(pane + ':' + path) ?? placesOf()[path] ?? 0;
   track(pane);
 }
 
 // Colour fenced code by the language named on the fence (```c, ```python, …).
 // Blocks with no language, or one that isn't known, are left plain.
+// Tables with more than three columns do not fit a phone. Each cell is given
+// its column's heading, so that on a narrow screen the style sheet can show
+// every row as a small card: one line per cell, heading above value.
+function labelTables(root) {
+  for (const table of root.querySelectorAll('table')) {
+    const heads = [...table.querySelectorAll('thead th')].map((th) => th.textContent.trim());
+    if (heads.length <= 3) continue;
+    table.classList.add('wide');
+    for (const row of table.querySelectorAll('tbody tr')) [...row.children].forEach((cell, i) => { if (heads[i]) cell.dataset.label = heads[i]; });
+  }
+}
 function colourCode(root) {
   if (!window.hljs) return;
   for (const code of root.querySelectorAll('pre code')) {
@@ -1702,7 +1871,7 @@ function makeVideo() {
   video.controls = true;
   video.playsInline = true;
   video.preload = 'metadata';
-  video.addEventListener('play', () => { lastMedia = 'video'; player.pause(); renderPlayers(); });
+  video.addEventListener('play', () => { const was = lastMedia; lastMedia = 'video'; player.pause(); if (was !== 'video') renderPlayers(); else tickPlayers(); });
   for (const ev of ['pause', 'timeupdate', 'ended']) video.addEventListener(ev, tickPlayers);
   // A video moves on to the next thing only when there is a queue to move through.
   video.addEventListener('ended', () => { if (bg?.el === video && queue.length) ended(video); });
@@ -1814,7 +1983,7 @@ function ended(media) {
 }
 const togglePlay = () => { if (!music.path) { const first = playList()[0]; if (first) playPath(first); } else if (player.paused) player.play().catch(() => {}); else player.pause(); };
 player.addEventListener('ended', () => ended(player));
-player.addEventListener('play', () => { lastMedia = 'music'; if (bg && !bg.el.paused) bg.el.pause(); renderPlayers(); });
+player.addEventListener('play', () => { const was = lastMedia; lastMedia = 'music'; if (bg && !bg.el.paused) bg.el.pause(); if (was !== 'music') renderPlayers(); else tickPlayers(); });
 for (const ev of ['play', 'pause', 'timeupdate', 'loadedmetadata', 'emptied']) player.addEventListener(ev, tickPlayers);
 if ('mediaSession' in navigator) {
   navigator.mediaSession.setActionHandler('previoustrack', () => stepTrack(-1));
@@ -1864,7 +2033,8 @@ function showPlayer(pane, path) {
   const box = el('div', 'player');
   v.bar.style.width = '0%';
   v.body.replaceChildren(box);
-  if (path !== music.path) playTrack(path); else renderPlayers();
+  // Opening the page does not start anything. With nothing loaded yet, this track is made ready, paused.
+  if (!music.path) playTrack(path, false); else renderPlayers();
 }
 function renderPlayers() {
   const name = music.path ? music.path.split('/').pop() : 'Nothing playing', dir = music.path ? music.path.split('/').slice(0, -1).join(' / ') || 'top level' : '';
@@ -1874,11 +2044,12 @@ function renderPlayers() {
     box.append(el('h5', '', 'Queue' + (queue.length ? ' · ' + queue.length : '')));
     if (!queue.length) box.append(el('p', 'qnone', 'Nothing queued, so the player goes through every track. Press the queue button on a track or a video to line it up.'));
     for (const p of queue) {
+      if (gateOf(p)) continue;   // in a locked folder: not named until it is opened
       const ok = !!docOf(p) && playable(p);
       const row = el('div', 'track' + (p === nowPath() ? ' cur' : '') + (ok ? '' : ' gone'));
       row.tabIndex = 0;
       row.setAttribute('role', 'button');
-      row.append(el('span', '', p.split('/').pop()), el('small', '', isVideo(p) ? 'video' : p.split('/').slice(0, -1).join(' / ') || 'top level'));
+      row.append(el('span', '', p.split('/').pop()), isVideo(p) ? el('small', '', 'video') : pathLabel(p.split('/').slice(0, -1).join(' / ') || 'top level'));
       const out = iconBtn('remove', 'Take out of the queue', 'q');
       out.onclick = (e) => { e.stopPropagation(); toggleQueue(p); };
       row.append(out);
@@ -1897,7 +2068,7 @@ function renderPlayers() {
     mode.onclick = () => { state.grouped = !grouped; save(); renderPlayers(); };
     box.append(mode);
     let group = null;
-    for (const t of tracks()) {
+    for (const t of tracks().filter(inView)) {
       const folder = t.path.split('/').slice(0, -1).join(' / ') || 'top level';
       if (grouped && folder !== group) { group = folder; box.append(el('h5', '', folder)); }
       const here = kept.has(t.path), ok = playable(t.path);
@@ -1909,12 +2080,12 @@ function renderPlayers() {
       st.setAttribute('aria-label', st.title);
       st.onclick = (e) => { e.stopPropagation(); if (here) dropCopy(t.path); else keepCopy(t.path); };
       row.append(st, el('span', '', t.path.split('/').pop()));
-      if (!grouped) row.append(el('small', '', folder));
+      if (!grouped) row.append(pathLabel(folder));
       row.append(el('small', '', here ? 'on this device' : ok ? 'server only' : 'not available offline'), queueBtn(t.path));
       row.onclick = () => ok && playTrack(t.path);
       box.append(row);
     }
-    if (!tracks().length) box.append(el('p', 'empty', 'No sound files in this folder yet.'));
+    if (!tracks().filter(inView).length) box.append(el('p', 'empty', view.onlyKept && tracks().length ? 'No sound files are kept on this device. “Show everything” in the file list brings the rest back.' : 'No sound files in this folder yet.'));
   }
   // The small controls in the sidebar: for the video that is carrying on in
   // the background, or else for the music.
@@ -1940,7 +2111,13 @@ function renderPlayers() {
     mini.replaceChildren(title, row);
   }
   paintQueueBtns();
+  markPlaying();
   tickPlayers();
+}
+// Mark the playing track in the file list (the list is not rebuilt for this).
+function markPlaying() {
+  for (const row of treeEl.querySelectorAll('.file.playing')) row.classList.remove('playing');
+  if (music.path) for (const row of treeEl.querySelectorAll('.file')) if (row.dataset.path === music.path) row.classList.add('playing');
 }
 function tickPlayers() {
   for (const b of document.querySelectorAll('.pl-play')) setIcon(b, player.paused ? 'play' : 'pause', player.paused ? 'Play' : 'Pause');
@@ -2037,7 +2214,7 @@ const KINDS = [
   ['music', 'Music', (p) => isAudio(p)],
 ];
 function appendBrowse(article, pane, folder) {
-  const inside = docs.filter((d) => !isFront(d.path) && (!folder || d.path.startsWith(folder + '/')));
+  const inside = docs.filter((d) => !isFront(d.path) && inView(d) && (!folder || d.path.startsWith(folder + '/')));
   const box = el('div', 'browse'), tiles = el('div', 'tiles'), listing = el('div', 'listing');
   const key = 'browse:' + folder;
   const draw = () => {
@@ -2064,10 +2241,10 @@ function appendBrowse(article, pane, folder) {
         row.tabIndex = 0;
         row.setAttribute('role', 'button');
         row.append(el('span', '', isMedia(d.path) ? d.path.split('/').pop() : d.title));
-        if (!grouped && where !== 'here') row.append(el('small', '', where));
+        if (!grouped && where !== 'here') row.append(pathLabel(where));
         if (kept.has(d.path)) row.append(el('small', '', 'on this device'));
         if (isAudio(d.path) || isVideo(d.path)) row.append(queueBtn(d.path));
-        row.onclick = (e) => openDoc(d.path, { pane, side: e.metaKey || e.ctrlKey || e.altKey });
+        row.onclick = (e) => (isAudio(d.path) && playable(d.path) && !(e.metaKey || e.ctrlKey || e.altKey) ? playTrack(d.path) : openDoc(d.path, { pane, side: e.metaKey || e.ctrlKey || e.altKey }));
         listing.append(row);
       }
     };
@@ -2328,7 +2505,8 @@ function renderContext() {
 async function loadNotes() {
   // While changes are still waiting to be sent, this device's copy is the newer one.
   if (!outbox.some((op) => op.kind !== 'file')) {
-    try { notes = await api('/api/notes'); saveLocal(); } catch { notes = store.get('notes:' + config.root) || notes; }
+    try { notes = await api('/api/notes'); saveLocal(); }
+    catch (e) { notes = store.get('notes:' + config.root) || notes; if (e.refused) { net.said = 'Notes shown are this device\'s copy: ' + e.message + '.'; renderNet(); } }
   }
   renderNotes();
   renderTree();
@@ -2495,7 +2673,7 @@ function flash(node) {
 }
 
 function renderNotes(rehighlight = true) {
-  const doc = activeDoc(), mine = notes.filter((n) => n.doc === doc);
+  const doc = activeDoc(), mine = doc && gateOf(doc) ? [] : notes.filter((n) => n.doc === doc);
   $('mNotes').textContent = 'Notes' + (mine.length ? ` (${mine.length})` : '');
   notesEl.innerHTML = '';
   if (state.panes.length > 1) {
@@ -2621,14 +2799,29 @@ function listen() {
   events.onopen = () => setOnline(true);
   events.onmessage = onFileChange;
 }
-async function onFileChange(e) {
-  const { file } = JSON.parse(e.data);
-  if (file.endsWith('notes.json')) return loadNotes();
-  if (file === 'hub.json' || file === config.front || file === 'FRONTPAGE.md') await loadConfig();
+// Changes arrive one file at a time, often in bursts (a folder upload, a
+// save that touches several files). They are collected for a moment and
+// answered with one refresh, not one each.
+let changed = new Set(), changedSince = 0, changeTimer = 0;
+function onFileChange(e) {
+  changed.add(JSON.parse(e.data).file);
+  if (!changedSince) changedSince = Date.now();
+  clearTimeout(changeTimer);
+  changeTimer = setTimeout(applyChanges, Date.now() - changedSince > 2000 ? 0 : 400);   // a long burst still refreshes every two seconds
+}
+async function applyChanges() {
+  const files = [...changed];
+  changed = new Set();
+  changedSince = 0;
+  if (files.some((f) => f.endsWith('notes.json'))) loadNotes();
+  const others = files.filter((f) => !f.endsWith('notes.json'));
+  if (!others.length) return;
+  if (others.some((f) => f === 'hub.json' || f === config.front || f === 'FRONTPAGE.md')) await loadConfig();
   await loadDocs();
   if (editing) return;
+  if (others.includes('hub.json')) return locksChanged();   // settings changed elsewhere, locks among them: redraw whatever they now hide or show
   for (let i = 0; i < state.panes.length; i++) {
-    if (state.panes[i].active !== file) continue;
+    if (!others.includes(state.panes[i].active)) continue;
     renderTabs(i);
     await showDoc(i, null, true);
     if (i === state.active) renderOutline();
@@ -2637,7 +2830,12 @@ async function onFileChange(e) {
 
 // Keep a copy of the page itself, so the reader opens without the server (see sw.js).
 // Browsers allow this on HTTPS and on localhost only.
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+  // The page shown came from the copy kept here; the worker has since fetched a changed one.
+  navigator.serviceWorker.addEventListener('message', (e) => { if (e.data?.type === 'page-updated') $('fresh').hidden = false; });
+}
+$('fresh').onclick = () => location.reload();
 
 (async function init() {
   // Private copies first: if they are encrypted, ask for the passphrase.

@@ -1,0 +1,411 @@
+## page without pairing
+200 
+## script without pairing
+200 
+## config without pairing
+401 {"error": "pairing required"}
+## file without pairing
+401 {"error": "pairing required"}
+## note without pairing
+401 {"error": "pairing required"}
+## upload without pairing
+401 {"error": "pairing required"}
+## session without pairing
+401 {"error": "pairing required"}
+## made-up token
+401 {"error": "pairing required"}
+## pair with no code
+400 {"error": "code required"}
+## pair with a wrong code
+403 {"error": "wrong or expired pairing code"}
+## pair
+200 {"device": {"id": "<id>", "name": "test device"}}
+## code works once
+403 {"error": "wrong or expired pairing code"}
+## session
+200 {"device": {"id": "<id>", "name": "test device"}, "local": false, "tls": false}
+## devices
+200 [{"created": "<created>", "current": true, "id": "<id>", "name": "test device", "seen": "<seen>"}]
+## new pairing code
+200 {"code": "<code>", "minutes": 10}
+## storage
+200 {"free": "<free>", "quota": 21474836480, "used": "<used>"}
+## unknown device
+404 {"error": "no such device"}
+## foreign host name
+403 {"error": "unknown host name"}
+## foreign host and origin
+403 {"error": "unknown host name"}
+## other site fetches
+403 {"error": "requests from other sites are not allowed"}
+## other port fetches
+403 {"error": "requests from other sites are not allowed"}
+## own page fetches
+200 
+## page headers
+200
+content-security-policy: default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self'; connect-src 'self'; frame-src 'self'; worker-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'
+content-type: text/html; charset=utf-8
+cross-origin-opener-policy: same-origin
+cross-origin-resource-policy: same-origin
+referrer-policy: no-referrer
+x-content-type-options: nosniff
+x-frame-options: deny
+body: (the page)
+## html file headers
+200
+accept-ranges: bytes
+content-length: 74
+content-security-policy: sandbox allow-same-origin; default-src 'none'; img-src 'self' data: blob:; media-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'
+content-type: text/html; charset=utf-8
+cross-origin-resource-policy: same-origin
+referrer-policy: no-referrer
+x-content-type-options: nosniff
+body: <html><head><title> A Page </title></head><body><h1>Hi</h1></body></html>
+## svg file headers
+200
+accept-ranges: bytes
+content-length: 71
+content-security-policy: sandbox allow-same-origin; default-src 'none'; img-src 'self' data: blob:; media-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'
+content-type: image/svg+xml
+cross-origin-resource-policy: same-origin
+referrer-policy: no-referrer
+x-content-type-options: nosniff
+body: <svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>
+## api headers
+200
+content-length: 19
+content-security-policy: default-src 'none'; sandbox; frame-ancestors 'none'
+content-type: text/plain; charset=utf-8
+cross-origin-resource-policy: same-origin
+referrer-policy: no-referrer
+x-content-type-options: nosniff
+body: # First
+
+Body one.
+## oversized json
+413 {"error": "body too large"}
+## config
+200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#fbeeb0", "id": "<id>", "name": "Important"}, {"color": "#cfe8c6", "id": "<id>", "name": "Definition"}, {"color": "#cfe0f5", "id": "<id>", "name": "Question"}, {"color": "#f6d0d6", "id": "<id>", "name": "Unclear"}], "ignore": ["CLAUDE.md"], "root": "<root>", "side": ["references.md"], "title": "Fixture Title"}
+## docs
+200 [{"front": false, "group": "a", "path": "a/1-doc.md", "side": false, "title": "First"}, {"front": false, "group": "a", "path": "a/2-doc.md", "side": false, "title": "2-doc"}, {"front": false, "group": "a", "path": "a/10-doc.md", "side": false, "title": "Tenth"}, {"front": false, "group": "b", "path": "b/clip.mp4", "side": false, "title": "clip.mp4"}, {"front": false, "group": "b", "path": "b/drawing.svg", "side": false, "title": "drawing.svg"}, {"front": false, "group": "b", "path": "b/page.html", "side": false, "title": "A Page"}, {"front": false, "group": "b", "path": "b/pic.png", "side": false, "title": "pic.png"}, {"front": false, "group": "", "path": "code.c", "side": false, "title": "code.c"}, {"front": true, "group": "", "path": "FRONTPAGE.md", "side": false, "title": "Fixture Title"}, {"front": false, "group": "", "path": "references.md", "side": true, "title": "Refs"}]
+## doc
+200 # First
+
+Body one.
+
+## doc missing
+404 {"error": "no such doc"}
+## doc traversal
+404 {"error": "no such doc"}
+## doc not readable type
+404 {"error": "no such doc"}
+## raw html
+200 <html><head><title> A Page </title></head><body><h1>Hi</h1></body></html>
+
+## raw traversal
+404 {"error": "not found"}
+## raw encoded traversal
+404 {"error": "not found"}
+## media whole
+200
+accept-ranges: bytes
+content-length: 20
+content-security-policy: sandbox allow-same-origin; default-src 'none'; img-src 'self' data: blob:; media-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'
+content-type: video/mp4
+cross-origin-resource-policy: same-origin
+referrer-policy: no-referrer
+x-content-type-options: nosniff
+body: 0123456789abcdefghij
+## media range middle
+206
+accept-ranges: bytes
+content-length: 4
+content-range: bytes 2-5/20
+content-security-policy: sandbox allow-same-origin; default-src 'none'; img-src 'self' data: blob:; media-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'
+content-type: video/mp4
+cross-origin-resource-policy: same-origin
+referrer-policy: no-referrer
+x-content-type-options: nosniff
+body: 2345
+## media range open end
+206
+accept-ranges: bytes
+content-length: 5
+content-range: bytes 15-19/20
+content-security-policy: sandbox allow-same-origin; default-src 'none'; img-src 'self' data: blob:; media-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'
+content-type: video/mp4
+cross-origin-resource-policy: same-origin
+referrer-policy: no-referrer
+x-content-type-options: nosniff
+body: fghij
+## media range last n
+206
+accept-ranges: bytes
+content-length: 4
+content-range: bytes 16-19/20
+content-security-policy: sandbox allow-same-origin; default-src 'none'; img-src 'self' data: blob:; media-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'
+content-type: video/mp4
+cross-origin-resource-policy: same-origin
+referrer-policy: no-referrer
+x-content-type-options: nosniff
+body: ghij
+## media range past end
+206
+accept-ranges: bytes
+content-length: 10
+content-range: bytes 10-19/20
+content-security-policy: sandbox allow-same-origin; default-src 'none'; img-src 'self' data: blob:; media-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'
+content-type: video/mp4
+cross-origin-resource-policy: same-origin
+referrer-policy: no-referrer
+x-content-type-options: nosniff
+body: abcdefghij
+## media range unsatisfiable
+416
+accept-ranges: bytes
+content-length: 0
+content-range: bytes */20
+content-security-policy: sandbox allow-same-origin; default-src 'none'; img-src 'self' data: blob:; media-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'
+content-type: video/mp4
+cross-origin-resource-policy: same-origin
+referrer-policy: no-referrer
+x-content-type-options: nosniff
+body: 
+## media range nonsense
+200
+accept-ranges: bytes
+content-length: 20
+content-security-policy: sandbox allow-same-origin; default-src 'none'; img-src 'self' data: blob:; media-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'
+content-type: video/mp4
+cross-origin-resource-policy: same-origin
+referrer-policy: no-referrer
+x-content-type-options: nosniff
+body: 0123456789abcdefghij
+## text file range
+206
+accept-ranges: bytes
+content-length: 7
+content-range: bytes 0-6/19
+content-security-policy: sandbox allow-same-origin; default-src 'none'; img-src 'self' data: blob:; media-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'
+content-type: text/plain; charset=utf-8
+cross-origin-resource-policy: same-origin
+referrer-policy: no-referrer
+x-content-type-options: nosniff
+body: # First
+## index page
+200 
+## vendor marked
+200 
+## vendor highlight
+200 
+## unknown route
+404 {"error": "not found"}
+## notes empty
+200 []
+## note create
+200 {"doc": "a/1-doc.md", "heading": "first", "headingText": "First", "id": "<id>", "quote": "Body one.", "status": "open", "text": "why \"this\"?\nline two", "ts": "<ts>", "type": "question"}
+## highlight create
+200 {"doc": "a/1-doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "Body", "status": "highlight", "text": "", "ts": "<ts>", "type": "important"}
+## note with own id
+200 {"doc": "a/1-doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "", "status": "open", "text": "written offline", "ts": "<ts>", "type": ""}
+## same note again
+200 {"doc": "a/1-doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "", "status": "open", "text": "written offline", "ts": "<ts>", "type": ""}
+## own id is usable
+200 {"doc": "a/1-doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "", "status": "open", "text": "edited by its own id", "ts": "<ts>", "type": ""}
+## note with bad id
+200 {"doc": "a/1-doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "", "status": "open", "text": "bad id and time", "ts": "<ts>", "type": ""}
+## note bad
+400 {"error": "doc and text or quote required"}
+## highlight gets text
+200 {"doc": "a/1-doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "Body", "status": "open", "text": "now annotated \u00fcn\u00efcode", "ts": "<ts>", "type": "important"}
+## note retype
+200 {"doc": "a/1-doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "Body", "status": "open", "text": "now annotated \u00fcn\u00efcode", "ts": "<ts>", "type": "unclear"}
+## notes list
+200 [{"doc": "a/1-doc.md", "heading": "first", "headingText": "First", "id": "<id>", "quote": "Body one.", "status": "open", "text": "why \"this\"?\nline two", "ts": "<ts>", "type": "question"}, {"doc": "a/1-doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "Body", "status": "open", "text": "now annotated \u00fcn\u00efcode", "ts": "<ts>", "type": "unclear"}, {"doc": "a/1-doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "", "status": "open", "text": "edited by its own id", "ts": "<ts>", "type": ""}, {"doc": "a/1-doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "", "status": "open", "text": "bad id and time", "ts": "<ts>", "type": ""}]
+## note delete
+200 {"ok": true}
+## note delete missing
+404 {"error": "no such note"}
+## note put missing
+404 {"error": "no such note"}
+## rename title
+200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#fbeeb0", "id": "<id>", "name": "Important"}, {"color": "#cfe8c6", "id": "<id>", "name": "Definition"}, {"color": "#cfe0f5", "id": "<id>", "name": "Question"}, {"color": "#f6d0d6", "id": "<id>", "name": "Unclear"}], "ignore": ["CLAUDE.md"], "root": "<root>", "side": ["references.md"], "title": "Renamed Title"}
+## front after rename
+200 # Renamed Title
+
+Description.
+
+## set highlights
+200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "root": "<root>", "side": ["references.md"], "title": "Renamed Title"}
+## edit front
+200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "root": "<root>", "side": ["references.md"], "title": "Edited"}
+## front after edit
+200 # Edited
+
+New text.
+
+## folder front page
+200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "root": "<root>", "side": ["references.md"], "title": "Edited"}
+## folder front content
+200 # Folder A
+
+About this folder.
+
+## folder front missing
+400 {"error": "no such folder"}
+## folder front escape
+400 {"error": "no such folder"}
+## edit front bad
+400 {"error": "markdown required"}
+## set locks
+200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "locks": {"a": {}, "b": {}, "gone": {"hash": "aGFzaA==", "salt": "c2FsdA=="}, "gone/deep": {}}, "root": "<root>", "side": ["references.md"], "title": "Edited"}
+## remove folder
+200 {"removed": "gone"}
+## locks after removal
+200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "locks": {"a": {}, "b": {}}, "root": "<root>", "side": ["references.md"], "title": "Edited"}
+## removed folder docs
+200 [{"front": false, "group": "a", "path": "a/1-doc.md", "side": false, "title": "First"}, {"front": false, "group": "a", "path": "a/2-doc.md", "side": false, "title": "2-doc"}, {"front": false, "group": "a", "path": "a/10-doc.md", "side": false, "title": "Tenth"}, {"front": false, "group": "a", "path": "a/FRONTPAGE.md", "side": false, "title": "Folder A"}, {"front": false, "group": "b", "path": "b/clip.mp4", "side": false, "title": "clip.mp4"}, {"front": false, "group": "b", "path": "b/drawing.svg", "side": false, "title": "drawing.svg"}, {"front": false, "group": "b", "path": "b/page.html", "side": false, "title": "A Page"}, {"front": false, "group": "b", "path": "b/pic.png", "side": false, "title": "pic.png"}, {"front": false, "group": "", "path": "code.c", "side": false, "title": "code.c"}, {"front": true, "group": "", "path": "FRONTPAGE.md", "side": false, "title": "Edited"}, {"front": false, "group": "", "path": "references.md", "side": true, "title": "Refs"}]
+## remove folder again
+400 {"error": "no such folder"}
+## remove folder escape
+400 {"error": "no such folder"}
+## remove notes folder
+400 {"error": "no such folder"}
+## remove a file
+400 {"error": "no such folder"}
+## upload new
+200 {"root": "<root>", "saved": true}
+## upload again
+200 {"skipped": true}
+## uploaded content
+200 # Uploaded
+## upload traversal
+400 {"error": "bad path"}
+## upload hidden
+400 {"error": "bad path"}
+## other site posts a note
+403 {"error": "requests from other sites are not allowed"}
+## other site uploads
+403 {"error": "requests from other sites are not allowed"}
+## sandboxed page posts
+403 {"error": "requests from other sites are not allowed"}
+## own page posts
+200 {"doc": "a/1-doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "", "status": "open", "text": "from the page itself", "ts": "<ts>", "type": ""}
+## other site reads
+403 {"error": "requests from other sites are not allowed"}
+## other hub, cookie only
+403
+## other hub, no token
+403
+## other hub, bad token
+401
+## other hub, token
+200
+## other hub, headers
+Access-Control-Allow-Origin: https://other.example:4321
+HTTP/1.1 200 OK
+Vary: Origin
+## other hub, preflight
+Access-Control-Allow-Headers: Authorization, Content-Type, Range
+Access-Control-Allow-Methods: GET, POST, PUT, DELETE
+Access-Control-Allow-Origin: https://other.example:4321
+Access-Control-Max-Age: 600
+HTTP/1.1 204 No Content
+Vary: Origin
+## other hub, odd origin
+403
+## other hub, pair no code
+403
+## other hub, pair with code
+given a token
+## other hub, new token
+200
+## set hubs
+200 [{"name": "Desk top", "url": "https://desk.local:4321"}, {"name": "usual port", "url": "https://pi.local"}]
+## hubs
+200 [{"name": "Desk top", "url": "https://desk.local:4321"}, {"name": "usual port", "url": "https://pi.local"}]
+## page policy
+connect-src 'self' https://desk.local:4321 https://pi.local
+## search
+200 [{"line": 3, "path": "a/1-doc.md", "text": "Body one."}]
+## search, nothing found
+200 []
+## search, too short
+400 {"error": "search for 2 to 100 characters"}
+## search skips ignored
+200 []
+## search skips hidden
+200 []
+## raw hidden file
+404 {"error": "not found"}
+## doc hidden file
+404 {"error": "no such doc"}
+## page file has a tag
+yes
+Cache-Control: no-cache
+## page file, already held
+304 0
+## page, already held, keeps its policy
+HTTP/1.1 304 Not Modified
+Content-Security-Policy: default-src 'none'; script-src 'self'; style-
+## page file, other tag
+200
+## data is never kept
+Cache-Control: no-store
+## hub address, odd characters
+200 [{"name": "ok", "url": "https://[fe80::1]:4321"}]
+## hubs emptied
+200 []
+## note onto a damaged file
+500 {"error": "notes.json is damaged and was left as it is; repair or remove it"}
+## notes from a damaged file
+500 {"error": "notes.json is damaged and was left as it is; repair or remove it"}
+## edit on a damaged file
+500 {"error": "notes.json is damaged and was left as it is; repair or remove it"}
+## damaged file untouched
+[{"id":"broken
+## settings from a damaged file
+500 {"error": "hub.json is damaged and was left as it is; repair or remove it"}
+## settings onto a damaged file
+500 {"error": "hub.json is damaged and was left as it is; repair or remove it"}
+## upload to own workspace
+200 {"root": "<workspaces>/My Space", "saved": true}
+## own workspace, odd name
+200 {"root": "<workspaces>/escape", "saved": true}
+## own workspace, no name
+400 {"error": "bad path"}
+## own workspace, bad path
+400 {"error": "bad path"}
+## own workspace, again
+200 {"skipped": true}
+## workspaces listed
+200 [{"current": true, "home": true, "name": "ws", "root": "<root>"}, {"current": false, "home": false, "name": "escape", "root": "<workspaces>/escape"}, {"current": false, "home": false, "name": "My Space", "root": "<workspaces>/My Space"}]
+## switch to missing
+404 {"error": "no such workspace"}
+## switch with no root
+404 {"error": "no such workspace"}
+## switch to own
+200 [{"current": false, "home": true, "name": "ws", "root": "<root>"}, {"current": false, "home": false, "name": "escape", "root": "<workspaces>/escape"}, {"current": true, "home": false, "name": "My Space", "root": "<workspaces>/My Space"}]
+## config in own
+200 {"front": null, "highlights": [{"color": "#fbeeb0", "id": "<id>", "name": "Important"}, {"color": "#cfe8c6", "id": "<id>", "name": "Definition"}, {"color": "#cfe0f5", "id": "<id>", "name": "Question"}, {"color": "#f6d0d6", "id": "<id>", "name": "Unclear"}], "ignore": ["CLAUDE.md"], "root": "<workspaces>/My Space", "side": [], "title": "My Space"}
+## docs in own
+200 [{"front": false, "group": "", "path": "doc.md", "side": false, "title": "In Own"}]
+## note in own
+200 {"doc": "doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "", "status": "open", "text": "in the other workspace", "ts": "<ts>", "type": ""}
+## notes in own
+200 [{"doc": "doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "", "status": "open", "text": "in the other workspace", "ts": "<ts>", "type": ""}]
+## switch home
+200 [{"current": true, "home": true, "name": "ws", "root": "<root>"}, {"current": false, "home": false, "name": "escape", "root": "<workspaces>/escape"}, {"current": false, "home": false, "name": "My Space", "root": "<workspaces>/My Space"}]
+## notes at home
+200 
+## config at home
+200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "locks": {"a": {}, "b": {}}, "root": "<root>", "side": ["references.md"], "title": "Edited"}
+## unpair
+200 {"ok": true}
+## after unpairing
+401 {"error": "pairing required"}
+## docs after changes
+401 {"error": "pairing required"}
+## workspaces
+401 {"error": "pairing required"}

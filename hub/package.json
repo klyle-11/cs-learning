@@ -1,14 +1,22 @@
 {
-  "name": "discrete-math-hub",
+  "name": "hub-reader",
   "version": "1.0.0",
-  "description": "",
+  "description": "The reader page. The server is ../server-cpp/hubd; npm only fetches the page's three libraries.",
   "scripts": {
-    "start": "node server.js"
+    "start": "../start.sh",
+    "start:network": "HOST=0.0.0.0 ../start.sh",
+    "start:network:insecure": "HUB_INSECURE_HTTP=1 HOST=0.0.0.0 ../start.sh",
+    "start:https-local": "HUB_TLS=1 ../start.sh",
+    "start:pair-local": "HUB_PAIR_LOCAL=1 ../start.sh",
+    "start:scratch": "PORT=4396 HUB_STATE=../server-cpp/build/scratch-state ../start.sh ../data-test --workspaces ../server-cpp/build/scratch-workspaces",
+    "cert": "../server-cpp/hubd --make-cert",
+    "cert:new-authority": "../server-cpp/hubd --new-authority",
+    "build": "make -C ../server-cpp hubd",
+    "test": "make -C ../server-cpp test"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
     "@highlightjs/cdn-assets": "^11.12.0",
     "dompurify": "^3.4.16",

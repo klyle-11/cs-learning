@@ -283,6 +283,7 @@ struct Response {
   // When `file` is set the body is that file's bytes [offset, offset + length), sent in pieces.
   std::string file;
   unsigned long long offset = 0, length = 0;
+  std::string etag;   // set for the page's own files: the browser may keep them and ask "still this one?"
   bool hold = false;  // the handler wrote its own response and keeps the connection (event stream)
   bool close = false; // do not reuse the connection after this
 };
@@ -303,6 +304,7 @@ inline const char *reason(int status) {
     case 200: return "OK";
     case 204: return "No Content";
     case 206: return "Partial Content";
+    case 304: return "Not Modified";
     case 308: return "Permanent Redirect";
     case 400: return "Bad Request";
     case 401: return "Unauthorized";
@@ -352,7 +354,9 @@ inline bool write_response(Conn &conn, const Response &r, bool keep, size_t piec
   head += "Content-Type: " + r.type + (text ? "; charset=utf-8" : "") + "\r\n";
   head += r.extra;
   head += "Content-Length: " + std::to_string(length) + "\r\n";
-  head += std::string("Cache-Control: no-store\r\nConnection: ") + (keep ? "keep-alive" : "close") + "\r\n\r\n";
+  if (!r.etag.empty()) head += "ETag: " + r.etag + "\r\n";
+  // Kept by the browser only where it can ask whether its copy is still current; everything else, never.
+  head += std::string(r.etag.empty() ? "Cache-Control: no-store" : "Cache-Control: no-cache") + "\r\nConnection: " + (keep ? "keep-alive" : "close") + "\r\n\r\n";
   conn.within(30000 + static_cast<long>(length / 8)); // at least 8 KB a second
   if (!conn.write_all(head)) return false;
   if (r.file.empty()) return conn.write_all(r.body);

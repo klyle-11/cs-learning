@@ -30,7 +30,7 @@ check: CFLAGS += -g -O1 -fsanitize=address,undefined
 check: LDFLAGS += -fsanitize=address,undefined
 check: clean hubd
 
-# Compare this server with the Node one on the same folder.
+# Send the recorded requests and compare the answers with test/expected.txt.
 test: hubd
 	./test/contract.sh
 

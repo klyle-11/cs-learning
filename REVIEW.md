@@ -2,6 +2,8 @@
 
 Second pass, 3 October 2026, branch `c-server` at `e6d1996`. Read in full: `hub/server.js` (676 lines), `server-cpp/src/hub.cpp` (1,413), `http.hpp` (534), `secure.hpp` (316), `hub/local.js`, `vault.js`, `sw.js`, the trust page, and the board's start-up code; `hub/app.js` (about 2,700 lines) was read around everything that stores, fetches, inserts HTML or redraws. The first pass, the same day, found the reader open to anyone on the network; its checklist was ticked off as content isolation, pairing, HTTPS and device encryption were built. Added since then, and new to this pass: the service worker, the queue, keeping pictures and video, folder locks, folder removal, and other hubs.
 
+**Since this pass was written, the same day:** finding 17 was fixed; the Node server was retired (`hub/server.js` is gone; `hubd` is the only server); findings 18 to 21, 24, 25, 29, 30, 32 and 37 were fixed and 28, 33 and 39 partly; find, reopening where you stopped, instant start and playing music without leaving the page were built; and the hub's own computer no longer needs the certificate authority, because `http://localhost` is served as it is. Each item below says what was done. The server's test now covers 143 requests. Where a finding had a Node half, that half no longer exists, and the finding says so. Places given as `server.js:<line>` refer to the last commit that has the file, `d8d878f`.
+
 Findings marked **confirmed** were reproduced against the scratch workspace (`data-test`) in this pass. The rest come from reading the code, with the place to look given. Nothing in this pass was changed in the code except one small list bug from the folder-lock work (a file added offline could drop out of the list when a lock changed).
 
 ## Verdict
@@ -28,15 +30,15 @@ Ticked means fixed in both servers and the page, and covered by a test.
 | High | 8 the card in the clear | open: needs the decision under "Target design", layer 5 |
 | High | 17 the authority could vouch for any site | fixed; **the old authority must still be removed from each device**, and the board needs flash encryption |
 | Medium | 9, 10, 11, 13 | done (10 and 13 have new relatives: 24 and 21) |
-| Medium | 12 no limit on total storage | done in C++; **two gaps in Node (22)** |
-| Medium | **18 to 24** | **new, open** |
+| Medium | 12 no limit on total storage | done |
+| Medium | **18 to 21, 23, 24** | **new, open** (22 went with the Node server) |
 | Low | 14 symbolic links (now confirmed), 15 titles in browser history, 16 old commits on GitHub | open |
 | Low | **25 to 31** | **new, open** |
-| Efficiency | **32 to 39** | **new, open** |
+| Efficiency | **32 to 37, 39** | **new, open** (38 went with the Node server) |
 
 Also open, from the sections further down:
 
-- [ ] Retire the Node server (workspaces in C++ first). Further away than before: four features were written twice today.
+- [x] Retire the Node server. Done after this pass: workspaces were added to `hubd`, checked against Node on 123 requests, and `hub/server.js` deleted. Not yet done: a full browser session against `hubd` alone.
 - [ ] Split `app.js` into modules. It has grown from about 2,000 lines to about 2,700.
 - [ ] A browser test suite in the repo. This pass ran a dozen browser checks (queue, offline start, locks, two hubs side by side); all were throwaway scripts again, and they are already gone.
 - [ ] Data model: highlight position as well as quote; note versions; clean-up of device copies.
@@ -105,31 +107,35 @@ The authority each device installs was made with no limit on which names it coul
 
 - [x] **11. The C++ server reads whole files into memory.** Fixed: files and uploads move in pieces.
 
-- [x] **12. No limit on total storage.** Fixed in C++. Node has two gaps: 22.
+- [x] **12. No limit on total storage.** Fixed.
 
 - [x] **13. Changes can be lost silently.** Fixed for the outbox: only a definite refusal drops a change, and it is listed. The same pattern exists in four newer places: 21.
 
-- [ ] **18. The page's own folder can be changed through the API when it sits inside the folder being served.** *New. From reading the code.*
-On the board the documents are `/sdcard/hub` and the page is `/sdcard/hub/www` (`esp32/main/board.cpp:139`). `hubd` also prefers a `hub/` inside the served folder (`hub.cpp:1390`), and the README's "Starting a new learning environment" sets things up that way. Folder removal refuses only `notes` (`hub.cpp:1147`, `server.js:548`), and uploads refuse only hidden names. So a paired device can remove `www` and upload its own `app.js`; in Node it is simpler still, because a script uploaded to `hub/vendor/` is served in place of the library it is named after (`server.js:355`). The planted script then runs in every other device's reader, with their unlocked copies and their tokens for other hubs. Paired devices are trusted with the data, but this turns "can write files" into "runs code on every device". In the usual laptop layout (`data/` beside `hub/`) the page is outside the served folder and this cannot happen.
-*Fix:* refuse uploads, folder removal and front-page writes anywhere under the page's folder; drop the "beside the page" lookup in Node, or apply it only outside the served folder.
+- [x] **18. The page's own folder can be changed through the API when it sits inside the folder being served.** *New. From reading the code.*
+On the board the documents are `/sdcard/hub` and the page is `/sdcard/hub/www` (`esp32/main/board.cpp:139`). `hubd` also prefers a `hub/` inside the served folder (`hub.cpp:1390`), and the README's "Starting a new learning environment" sets things up that way. Folder removal refuses only `notes` (`hub.cpp:1147`, `server.js:548`), and uploads refuse only hidden names. So a paired device can remove `www` and upload its own `app.js`. The planted script then runs in every other device's reader, with their unlocked copies and their tokens for other hubs. Paired devices are trusted with the data, but this turns "can write files" into "runs code on every device". In the usual laptop layout (`data/` beside `hub/`) the page is outside the served folder and this cannot happen.
+*Fix:* refuse uploads, folder removal and front-page writes anywhere under the page's folder.
+*Done after this pass:* uploads, folder removal and front-page writes are refused inside the page's folder.
 
-- [ ] **19. A damaged notes file is replaced by an empty one on the next change.** *New. From reading the code.*
-Both servers treat a notes file that does not parse as an empty list (`server.js:82`, `hub.cpp:400`), and the next note written saves that list back: every earlier note is gone. Settings behave the same (`hub.json`: side list, ignore list, folder locks). Node writes both files in place (`server.js:87`, `:540`), so a crash or a full disk in mid-write is one way to end up with a broken file; a hand edit or a tool writing replies into `notes.json` is another.
-*Fix:* if the file exists and does not parse, refuse to write and say so; write through a temporary file and a rename in Node as the C++ server does; keep the previous version beside it.
+- [x] **19. A damaged notes file is replaced by an empty one on the next change.** *New. From reading the code.*
+Both servers treat a notes file that does not parse as an empty list (`server.js:82`, `hub.cpp:400`), and the next note written saves that list back: every earlier note is gone. Settings behave the same (`hub.json`: side list, ignore list, folder locks). `hubd` writes through a temporary file, so the likeliest cause of a broken file is a hand edit, or a tool writing replies into `notes.json`.
+*Fix:* if the file exists and does not parse, refuse to write and say so; keep the previous version beside it.
+*Done after this pass:* a notes or settings file that does not parse is never written over, and is not answered as "empty" either: reading and writing are both refused, with the reason. The reader then keeps showing its own copy of the notes and says so, and a damaged settings file no longer drops the folder locks. Covered by the server's test and a browser check. Not done: keeping the previous version beside the file.
 
-- [ ] **20. Editing a note can undo a change made at the same moment (Node); a slow edit holds up every other save (C++).** *New. From reading the code.*
-Node reads the list, then waits for the request body, then writes the list back (`server.js:605` to `:616`). A note added during that wait, by another device or by a reply written into the file, is overwritten. The C++ server takes its lock first and reads the body while holding it (`hub.cpp:1230` to `:1244`), so one slow sender stalls all saving for up to a minute.
-*Fix:* in both, read the body first; then read, change and write in one step.
+- [x] **20. A slow edit to a note holds up every other save.** *New. From reading the code.*
+(The Node server had the opposite fault, losing a change made during the wait; that went with it.) `hubd` takes its lock first and reads the request body while holding it (`hub.cpp:1230` to `:1244`), so one slow sender stalls all saving for up to a minute.
+*Fix:* read the body first; then lock, read, change and write.
+*Done after this pass:* the body is read before the lock is taken.
 
-- [ ] **21. What does not fit on the device is dropped without a word.** *New. From reading the code.* Four cases of the pattern in 13:
+- [x] **21. What does not fit on the device is dropped without a word.** *New. From reading the code.* Four cases of the pattern in 13:
   - When the browser's small store is full, writes fail silently (`local.js:50`). That store holds the notes waiting to be sent and the outbox itself, so they are gone on reload. With several hubs and workspaces each caching a document list there, the 5 MB limit is closer than it was.
   - A copy that could not be stored is still marked as kept: `keepCopy` and `rememberDoc` ignore whether the write worked, so the file shows ● and is not there when the server is away.
   - A file added while offline whose bytes are missing from the device is removed from the outbox as if it had been sent (`flush`: the test is "no answer, or a good one").
   - "add files…" skips anything over 50 MB without saying so.
+*Done after this pass:* a copy is marked kept only if it was stored, and "keep all" stops at the first one that does not fit; a store that refuses a write is reported in the status box, with protection on as well as off; a file whose bytes are missing is listed as not sent; files left out of "add files" are named. Not done: moving the notes and the outbox out of the small store, so a full store is now announced but can still lose them.
 
   *Fix:* check each result and show failures in the status box; move the notes and the outbox out of the small store into the same one as the copies.
 
-- [ ] **22. The Node server's storage limit has two gaps.** *New. The second is confirmed.*
+- [x] **22. The Node server's storage limit had two gaps.** *Gone with the Node server.* `hubd` refuses uploads without a length, and measures the folder an upload goes to.
 An upload that opens a workspace of its own is checked against how full the *open* workspace is (`server.js:483` to `:490`), so such uploads are never counted. And an upload sent without a stated length is checked as if it were empty: a one-byte upload sent in chunks was accepted without a length. The C++ server has no workspaces and refuses uploads without a length.
 *Fix:* measure the folder the upload goes to; refuse uploads without a length, as the C++ server does.
 
@@ -137,9 +143,10 @@ An upload that opens a workspace of its own is checked against how full the *ope
 By design the trust page and `hub-ca.crt` are reachable over plain HTTP, since the device cannot yet trust HTTPS. Someone on the same network at that moment can swap the file, and the fingerprint the page displays arrives over the same connection (`trust.js` fetches it from `/api/trust`), so they can swap that too. The only protection is the user comparing the page's fingerprint with the one the server printed in its terminal. The page asks for this, but does not say that the page itself may be forged or what is at stake; with 17, a swapped authority means everything that device does over HTTPS can be read.
 *Fix:* say so plainly on the page; print the address and fingerprint together in the terminal (a QR code would do both); offer a way that does not use the network (the file over USB or AirDrop).
 
-- [ ] **24. On the board, a large folder can end the server.** *New. From reading the code.*
+- [x] **24. On the board, a large folder can end the server.** *New. From reading the code.*
 The folder watcher keeps two complete lists of every file's path (`hub.cpp:702`), and each request for the document list builds a third (`tree_stamp`, `:763`). On a microcontroller with a few hundred kilobytes free, a thousand files is enough to run out. The watcher's thread has no guard (`:1398`), so running out of memory there ends the whole process, which is exactly what 10 fixed for connections.
 *Fix:* a `try`/`catch` in the loop; one shared list for the watcher and the document list; keep a running hash rather than the paths.
+*Done after this pass:* the watcher's loop is guarded, and the list request walks the folder at most once per watch interval. The watcher and the list still keep separate lists.
 
 ### Low
 
@@ -149,17 +156,21 @@ The folder watcher keeps two complete lists of every file's path (`hub.cpp:702`)
 
 - [ ] **16.** Old commits may still be retrievable on GitHub by their id. Not re-checked in this pass.
 
-- [ ] **25. Hub addresses are put into the page's content policy without checking their characters. Confirmed** (the check accepts them). An address such as `https://x;sandbox` passes both servers' checks (`server.js:145`, `:412`; `hub.cpp:553`), and the page's policy is built by joining these addresses in. Spaces cannot get through, so nothing can be *allowed* this way, but a directive can be *added*: `sandbox` would stop the reader's own scripts on every device until `hubs.json` is repaired by hand. Only a paired device can do it. *Fix:* letters, digits, dots, hyphens, colons and brackets only.
+- [x] **25. Hub addresses are put into the page's content policy without checking their characters. Confirmed** (the check accepts them). An address such as `https://x;sandbox` passes both servers' checks (`server.js:145`, `:412`; `hub.cpp:553`), and the page's policy is built by joining these addresses in. Spaces cannot get through, so nothing can be *allowed* this way, but a directive can be *added*: `sandbox` would stop the reader's own scripts on every device until `hubs.json` is repaired by hand. Only a paired device can do it. *Fix:* letters, digits, dots, hyphens, colons and brackets only.
+*Done after this pass:* letters, digits, dots, hyphens, colons and brackets only. Covered by the server's test.
 
 - [ ] **26. Pairing can now be attempted from other websites.** So that a reader loaded from one hub can pair with another, `POST /api/pair` is no longer refused when it comes from another site (`server.js:371`, `hub.cpp:873`). Guessing the code is not realistic (five tries at one in a million million), but a web page open in any browser on the network can use up the five tries and so cancel a code that is on offer. *Fix:* accept pairing from another site only for the address named when the code was made, or only for a few minutes after a paired device allows it.
 
 - [ ] **27. Tokens for other hubs are kept where the page's scripts can read them.** This hub's own token is a cookie that scripts cannot see. Tokens for other hubs are stored by the page (`hub:tokens`, `app.js:33`), in the clear unless protection is on, and they never expire. Anything that ever runs in the page (a sanitiser slip, or 18) could take them and use them from anywhere that hub can be reached. *Fix:* suggest "protect…" when a hub is added; let a token be limited in time.
 
 - [ ] **28. A locked folder shows through.** The lock is the reader's, by design, and the README says so. Beyond that: the names of kept files inside a locked folder appear in "everything on this device" and in the queue list; the full document list, titles included, is cached unencrypted on the device; the server gives the files to any paired device that asks; the salted hash is in `hub.json`, which every paired device can fetch and guess against (100,000 rounds); and a lock set on one device does not close what another already has open. *Fix:* filter those two lists. Making it a real lock means enforcing it on the server, or layer 5.
+*Partly done after this pass:* the two lists no longer name files in a locked folder; find returns nothing from inside one, its front page and notes included; the notes panel stays empty beside the lock screen; and a lock set or removed on another device takes effect in open pages without a reload. Still true by design: the document list is cached unencrypted on the device, the server gives the files to any paired device, and the hash can be guessed against. Locked folders in a workspace other than the open one are still named in "everything on this device".
 
-- [ ] **29. Hidden files and "ignored" files are served to anyone who asks by path. Confirmed.** The document list leaves out names starting with a dot and anything on the ignore list, but `/raw/.name` and `/api/doc?path=.name` answer (a hidden file was read through both in Node; the C++ routes skip the same check, `hub.cpp:967`, `:1169`). If the folder is a git repository, that includes `.git/`. Only paired devices can ask. *Fix:* apply the strict path check to reading too.
+- [x] **29. Hidden files and "ignored" files are served to anyone who asks by path. Confirmed.** The document list leaves out names starting with a dot and anything on the ignore list, but `/raw/.name` and `/api/doc?path=.name` answer (a hidden file was read through both in Node; the C++ routes skip the same check, `hub.cpp:967`, `:1169`). If the folder is a git repository, that includes `.git/`. Only paired devices can ask. *Fix:* apply the strict path check to reading too.
+*Done after this pass:* the read routes refuse hidden names. Covered by the server's test. The ignore list is still only a listing filter.
 
-- [ ] **30. A pairing lasts exactly a year.** The cookie is set once with a one-year life and never renewed (`server.js:241`, `hub.cpp:621`); Chrome caps cookies at 400 days regardless. A year after pairing the device is asked for a code again, however often it was used, and its unsent changes wait until then. *Fix:* send the cookie again on the first request of each day.
+- [x] **30. A pairing lasts exactly a year.** The cookie is set once with a one-year life and never renewed (`server.js:241`, `hub.cpp:621`); Chrome caps cookies at 400 days regardless. A year after pairing the device is asked for a code again, however often it was used, and its unsent changes wait until then. *Fix:* send the cookie again on the first request of each day.
+*Done after this pass:* the cookie is sent again, with a fresh year, on the first request of each day.
 
 - [ ] **31. Removing a folder is immediate and permanent.** `DELETE /api/folder` deletes the folder (`server.js:549`, `hub.cpp:1151`). The reader asks first, but there is no way back, and the notes pinned to those documents stay behind pointing at nothing. *Fix:* move the folder to a "removed" place outside the document list and empty that by hand.
 
@@ -180,9 +191,11 @@ The folder watcher keeps two complete lists of every file's path (`hub.cpp:702`)
 
 None of these is visible on a laptop with 40 documents. They are ordered by how soon they will be felt on the board or a phone.
 
-- [ ] **32. Every file change makes every open page fetch the whole document list.** `onFileChange` in `app.js` asks for the full list on each event, with no pause to collect several. Uploading a folder of 100 files therefore makes each open page, the uploading one included, ask 100 times. To answer, Node reads every markdown and HTML file from start to end to find its title (`server.js:97`; the C++ server reads the first 64 KB and keeps the answer, but still checks every file on disk for each request, `hub.cpp:1026`). *Fix:* wait half a second and ask once; read only the start of each file in Node; let the list reuse the watcher's view of the folder.
+- [x] **32. Every file change makes every open page fetch the whole document list.** `onFileChange` in `app.js` asks for the full list on each event, with no pause to collect several. Uploading a folder of 100 files therefore makes each open page, the uploading one included, ask 100 times. To answer, the server keeps the list it built last time, but still checks every file on disk for each request (`tree_stamp` in `hub.cpp`). *Fix:* wait half a second and ask once; let the list reuse the watcher's view of the folder.
+*Done after this pass:* changes are collected for a moment and answered with one list request (measured: 12 files changed at once, 1 request), and the server walks the folder at most once per interval.
 
 - [ ] **33. The page's own files are sent whole on every load.** About 380 KB (the reader 137 KB, highlight.js 129 KB, marked 47 KB, the page 40 KB, DOMPurify 29 KB), uncompressed, marked "do not store", with no way for the browser to hear "unchanged". The service worker asks for all of them on each start. Over HTTPS from the board that is seconds. *Fix:* answer "not modified" when the file has not changed; send compressed copies; let the service worker show its copy at once and refresh behind it.
+*Partly done after this pass:* the page's files carry a tag, and an unchanged file is answered "not modified" with no body. Not compressed yet.
 
 - [ ] **34. From another hub, files are fetched whole and held in memory.** A picture, a track or a video from another hub is downloaded completely before it shows, and the copy stays in memory until the page is closed (`remoteBlobs`). A long video cannot start until all of it has arrived. Each new address also costs an extra round trip first, because the browser asks permission per address, and the list and the notes are re-fetched in full every minute whether or not anything changed. *Fix:* short-lived tickets so media can be streamed by address; a small "has anything changed" answer to poll instead.
 
@@ -190,11 +203,13 @@ None of these is visible on a laptop with 40 documents. They are ordered by how 
 
 - [ ] **36. The notes file must fit in memory several times over.** Each read parses the whole file and each change writes all of it. On the board, a parsed file takes roughly ten times its size, so a notes file of a few tens of kilobytes is the practical limit. *Fix:* one notes file per document (already on the list).
 
-- [ ] **37. The reader looks for an absent server every four seconds, indefinitely.** Same rate whether the page is in front or in the background, after a minute or after a week. On a phone that is a radio wake-up every four seconds for as long as the app is open. *Fix:* back off to once a minute, and look at once when the page comes to the front or the network changes.
+- [x] **37. The reader looks for an absent server every four seconds, indefinitely.** Same rate whether the page is in front or in the background, after a minute or after a week. On a phone that is a radio wake-up every four seconds for as long as the app is open. *Fix:* back off to once a minute, and look at once when the page comes to the front or the network changes.
+*Done after this pass:* every 4 seconds for the first minute, then every 15, then once a minute; not at all in the background; at once when the page comes to the front.
 
-- [ ] **38. Small repeated costs in Node.** The list of paired devices is read from disk on every request that carries a token (`server.js:232`); settings and the front page are read for each list or settings request; the table of pending change notices never shrinks (`server.js:296`). An interrupted upload can leave a `.tmp` file that is never removed.
+- [x] **38. Small repeated costs in Node.** *Gone with the Node server.* The list of paired devices is read from disk on every request that carries a token (`server.js:232`); settings and the front page are read for each list or settings request; the table of pending change notices never shrinks (`server.js:296`). An interrupted upload can leave a `.tmp` file that is never removed.
 
 - [ ] **39. Lists are rebuilt in full for small changes.** As at the first pass (below), and more so now: the file tree, the status box and the whole track list are rebuilt on every play or pause, on each file kept, and on each step of "keep all"; documents are found by searching the list from the start, inside loops.
+*Partly done after this pass:* documents are looked up by path, not searched for; headings are measured once per frame; the track list is no longer rebuilt on play and pause; "keep all" redraws every fifth file. Notes, the tree and highlights are still redrawn whole.
 
 Storage on the device, as it stands: nothing kept there expires by itself, and the reader now asks the browser not to clear it. There is still no record of how much space the copies take, no way to remove them in bulk, and copies from a hub or workspace that is no longer used stay until removed one by one.
 
@@ -214,9 +229,9 @@ Styles and markup are in `index.html`; storage and encryption moved to `local.js
 
 *Recommendation:* unchanged. ES modules, no build step, one owner per piece of state. The seams are clearer now than they were: `net` (requests, hubs, online state), `store` (copies, outbox), `docs` (list, locks), `panes`, `render`, `notes`, `player`, `upload`, `ui`.
 
-### Two servers
+### One server now
 
-Every feature and every fix is written twice. The comparison test has kept them equal (it caught two differences during today's work), but workspaces are still Node-only, and several findings above differ between the two (19, 20, 22, 32). *Recommendation:* unchanged: make the C++ server the only one. Until then, add each finding's regression to the comparison test first, then fix both.
+At this pass every feature and every fix was written twice, in Node and in C++, and several findings differed between the two. The Node server has since been retired: `hubd` gained workspaces, was checked against Node on 123 requests (identical, apart from listing workspaces in name order), and the comparison test became a test against those recorded answers. What that leaves open is a full session in a browser against `hubd` alone; the page has been driven against it for documents, media, notes and pairing, as a second hub, but not yet as the only server since workspaces were added.
 
 ### Data model weaknesses
 
@@ -250,10 +265,10 @@ No changes were made for this section; these are observations and ideas. It is b
 | Note box on a phone | Return saves the note; there is no way to type a new line, and it is easy to send by accident. | On touch screens, return makes a new line and a button sends. |
 | Note box | Shown under pictures, video and the player, where a note cannot be pinned to anything. On a phone it takes about a quarter of the screen. | Fold it to one line until tapped; hide it for media. |
 | Contents button on a phone | Sits on top of the front page's "edit front page" button. | Move one of them. |
-| Opening a track | Clicking a track in the file list opens the player in the reading pane and replaces what was being read. Going back to a track's page starts it playing. | Clicking a track plays it (the footer appears); the player page opens only from the footer. |
+| Opening a track | Done after this pass: a track plays without leaving the page, and the player opens from the footer. | On a phone the footer lives in the drawer, so nothing shows what is playing once the drawer is closed: a small mark in the top bar would. |
 | Phone's own back gesture | Leaves the reader. | Record each document opened in the browser's history, so back means back. |
-| Reading position | Forgotten on reload. | Remember it per document; show "continue reading" on the front page. |
-| Finding things | No search, and no filter on the file list. | A filter box over the files first; search across documents and notes later. |
+| Reading position | Done after this pass: a document reopens where it was left. | Next: "continue reading" on the front page. |
+| Finding things | Done after this pass: a find box filters the file list and searches inside documents and notes. | Next: jump between several matches in one document. |
 | ○ and ● | The meaning is explained only in settings; three different marks mean "keep" (○/●, an arrow, a tick). | One mark everywhere, and a word beside it at phone width. |
 | File rows | Up to four small controls on hover (+, ○, queue, "side"), one of them a word. | One "more" menu, or icons throughout. |
 | Hub and workspace menus | Two unlabelled menus stacked above the files. On a phone, nothing says which hub is on screen. | One "where" menu (hub, then workspace); the hub's name in the phone's top bar. |
@@ -267,11 +282,30 @@ No changes were made for this section; these are observations and ideas. It is b
 | Dialogs | Escape does not close them; focus does not return to where it was. | Both. |
 | Waiting | Nothing shows while a document, a kept file, or a file from another hub is on its way. | A quiet progress mark after a third of a second. |
 | Copies | A document shown from the device looks the same as one from the server. | A small "copy from 3 Oct" tag. |
-| Updates | After the page changes, the installed app needs one visit with the server on, and says nothing. | "A newer version is ready: reload." |
+| Updates | Done after this pass: the reader says "a newer version is ready" and reloads on a press. | |
 | Installing | Nothing offers it, though installing is what makes the browser keep the copies. | An "install" button where the browser allows it; a one-line hint on an iPhone. |
 | Player footer | No shuffle, repeat, position bar or way to the queue. | A press on the footer opens a small panel with them. |
 | Queue | Order cannot be changed; no "play next". | Drag to reorder; "play next" beside "add". |
 | Tooltips | Many controls are explained only by a tooltip. | Labels at phone width; a short "what the marks mean" on the front page for a new workspace. |
+
+### Added after this section was first written
+
+Two changes were made on request afterwards, and neither has been seen rendered yet, so both belong on the list of things to look at:
+
+| Where | What changed | What to look for |
+|---|---|---|
+| Wide tables on a phone | A table with more than three columns now shows each row as a card, one line per cell under its column name. | Tables whose first column is not a good card heading; very long tables, which become a long run of cards; whether three columns is the right cut-off. |
+| Buttons and links | A dark background with light text while pressed, and with a mouse while pointed at. | Links inside running text flashing dark as the pointer crosses a paragraph, which may be too strong while reading; icon buttons, where the dark square may be larger than the icon suggests; the reversed colours on the Triple-M theme. |
+
+And three more rough edges, from the certificate work:
+
+| Where | What happens now | Idea |
+|---|---|---|
+| Network access | Whether the hub listens on the network is decided in the terminal (`HOST=0.0.0.0`). Nothing in the reader shows or changes it. | A "Network access: off / on" control in settings on the hub's own machine. |
+| The authority | The reader does not say which authority this device was given, when, or how to remove it. | A line under "This device" with its name and fingerprint, and the removal steps for the device in hand. |
+| The trust page | Asks for the fingerprint to be compared but not why, and gives the Windows value in a form Windows does not show. | Say what the check protects against; show the SHA-1 as well, labelled "Thumbprint". |
+
+Also built on request since: a switch in settings that narrows every list to what is kept on the device; playlists that give the file's name the room it needs and shorten the folder to its last two parts; and a hub menu re-tested with the C++ server on both ends.
 
 ### Consistency
 
@@ -282,10 +316,10 @@ No changes were made for this section; these are observations and ideas. It is b
 
 ### Bigger ideas, in the order I would try them
 
-1. **Instant start.** Show the kept page at once and refresh it in the background. Every start becomes immediate, online or not, and it removes most of 33.
-2. **Music beside reading.** Separate "play this" from "open the player", so starting music never takes the page being read.
-3. **Find.** A filter over the file list, then full search.
-4. **Continue reading.** Remembered positions and a short "recent" list on the front page.
+1. **Instant start.** *Done.* The kept page is shown at once and checked against the server behind it; a changed page is fetched for next time and the reader offers "a newer version is ready". Measured: 0.08 s with the server up, 0.02 s for the page itself with the server not answering (the document then waits about 3 s for the reader to give up on the server).
+2. **Music beside reading.** *Done.* Pressing a track in the file list or a front-page list plays it where you are; the playing track is marked in the list; the name in the sidebar's footer opens the player. Opening the player page no longer starts or changes what is playing.
+3. **Find.** *Done* (file names, text in documents, notes).
+4. **Continue reading.** Positions are remembered (*done*); the "recent" list on the front page is not built.
 5. **One "everything is saved" line.** Saved, waiting, or not reachable since when; in one place, always in the same words.
 6. **Quick open.** One key for a box that jumps to a document, a heading or an action. Most useful when the sidebar is tucked away.
 7. **Answered notes.** A mark for replies not yet read, and "next unanswered".
@@ -305,10 +339,10 @@ Five layers, each closing one way in.
 1. **What is left of the authority (17, 23).** Remove the old one from every device; flash encryption on the board; have the trust page say what the fingerprint check is for.
 2. **Quiet data loss (19, 20, 21).** Small, contained changes; each gets a regression in the comparison test or the browser suite.
 3. **Today's loose ends (25, 28, 29, 30).** An hour each.
-4. **The page's folder (18) and Node's storage gaps (22).**
+4. **The page's folder (18).**
 5. **A browser test suite in the repo**, starting with the checks from this pass.
 6. **Efficiency for the board (32, 33, 24, 36), in that order.** 32 and 33 are also what make a phone feel quick.
 7. **Design: the rough-edges table**, starting with the note box on a phone, the contents button overlap, and "play without leaving the page".
-8. Then the standing items: retire the Node server, split the page into modules, decide on layer 5.
+8. Then the standing items: split the page into modules, decide on layer 5.
 
 Steps 1 to 6 need no new decisions. Layer 5 does.

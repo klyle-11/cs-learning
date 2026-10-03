@@ -1,16 +1,17 @@
 // The service worker: it keeps a copy of the page itself (the HTML, its
-// scripts, the icons) so the reader opens when the server is out of reach.
-// Documents, notes and media are not its business; app.js keeps those.
+// scripts, the icons) so the reader opens at once, and opens when the server
+// is out of reach. Documents, notes and media are not its business; app.js
+// keeps those.
 //
-// The server is always asked first, so a change to the page shows up on the
-// next load. Only if it does not answer within a few seconds is the kept copy
-// used, and then for a while without asking again, so that a start without
-// the server waits once rather than once per file.
+// A file it holds is handed over immediately. Behind that, the server is
+// asked whether the file has changed; if it has, the new one is kept for the
+// next load and the open page is told, so it can offer "reload". So every
+// start is instant, with the server near, far or absent, and a change to the
+// page shows one load later than it used to.
 const CACHE = 'hub-shell-v1';
 const SHELL = ['/', '/app.js', '/local.js', '/vault.js', '/vendor/marked.js', '/vendor/highlight.js', '/vendor/purify.js',
   '/manifest.webmanifest', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png'];
-const WAIT = 2500, QUIET = 15000;
-let downUntil = 0;
+const WAIT = 8000;   // how long the check behind a served file may take
 
 self.addEventListener('install', (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())));
 self.addEventListener('activate', (e) => e.waitUntil((async () => {
@@ -21,24 +22,25 @@ self.addEventListener('activate', (e) => e.waitUntil((async () => {
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== location.origin || !SHELL.includes(url.pathname)) return;
-  e.respondWith(answer(url.pathname));
+  e.respondWith((async () => {
+    const cache = await caches.open(CACHE), held = await cache.match(url.pathname);
+    if (!held) return refresh(cache, url.pathname, null);   // nothing kept yet: wait for the server
+    e.waitUntil(refresh(cache, url.pathname, held).catch(() => {}));
+    return held;
+  })());
 });
 
-async function answer(key) {
-  const cache = await caches.open(CACHE);
-  if (Date.now() < downUntil) { const hit = await cache.match(key); if (hit) return hit; }
+// Fetch a file from the server and keep it. If it differs from the copy that
+// was just served, tell the open pages.
+async function refresh(cache, key, held) {
   const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), WAIT);
   try {
-    const r = await fetch(key, { signal: ctl.signal, cache: 'no-store' });
-    clearTimeout(timer);
-    downUntil = 0;
-    if (r.ok) await cache.put(key, r.clone());
+    // 'no-cache': the browser asks the server whether its copy is still current, and only a changed file is sent again.
+    const r = await fetch(key, { signal: ctl.signal, cache: 'no-cache' });
+    if (!r.ok) return r;
+    await cache.put(key, r.clone());
+    const was = held && held.headers.get('etag'), now = r.headers.get('etag');
+    if (held && was && now && was !== now) for (const c of await self.clients.matchAll()) c.postMessage({ type: 'page-updated' });
     return r;
-  } catch (err) {
-    clearTimeout(timer);
-    downUntil = Date.now() + QUIET;
-    const hit = await cache.match(key);
-    if (hit) return hit;
-    throw err;
-  }
+  } finally { clearTimeout(timer); }
 }

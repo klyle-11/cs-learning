@@ -47,11 +47,15 @@ const db = {
 };
 
 const lsGet = (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } };
-const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+// A write the browser refuses (its small store is full) is remembered, so the reader can say so.
+// Which values could not be written; one that is written successfully later comes off the list.
+const unsaved = new Set();
+const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); unsaved.delete(k); } catch { unsaved.add(k); } };
 
 async function putKv(k, json) {
   const key = await vault.name('kv|' + k);
-  await db.put('kv', { key, data: await vault.seal(te.encode(JSON.stringify({ k, json })), key) });
+  // With protection on, values live in the larger store; a failed write there is noted the same way.
+  if ((await db.put('kv', { key, data: await vault.seal(te.encode(JSON.stringify({ k, json })), key) })) == null) unsaved.add(k); else unsaved.delete(k);
 }
 
 export const store = {
@@ -97,13 +101,14 @@ export const idb = {
     if (!rec) return null;
     try { return unpack(await vault.open(rec.data, hashed)); } catch { return null; }
   },
+  // True if the record was stored. False when there was no room, or the store is locked.
   async put(name, value) {
-    if (mode === 'plain') return db.put(name, value);
-    if (mode !== 'open') return null;
+    if (mode === 'plain') return (await db.put(name, value)) != null;
+    if (mode !== 'open') return false;
     const hashed = await vault.name(name + '|' + value.key);
-    await db.put(name, { key: hashed, data: await vault.seal(await pack(value), hashed) });
+    if ((await db.put(name, { key: hashed, data: await vault.seal(await pack(value), hashed) })) == null) return false;
     if (!index(name).includes(value.key)) store.set('idx:' + name, [...index(name), value.key]);
-    return null;
+    return true;
   },
   async del(name, key) {
     if (mode === 'plain') return db.del(name, key);
@@ -123,6 +128,7 @@ const privateKeys = () => Object.keys(localStorage).filter((k) => !PLAIN.has(k) 
 export const local = {
   get mode() { return mode; },
   get canProtect() { return vault.available; },
+  get full() { return unsaved.size > 0; },
   // Call first. Says whether a passphrase is needed before anything can be read.
   start() { return (mode = vault.enabled ? 'locked' : 'plain'); },
 

@@ -34,7 +34,15 @@
 using std::string;
 using Strings = std::vector<string>;
 
-static string ROOT;                    // the folder of documents
+// The folder of documents. It can change while the server runs (another
+// workspace is opened), so each thread works on its own copy, taken when its
+// request begins: a request sees one folder from start to finish.
+static thread_local string ROOT;
+static string HOME_DIR;                // the folder the server was started on
+static string WORKSPACES;              // where uploads opened as workspaces of their own are kept; "" if this server keeps none
+static std::mutex root_lock;
+static string open_root;               // the workspace that is open: HOME_DIR, or a folder in WORKSPACES
+static string root_now() { std::lock_guard<std::mutex> g(root_lock); return open_root; }
 static string WWW;                     // where index.html and the vendor scripts live
 static string STATE;                   // certificates and the list of paired devices: never inside ROOT
 static const char *FRONT = "FRONTPAGE.md";
@@ -572,7 +580,9 @@ static bool cross_site(const http::Request &req) {
 static bool plain_origin(const string &o) {
   size_t at = starts_with(o, "https://") ? 8 : starts_with(o, "http://") ? 7 : 0;
   if (!at || o.size() == at) return false;
-  return std::all_of(o.begin() + static_cast<long>(at), o.end(), [](unsigned char c) { return c > ' ' && c != '/' && c < 127; });
+  // Letters, digits, dots, hyphens, colons and brackets only: the address is
+  // written into the page's content policy, where ";" or "," would start a new rule.
+  return std::all_of(o.begin() + static_cast<long>(at), o.end(), [](unsigned char c) { return std::isalnum(c) || c == '.' || c == '-' || c == ':' || c == '[' || c == ']'; });
 }
 static string bearer_of(const http::Request &req) {
   const string &h = req.header("authorization");
@@ -584,16 +594,18 @@ static string bearer_of(const http::Request &req) {
 // was given when it paired, sent as "Authorization: Bearer"; for it the cookie
 // and being on this machine count for nothing, since any website could cause
 // such a request.
+static thread_local string renew_cookie;   // set when this request's cookie should be sent again with a fresh year
 static string device_of(const http::Request &req, bool cross) {
   string cookie = bearer_of(req);
-  if (cookie.empty() && !cross) cookie = cookie_of(req, "hub_device");
+  const bool by_cookie = cookie.empty() && !cross;
+  if (by_cookie) cookie = cookie_of(req, "hub_device");
   size_t dot = cookie.find('.');
   if (dot != string::npos) {
     string id = cookie.substr(0, dot), hash = secure::sha256_hex(cookie.substr(dot + 1)), today = now_iso().substr(0, 10);
     std::lock_guard<std::mutex> g(auth_lock);
     for (Device &d : devices) {
       if (d.id != id || !secure::same(d.hash, hash)) continue;
-      if (d.seen != today) { d.seen = today; save_devices(); } // one small write a day, not one per request
+      if (d.seen != today) { d.seen = today; save_devices(); if (by_cookie) renew_cookie = cookie; } // one small write a day; the cookie's year starts again
       return d.id;
     }
   }
@@ -686,6 +698,12 @@ static bool room_for(unsigned long long more) {
   if (free_bytes() < more + (16ULL << 20)) return false;
   return quota_bytes == 0 || used_bytes() + more <= quota_bytes;
 }
+// The same for a folder other than the open workspace, measured as it is now.
+static bool room_in(const string &dir, unsigned long long more) {
+  if (dir == ROOT) return room_for(more);
+  if (free_bytes() < more + (16ULL << 20)) return false;
+  return quota_bytes == 0 || tree_size(dir) + more <= quota_bytes;
+}
 static void used_more(unsigned long long n) { std::lock_guard<std::mutex> g(usage_lock); usage_cache += n; }
 
 // ---- live reload: tell open pages which file changed --------------------------------
@@ -720,10 +738,16 @@ static void tell_clients(const string &line) {
 }
 static void watch_loop() {
   std::map<string, long long> before;
+  ROOT = root_now();
+  string watching = ROOT;
   snapshot(ROOT, "", before);
   auto pinged = http::Clock::now();
   for (;;) {
     std::this_thread::sleep_for(std::chrono::milliseconds(profile.watch_ms));
+    try {
+    ROOT = root_now();
+    // Another workspace was opened: start afresh there, with nothing to announce.
+    if (ROOT != watching) { watching = ROOT; before.clear(); snapshot(ROOT, "", before); continue; }
     { std::lock_guard<std::mutex> g(clients_lock); if (clients.empty()) continue; }
     // A comment line now and then finds pages that have gone away, freeing their place.
     if (http::Clock::now() - pinged > std::chrono::seconds(20)) { tell_clients(": ping\n\n"); pinged = http::Clock::now(); }
@@ -738,6 +762,7 @@ static void watch_loop() {
       cJSON_AddStringToObject(msg.p, "file", file.c_str());
       tell_clients("data: " + dump(msg.p) + "\n\n");
     }
+    } catch (...) { before.clear(); }   // out of memory on a large folder must not end the server: start the comparison again
   }
 }
 
@@ -766,11 +791,12 @@ static http::Response file_response(const string &abs, const char *type) {
   return r;
 }
 static http::Response asset_response(const string &abs, const char *type) {
-  if (!profile.cache_assets) return file_response(abs, type);
   long long stamp = stamp_of(abs);
   if (stamp < 0) return http::error(404, "no such file");
+  if (!profile.cache_assets) { http::Response r = file_response(abs, type); r.etag = "\"" + std::to_string(stamp) + "\""; return r; }
   http::Response r;
   r.type = type;
+  r.etag = "\"" + std::to_string(stamp) + "\"";
   std::lock_guard<std::mutex> g(cache_lock);
   CachedFile &c = asset_cache[abs];
   if (c.stamp != stamp || c.body.empty()) { if (!read_file(abs, c.body)) return http::error(404, "no such file"); c.stamp = stamp; }
@@ -779,10 +805,31 @@ static http::Response asset_response(const string &abs, const char *type) {
 }
 // One number that changes whenever any file in the folder is added, removed,
 // resized or modified. Costs one stat per file and reads none of them.
+static unsigned long long tree_stamp_now();
+// The same, worked out at most once per watch interval: a burst of requests
+// for the list costs one walk of the folder, not one each. A change made
+// through this server (touch_tree) makes the next request look again at once.
+static std::mutex stamp_lock;
+static unsigned long long stamp_value = 0;
+static http::Clock::time_point stamp_at;
+static string stamp_root;
+static bool stamp_fresh = false;
+static void touch_tree() { std::lock_guard<std::mutex> g(stamp_lock); stamp_fresh = false; }
 static unsigned long long tree_stamp() {
+  std::lock_guard<std::mutex> g(stamp_lock);
+  if (!stamp_fresh || stamp_root != ROOT || http::Clock::now() - stamp_at > std::chrono::milliseconds(profile.watch_ms)) {
+    stamp_value = tree_stamp_now();
+    stamp_at = http::Clock::now();
+    stamp_root = ROOT;
+    stamp_fresh = true;
+  }
+  return stamp_value;
+}
+static unsigned long long tree_stamp_now() {
   std::map<string, long long> snap;
   snapshot(ROOT, "", snap);
   unsigned long long h = 1469598103934665603ULL;
+  for (char ch : ROOT) h = (h ^ static_cast<unsigned char>(ch)) * 1099511628211ULL;   // two workspaces never share a list
   for (const auto &kv : snap) {
     for (char ch : kv.first) h = (h ^ static_cast<unsigned char>(ch)) * 1099511628211ULL;
     h = (h ^ static_cast<unsigned long long>(kv.second)) * 1099511628211ULL;
@@ -815,6 +862,118 @@ static const std::pair<const char *, const char *> ASSETS[] = {
     {"/vendor/marked.js", "node_modules/marked/lib/marked.umd.js"},
     {"/vendor/highlight.js", "node_modules/@highlightjs/cdn-assets/highlight.min.js"},
     {"/vendor/purify.js", "node_modules/dompurify/dist/purify.min.js"}};
+
+// ---- workspaces ----------------------------------------------------------------------------
+// The folder the server was started on is "home". A folder uploaded "as its
+// own workspace" is kept in WORKSPACES and can be opened in home's place, with
+// its own notes and settings; home stays on disk and can be switched back to.
+
+// A name a person typed, made safe to be a folder name: letters, digits, "_",
+// spaces, dots and hyphens only; no leading or trailing dots or spaces.
+static string clean_name(const string &name) {
+  string out;
+  bool gap = false;
+  for (char ch : name) {
+    const unsigned char c = static_cast<unsigned char>(ch);
+    if (std::isalnum(c) || c == '_' || c == ' ' || c == '.' || c == '-') { if (gap) out += ' '; gap = false; out += static_cast<char>(c); }
+    else gap = true;
+  }
+  if (gap) out += ' ';
+  size_t a = out.find_first_not_of(" ."), b = out.find_last_not_of(" .");
+  return a == string::npos ? "" : out.substr(a, b - a + 1).substr(0, 80);
+}
+struct Workspace { string name, root; bool home; };
+static std::vector<Workspace> list_workspaces() {
+  std::vector<Workspace> out = {{basename_of(HOME_DIR), HOME_DIR, true}};
+  if (WORKSPACES.empty()) return out;
+  Strings names;
+  if (DIR *d = ::opendir(WORKSPACES.c_str())) {
+    while (dirent *e = ::readdir(d)) if (e->d_name[0] != '.' && is_dir(WORKSPACES + "/" + e->d_name)) names.push_back(e->d_name);
+    ::closedir(d);
+  }
+  std::sort(names.begin(), names.end(), natural_less);
+  for (const string &n : names) out.push_back({n, WORKSPACES + "/" + n, false});
+  return out;
+}
+static http::Response workspaces_response() {
+  Json list(cJSON_CreateArray());
+  for (const Workspace &w : list_workspaces()) {
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "name", w.name.c_str());
+    cJSON_AddStringToObject(o, "root", w.root.c_str());
+    cJSON_AddBoolToObject(o, "home", w.home);
+    cJSON_AddBoolToObject(o, "current", w.root == ROOT);
+    cJSON_AddItemToArray(list.p, o);
+  }
+  return json_response(list.p);
+}
+// Open a workspace in place of the one that is open, and remember the choice for the next start.
+static void open_workspace(const Workspace &w) {
+  { std::lock_guard<std::mutex> g(root_lock); open_root = w.root; }
+  ROOT = w.root;
+  { std::lock_guard<std::mutex> g(usage_lock); usage_known = false; }
+  if (!WORKSPACES.empty()) { make_dirs(WORKSPACES); write_file(WORKSPACES + "/.current", w.home ? "" : w.name); }
+}
+
+// A file that is there but cannot be read as what it should be. Writing would
+// replace everything in it with what little this request knows, so writes are
+// refused until it is repaired by hand.
+static bool damaged(const string &path, bool want_array) {
+  string text;
+  if (!read_file(path, text) || trim(text).empty()) return false;
+  Json parsed(cJSON_Parse(text.c_str()));
+  return want_array ? !cJSON_IsArray(parsed.p) : !cJSON_IsObject(parsed.p);
+}
+static http::Response damaged_error(const char *what) { return http::error(500, string(what) + " is damaged and was left as it is; repair or remove it"); }
+// Whether a path is the page's own folder or inside it: nothing there may be changed through the API.
+static bool in_page_folder(const string &abs) { return abs == WWW || starts_with(abs, WWW + "/"); }
+
+// ---- search --------------------------------------------------------------------------------
+// Lines that contain the words asked for, in the documents that can be read
+// as text. Upper and lower case count as the same (for plain letters).
+static void search_tree(const string &dir, const string &rel, const Strings &ignore, const string &needle, cJSON *out, int &left) {
+  DIR *d = ::opendir(dir.c_str());
+  if (!d) return;
+  Strings names;
+  while (dirent *e = ::readdir(d)) names.push_back(e->d_name);
+  ::closedir(d);
+  std::sort(names.begin(), names.end(), natural_less);
+  for (const string &name : names) {
+    if (left <= 0) return;
+    string r = rel.empty() ? name : rel + "/" + name, abs = dir + "/" + name;
+    if (name[0] == '.' || matches(r, ignore)) continue;
+    if (is_dir(abs)) {
+      if (name == "node_modules" || name == "notes" || abs == WWW) continue;
+      search_tree(abs, r, ignore, needle, out, left);
+      continue;
+    }
+    if (!readable(name)) continue;
+    string text;
+    if (!read_start(abs, text, 2u << 20)) continue;
+    const string low = lower(text);
+    size_t at = 0;
+    int line = 1, in_file = 0;
+    size_t counted = 0;
+    while (in_file < 3 && left > 0 && (at = low.find(needle, at)) != string::npos) {
+      for (; counted < at; counted++) if (text[counted] == '\n') line++;
+      size_t a = text.rfind('\n', at), b = text.find('\n', at);
+      a = a == string::npos ? 0 : a + 1;
+      if (b == string::npos) b = text.size();
+      // Around the match, not the whole line: a line can be very long.
+      size_t from = at > a + 60 ? at - 60 : a, to = std::min(b, at + needle.size() + 100);
+      while (from < to && (static_cast<unsigned char>(text[from]) & 0xC0) == 0x80) from++;   // not in the middle of a character
+      while (to > from && to < b && (static_cast<unsigned char>(text[to]) & 0xC0) == 0x80) to--;
+      cJSON *hit = cJSON_CreateObject();
+      cJSON_AddStringToObject(hit, "path", r.c_str());
+      cJSON_AddNumberToObject(hit, "line", line);
+      cJSON_AddStringToObject(hit, "text", squeeze(text.substr(from, to - from)).c_str());
+      cJSON_AddItemToArray(out, hit);
+      in_file++;
+      left--;
+      at = b;
+    }
+  }
+}
 
 // The body of a JSON request, or the status to refuse it with.
 static int json_body(http::Request &req, string &body) { return req.read_body(body, MAX_JSON); }
@@ -850,7 +1009,11 @@ static http::Response answer(http::Request &req) {
     return json_response(out.p);
   }
   // Someone typed http:// at a port that speaks HTTPS: send them to the trust page, or on to https://.
-  if (req.plain_on_tls) {
+  // Not this machine's own browser, though: a connection from the machine to
+  // itself never crosses the network, so there is nothing for encryption to
+  // protect, and browsers count http://localhost as secure. So the computer
+  // the hub runs on never needs the hub's certificate authority installed.
+  if (req.plain_on_tls && !req.local) {
     http::Response r;
     r.status = 308;
     r.type = "text/plain";
@@ -983,7 +1146,7 @@ static http::Response answer(http::Request &req) {
   // Files as they are on disk (HTML documents, images and the like).
   if (starts_with(p, "/raw/")) {
     Strings parts;
-    if (!clean_parts(p.substr(5), parts, false)) return http::error(404, "not found");
+    if (!clean_parts(p.substr(5), parts, true)) return http::error(404, "not found");   // hidden files are not served, as they are not listed
     string abs = ROOT + "/" + join(parts);
     struct stat st;
     if (::stat(abs.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) return http::error(404, "no such file");
@@ -1039,6 +1202,16 @@ static http::Response answer(http::Request &req) {
     return r;
   }
 
+  if (p == "/api/search" && m == "GET") {
+    auto it = req.query.find("q");
+    string q = it == req.query.end() ? "" : lower(squeeze(it->second));
+    if (q.size() < 2 || q.size() > 100) return http::error(400, "search for 2 to 100 characters");
+    Json cfg(read_config()), hits(cJSON_CreateArray());
+    int left = 60;
+    search_tree(ROOT, "", list_of(cfg.p, "ignore"), q, hits.p, left);
+    return json_response(hits.p);
+  }
+
   if (p == "/api/docs") {
     // Building the list reads every file for its title, so keep the answer
     // until something in the folder changes.
@@ -1090,13 +1263,15 @@ static http::Response answer(http::Request &req) {
     return json_response(out.p);
   }
 
-  if (p == "/api/config" && m == "GET") { Json cfg(read_config()); return json_response(cfg.p); }
+  // A damaged settings file is not papered over with defaults: those would drop the folder locks.
+  if (p == "/api/config" && m == "GET") { if (damaged(ROOT + "/hub.json", false)) return damaged_error("hub.json"); Json cfg(read_config()); return json_response(cfg.p); }
   if (p == "/api/config" && m == "PUT") {
     string text;
     if (int bad = json_body(req, text)) return body_error(bad);
     Json body(cJSON_Parse(text.c_str()));
     if (!cJSON_IsObject(body.p)) return http::error(400, "json object required");
     std::lock_guard<std::mutex> g(store_lock);
+    if (damaged(ROOT + "/hub.json", false)) return damaged_error("hub.json");
     Json file(read_settings_file());
     string title = squeeze(str_of(body.p, "title")), md;
     if (!title.empty() && read_file(ROOT + "/" + FRONT, md)) {
@@ -1153,6 +1328,7 @@ static http::Response answer(http::Request &req) {
       cJSON_AddItemToObject(file.p, "locks", clean);
     }
     if (!write_file(ROOT + "/hub.json", dump(file.p, true) + "\n")) return http::error(500, "could not save");
+    touch_tree();
     Json cfg(read_config());
     return json_response(cfg.p);
   }
@@ -1165,12 +1341,15 @@ static http::Response answer(http::Request &req) {
     struct stat st;
     if (it == req.query.end() || !clean_parts(it->second, parts, true) || parts[0] == "notes" ||
         ::lstat((ROOT + "/" + join(parts)).c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) return http::error(400, "no such folder");
-    std::lock_guard<std::mutex> g(store_lock);
     string key = join(parts);
+    // Not the page's own folder, nor a folder that holds it.
+    if (in_page_folder(ROOT + "/" + key) || starts_with(WWW + "/", ROOT + "/" + key + "/")) return http::error(400, "no such folder");
+    std::lock_guard<std::mutex> g(store_lock);
     if (!remove_tree(ROOT + "/" + key)) return http::error(500, "could not remove");
+    touch_tree();
     Json file(read_settings_file());
     cJSON *locks = cJSON_GetObjectItemCaseSensitive(file.p, "locks");
-    if (cJSON_IsObject(locks)) {
+    if (cJSON_IsObject(locks) && !damaged(ROOT + "/hub.json", false)) {
       Strings gone;
       const cJSON *l;
       cJSON_ArrayForEach(l, locks) { string k = l->string ? l->string : ""; if (k == key || k.compare(0, key.size() + 1, key + "/") == 0) gone.push_back(k); }
@@ -1185,7 +1364,7 @@ static http::Response answer(http::Request &req) {
   if (p == "/api/doc") {
     Strings parts;
     auto it = req.query.find("path");
-    if (it == req.query.end() || !clean_parts(it->second, parts, false) || !readable(parts.back())) return http::error(404, "no such doc");
+    if (it == req.query.end() || !clean_parts(it->second, parts, true) || !readable(parts.back())) return http::error(404, "no such doc");
     http::Response r = file_response(ROOT + "/" + join(parts), "text/plain");
     return r.status == 200 ? r : http::error(404, "no such doc");
   }
@@ -1204,14 +1383,17 @@ static http::Response answer(http::Request &req) {
       Strings parts;
       if (!clean_parts(folder, parts, true) || !is_dir(ROOT + "/" + join(parts))) return http::error(400, "no such folder");
       dir = ROOT + "/" + join(parts);
+      if (in_page_folder(dir)) return http::error(400, "no such folder");
     }
     std::lock_guard<std::mutex> g(store_lock);
     if (!write_file(dir + "/" + FRONT, md)) return http::error(500, "could not save");
+    touch_tree();
     Json cfg(read_config());
     return json_response(cfg.p);
   }
 
-  if (p == "/api/notes" && m == "GET") { Json notes(read_notes()); return json_response(notes.p); }
+  // Nor is a damaged notes file answered as "no notes": a reader would replace its own copy with nothing.
+  if (p == "/api/notes" && m == "GET") { if (damaged(ROOT + "/notes/notes.json", true)) return damaged_error("notes.json"); Json notes(read_notes()); return json_response(notes.p); }
   if (p == "/api/notes" && m == "POST") {
     string raw;
     if (int bad = json_body(req, raw)) return body_error(bad);
@@ -1220,6 +1402,7 @@ static http::Response answer(http::Request &req) {
     string doc = str_of(body.p, "doc"), text = str_of(body.p, "text"), quote = str_of(body.p, "quote");
     if (doc.empty() || (text.empty() && quote.empty())) return http::error(400, "doc and text or quote required");
     std::lock_guard<std::mutex> g(store_lock);
+    if (damaged(ROOT + "/notes/notes.json", true)) return damaged_error("notes.json");
     Json notes(read_notes());
     // A note written while the board was out of reach arrives later with the id
     // and time it was given on the device. Sending the same one twice is harmless.
@@ -1246,7 +1429,11 @@ static http::Response answer(http::Request &req) {
   }
   if (starts_with(p, "/api/notes/") && (m == "PUT" || m == "DELETE")) {
     string id = p.substr(11);
+    // The body is read before the lock is taken, so a slow sender holds nobody else up.
+    string text;
+    if (m == "PUT") { if (int bad = json_body(req, text)) return body_error(bad); }
     std::lock_guard<std::mutex> g(store_lock);
+    if (damaged(ROOT + "/notes/notes.json", true)) return damaged_error("notes.json");
     Json notes(read_notes());
     int index = 0;
     cJSON *note = nullptr, *item;
@@ -1259,8 +1446,6 @@ static http::Response answer(http::Request &req) {
       r.body = "{\"ok\":true}";
       return r;
     }
-    string text;
-    if (int bad = json_body(req, text)) return body_error(bad);
     Json body(cJSON_Parse(text.c_str()));
     if (!cJSON_IsObject(body.p)) return http::error(400, "json object required");
     for (const char *key : {"text", "quote", "heading", "headingText", "type"}) if (has_str(body.p, key)) set_str(note, key, str_of(body.p, key));
@@ -1269,42 +1454,54 @@ static http::Response answer(http::Request &req) {
     return json_response(note);
   }
 
-  // Workspaces made from uploads are not in this server yet: there is one, the folder itself.
-  if (p == "/api/workspaces" || (p == "/api/workspace" && m == "POST")) {
-    Json list(cJSON_CreateArray());
-    cJSON *home = cJSON_CreateObject();
-    cJSON_AddStringToObject(home, "name", basename_of(ROOT).c_str());
-    cJSON_AddStringToObject(home, "root", ROOT.c_str());
-    cJSON_AddBoolToObject(home, "home", true);
-    cJSON_AddBoolToObject(home, "current", true);
-    cJSON_AddItemToArray(list.p, home);
-    return json_response(list.p);
+  if (p == "/api/workspaces") return workspaces_response();
+  // Switch to another workspace: the home folder, or one made from an upload.
+  if (p == "/api/workspace" && m == "POST") {
+    string text;
+    if (int bad = json_body(req, text)) return body_error(bad);
+    Json body(cJSON_Parse(text.c_str()));
+    const string want = str_of(body.p, "root");
+    for (const Workspace &w : list_workspaces()) {
+      if (w.root != want || want.empty()) continue;
+      std::lock_guard<std::mutex> g(store_lock);
+      open_workspace(w);
+      return workspaces_response();
+    }
+    return http::error(404, "no such workspace");
   }
 
-  // One file of an uploaded folder, added to this folder. Existing files are
-  // never overwritten. The body goes to disk a piece at a time, under a
-  // temporary name until it is complete.
+  // One file of an uploaded folder. Without "workspace" it is added to the
+  // open workspace; with it, to a workspace of its own, made on first use.
+  // Existing files are never overwritten. The body goes to disk a piece at a
+  // time, under a temporary name until it is complete.
   if (p == "/api/upload" && m == "POST") {
-    if (req.query.count("workspace")) return http::error(501, "opening an upload as its own workspace is not in the C++ server yet");
     Strings parts;
-    auto it = req.query.find("path");
+    auto it = req.query.find("path"), ws = req.query.find("workspace");
+    string base = ROOT;
+    if (ws != req.query.end()) {
+      if (WORKSPACES.empty()) return http::error(501, "this server keeps no workspaces of its own");
+      if (clean_name(ws->second).empty()) return http::error(400, "bad path");
+      base = WORKSPACES + "/" + clean_name(ws->second);
+    }
     if (it == req.query.end() || !clean_parts(it->second, parts, true)) return http::error(400, "bad path");
     if (req.content_length > profile.max_upload) return http::error(413, "body too large");
-    string abs = ROOT + "/" + join(parts);
+    string abs = base + "/" + join(parts);
+    if (in_page_folder(abs)) return http::error(400, "bad path");   // the page's own files are not changed through the API
     Json out(cJSON_CreateObject());
     if (is_file(abs) || is_dir(abs)) {
       req.discard_body(profile.max_upload);
       cJSON_AddBoolToObject(out.p, "skipped", true);
       return json_response(out.p);
     }
-    if (!room_for(req.content_length)) return http::error(507, "storage is full");
+    if (!room_in(base, req.content_length)) return http::error(507, "storage is full");
     make_dirs(dirname_of(abs));
     string tmp = abs + "." + secure::random_hex(4) + ".tmp";
     if (int bad = req.save_body(tmp, profile.max_upload, profile.piece)) return bad == 507 ? http::error(507, "storage is full") : bad == 500 ? http::error(500, "could not save") : body_error(bad);
     if (::rename(tmp.c_str(), abs.c_str()) != 0) { ::unlink(tmp.c_str()); return http::error(500, "could not save"); }
-    used_more(req.content_length);
+    if (base == ROOT) used_more(req.content_length);
+    touch_tree();
     cJSON_AddBoolToObject(out.p, "saved", true);
-    cJSON_AddStringToObject(out.p, "root", ROOT.c_str());
+    cJSON_AddStringToObject(out.p, "root", base.c_str());
     return json_response(out.p);
   }
 
@@ -1313,8 +1510,12 @@ static http::Response answer(http::Request &req) {
 
 // Every answer leaves with the headers that say what a browser may do with it.
 static http::Response route(http::Request &req) {
+  ROOT = root_now();
+  renew_cookie.clear();
   http::Response r = answer(req);
   if (r.hold) return r;
+  if (!renew_cookie.empty() && r.extra.find("Set-Cookie") == string::npos) r.extra += device_cookie(renew_cookie, req.tls);
+
   bool page = req.method == "GET" && (req.path == "/" || req.path == "/trust") && r.status == 200;
   if (page) {
     // The page may also talk to the other hubs it has been told about.
@@ -1328,6 +1529,10 @@ static http::Response route(http::Request &req) {
   r.extra += COMMON_HEADERS;
   // A reader loaded from another hub may read the answer (see cross_site, above).
   if (cross_site(req) && plain_origin(req.header("origin"))) r.extra += "Access-Control-Allow-Origin: " + req.header("origin") + "\r\nVary: Origin\r\n";
+  // A page file the browser already has: say so, and send nothing. Done last,
+  // so the answer carries the same headers the file itself would (a browser
+  // applies them to the copy it holds).
+  if (!r.etag.empty() && r.status == 200 && req.header("if-none-match") == r.etag) { r.status = 304; r.body.clear(); r.file.clear(); r.length = 0; }
   return r;
 }
 
@@ -1340,7 +1545,7 @@ int hub_main(int argc, char **argv) {
 #else
 int main(int argc, char **argv) {
 #endif
-  string folder = ".", host = "127.0.0.1", www, forced;
+  string folder = ".", host = "127.0.0.1", www, forced, workspaces;
   int port = 4321;
   bool want_tls = false, insecure = false, make_cert = false, new_authority = false;
   long long quota_mb = -1;
@@ -1353,6 +1558,7 @@ int main(int argc, char **argv) {
     else if (a == "--www" && i + 1 < argc) www = argv[++i];
     else if (a == "--profile" && i + 1 < argc) forced = argv[++i];
     else if (a == "--state" && i + 1 < argc) STATE = argv[++i];
+    else if (a == "--workspaces" && i + 1 < argc) workspaces = argv[++i];
     else if (a == "--allow-host" && i + 1 < argc) extra_hosts.push_back(argv[++i]);
     else if (a == "--quota-mb" && i + 1 < argc) quota_mb = std::atoll(argv[++i]);
     else if (a == "--tls") want_tls = true;
@@ -1362,10 +1568,12 @@ int main(int argc, char **argv) {
     else if (a == "--new-authority") make_cert = new_authority = true;
     else if (a == "--help" || a == "-h") {
       std::printf("usage: hubd [folder] [--port 4321] [--host 127.0.0.1] [--www <folder>/hub] [--profile desktop|small|esp32]\n"
-                  "            [--state <dir>] [--tls] [--insecure-http] [--pair-local] [--allow-host <name>] [--quota-mb <n>]\n"
+                  "            [--state <dir>] [--workspaces <dir>] [--tls] [--insecure-http] [--pair-local] [--allow-host <name>] [--quota-mb <n>]\n"
                   "       hubd --make-cert [--state <dir>] [--allow-host <name>]\n"
                   "       hubd --new-authority [--state <dir>] [--allow-host <name>]\n\n"
                   "  --state         where certificates and the list of paired devices are kept (default ~/.config/hub)\n"
+                  "  --workspaces    where uploads opened as workspaces of their own are kept (default: workspaces/ beside the page,\n"
+                  "                  when the page is not inside the folder being served; otherwise none are kept)\n"
                   "  --tls           serve HTTPS. Always on when --host is not this machine only\n"
                   "  --insecure-http serve the network without encryption anyway (not recommended)\n"
                   "  --pair-local    ask this machine's own browser to pair too\n"
@@ -1418,13 +1626,25 @@ int main(int argc, char **argv) {
 
   char resolved[4096];
   if (!::realpath(folder.c_str(), resolved) || !is_dir(resolved)) { std::fprintf(stderr, "not a folder: %s\n", folder.c_str()); return 1; }
-  ROOT = resolved;
+  HOME_DIR = open_root = ROOT = resolved;
   if (::realpath(STATE.c_str(), resolved)) STATE = resolved;
   if (starts_with(STATE + "/", ROOT + "/")) { std::fprintf(stderr, "the state folder must not be inside the folder being served\n"); return 1; }
   // The page lives beside the server (../hub from server-cpp/), or inside the folder being served.
   if (www.empty()) www = is_file(ROOT + "/hub/index.html") ? ROOT + "/hub" : is_file("../hub/index.html") ? "../hub" : "hub";
   if (!::realpath(www.c_str(), resolved) || !is_file(string(resolved) + "/index.html")) { std::fprintf(stderr, "no index.html in %s\n", www.c_str()); return 1; }
   WWW = resolved;
+  // Workspaces of their own are kept beside the page, unless the page is part
+  // of what is being served (as on the board), or where --workspaces says.
+  if (workspaces.empty() && !starts_with(WWW + "/", HOME_DIR + "/")) workspaces = WWW + "/workspaces";
+  if (!workspaces.empty()) {
+    make_dirs(workspaces);
+    if (!::realpath(workspaces.c_str(), resolved)) { std::fprintf(stderr, "cannot use %s for workspaces\n", workspaces.c_str()); return 1; }
+    WORKSPACES = resolved;
+    if (starts_with(STATE + "/", WORKSPACES + "/") || starts_with(WORKSPACES + "/", HOME_DIR + "/")) { std::fprintf(stderr, "the workspaces folder must not hold the state folder, or be inside the folder being served\n"); return 1; }
+    // Start on the workspace that was open last time, if it is still there.
+    string last;
+    if (secure::slurp(WORKSPACES + "/.current", last) && !trim(last).empty() && is_dir(WORKSPACES + "/" + trim(last))) open_root = ROOT = WORKSPACES + "/" + trim(last);
+  }
   if (port <= 0 || port > 65535) { std::fprintf(stderr, "bad port\n"); return 1; }
 
   detect_profile(forced);
@@ -1432,6 +1652,7 @@ int main(int argc, char **argv) {
   load_devices();
   std::thread(watch_loop).detach();
   std::printf("hubd: %s://%s:%d  (reading %s)\n", tls_on ? "https" : "http", host == "0.0.0.0" ? "localhost" : host.c_str(), port, ROOT.c_str());
+  if (tls_on) std::printf("On this computer, open http://localhost:%d (no certificate needed). Other devices use https:// and the authority above.\n", port);
   std::printf("device: %s profile, %u cores, %llu MB memory; uploads up to %zu MB, folder checked every %d ms, %d connections at once\n", profile.name, device_cores, device_memory_mb, profile.max_upload >> 20, profile.watch_ms, profile.max_conns);
   std::printf("%zu paired device%s%s\n", devices.size(), devices.size() == 1 ? "" : "s", pair_local ? "" : "; this machine's own browser needs no pairing");
   // With nobody paired yet, someone has to be let in: offer a code on the terminal.

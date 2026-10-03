@@ -1,14 +1,17 @@
 #!/bin/bash
-# Runs the same requests against the Node server and the C++ server, each on its
-# own copy of a small fixture folder, and compares the answers.
-#   ./test/contract.sh        (from server-cpp/, after `make`)
+# Sends a fixed list of requests to the server, on a small fixture folder, and
+# compares the answers with the ones recorded in test/expected.txt. Those were
+# recorded when the C++ server and the Node server it replaced gave identical
+# answers, so this holds the server to the contract in API.md.
+#   ./test/contract.sh            (from server-cpp/, after `make`)
+#   UPDATE=1 ./test/contract.sh   record the answers as the new expected ones,
+#                                 after reading the differences and meaning them
 set -u
 cd "$(dirname "$0")/.."
 REPO="$(cd .. && pwd)"
 WORK="$(mktemp -d)"
-NODE_PORT=4411
 CPP_PORT=4412
-trap 'kill $NODE_PID $CPP_PID 2>/dev/null; wait 2>/dev/null; rm -rf "$WORK"' EXIT
+trap 'kill $CPP_PID 2>/dev/null; wait 2>/dev/null; rm -rf "$WORK"' EXIT
 
 fixture() {
   mkdir -p "$1/a" "$1/b" "$1/notes"
@@ -27,17 +30,15 @@ fixture() {
   printf 'not really a png' > "$1/b/pic.png"
   printf '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>' > "$1/b/drawing.svg"
 }
-fixture "$WORK/node/ws"
 fixture "$WORK/cpp/ws"
 
-# Both are told to ask even this machine to pair, so the requests below prove
+# It is told to ask even this machine to pair, so the requests below prove
 # that nothing is answered without a paired device's token.
-PORT=$NODE_PORT HUB_STATE="$WORK/node/state" HUB_PAIR_LOCAL=1 node "$REPO/hub/server.js" "$WORK/node/ws" > "$WORK/node.log" 2>&1 &
-NODE_PID=$!
-./hubd "$WORK/cpp/ws" --port $CPP_PORT --www "$REPO/hub" --state "$WORK/cpp/state" --pair-local > "$WORK/cpp.log" 2>&1 &
+mkdir -p "$WORK/cpp/workspaces"
+./hubd "$WORK/cpp/ws" --port $CPP_PORT --www "$REPO/hub" --state "$WORK/cpp/state" --workspaces "$WORK/cpp/workspaces" --pair-local > "$WORK/cpp.log" 2>&1 &
 CPP_PID=$!
-# wait until both answer (the memory-checked build starts slowly)
-for port in $NODE_PORT $CPP_PORT; do
+# wait until it answers (the memory-checked build starts slowly)
+for port in $CPP_PORT; do
   for _ in $(seq 1 50); do curl -s -o /dev/null -m 1 "http://127.0.0.1:$port/" && break; sleep 0.2; done
 done
 code_in() { grep -o 'pairing code: [A-Z0-9-]*' "$1" | tail -1 | awk '{print $3}'; }
@@ -76,8 +77,9 @@ run() { # run <port> <root> <log>: the request script
   hreq() { # like req, but also shows the headers that matter for partial downloads
     local label="$1"; shift
     echo "## $label"
-    curl -s -m 5 -b "$JAR" -D - -o "$WORK/body" "$@" | tr -d '\r' | grep -iE '^(HTTP/|content-range|accept-ranges|content-type|content-length|content-security-policy|x-content-type-options|x-frame-options|referrer-policy|cross-origin-)' | sed 's/^HTTP\/1.1 \([0-9]*\).*/\1/' | tr 'A-Z' 'a-z' | sort
-    echo "body: $(cat "$WORK/body")"
+    curl -s -m 5 -b "$JAR" -D - -o "$WORK/body" "$@" | tr -d '\r' | grep -iE '^(HTTP/|content-range|accept-ranges|content-type|content-length|content-security-policy|x-content-type-options|x-frame-options|referrer-policy|cross-origin-)' | sed 's/^HTTP\/1.1 \([0-9]*\).*/\1/' | tr 'A-Z' 'a-z' | sort | { if [ "$label" = "page headers" ]; then grep -v '^content-length'; else cat; fi; }
+    # The page itself changes whenever the reader does: its headers are the contract, not its text.
+    if [ "$label" = "page headers" ]; then echo "body: (the page)"; else echo "body: $(cat "$WORK/body")"; fi
   }
   J=(-H 'Content-Type: application/json')
   # Before pairing: the page itself is public, nothing else is.
@@ -194,6 +196,52 @@ run() { # run <port> <root> <log>: the request script
   req "set hubs"              body -X PUT "${J[@]}" -d '{"hubs":[{"name":"  Desk   top ","url":"https://Desk.local:4321/some/path"},{"name":"dup","url":"https://desk.local:4321"},{"name":"usual port","url":"https://pi.local:443"},{"name":"","url":"https://x.local"},{"name":"bad","url":"ftp://x.local"},{"name":"bad2","url":"not a url"}]}' "$B/api/hubs"
   req "hubs"                  body "$B/api/hubs"
   echo "## page policy";              curl -s -o /dev/null -D - -b "$JAR" "$B/" | tr -d '\r' | grep -i '^content-security-policy' | grep -o "connect-src[^;]*"
+  # Search, hidden files, and the page's files when the browser already has them.
+  req "search"                  body "$B/api/search?q=BODY%20one"
+  req "search, nothing found"   body "$B/api/search?q=zzzznothing"
+  req "search, too short"       body "$B/api/search?q=a"
+  req "search skips ignored"    body "$B/api/search?q=ignored"
+  req "search skips hidden"     body "$B/api/search?q=secret"
+  req "raw hidden file"         body "$B/raw/.hidden.md"
+  req "doc hidden file"         body "$B/api/doc?path=.hidden.md"
+  TAG="$(curl -s -o /dev/null -D - "$B/app.js" | tr -d '\r' | awk -F': ' 'tolower($1)=="etag"{print $2}')"
+  echo "## page file has a tag";       [ -n "$TAG" ] && echo yes; curl -s -o /dev/null -D - "$B/app.js" | tr -d '\r' | grep -i '^cache-control'
+  echo "## page file, already held";   curl -s -o /dev/null -w '%{http_code} %{size_download}\n' -H "If-None-Match: $TAG" "$B/app.js"
+  PTAG="$(curl -s -o /dev/null -D - "$B/" | tr -d '\r' | awk -F': ' 'tolower($1)=="etag"{print $2}')"
+  echo "## page, already held, keeps its policy"; curl -s -o /dev/null -D - -H "If-None-Match: $PTAG" "$B/" | tr -d '\r' | grep -i -E '^HTTP|^content-security-policy' | cut -c1-70
+  echo "## page file, other tag";      curl -s -o /dev/null -w '%{http_code}\n' -H 'If-None-Match: "0"' "$B/app.js"
+  echo "## data is never kept";        curl -s -o /dev/null -D - -b "$JAR" "$B/api/config" | tr -d '\r' | grep -i '^cache-control\|^etag'
+  req "hub address, odd characters" body -X PUT "${J[@]}" -d '{"hubs":[{"name":"x","url":"https://x;sandbox"},{"name":"y","url":"https://x,script-src"},{"name":"ok","url":"https://[fe80::1]:4321"}]}' "$B/api/hubs"
+  req "hubs emptied"            body -X PUT "${J[@]}" -d '{"hubs":[]}' "$B/api/hubs"
+  # A damaged notes file is left alone, and says so.
+  cp "$R/notes/notes.json" "$WORK/notes.keep"; printf '[{"id":"broken' > "$R/notes/notes.json"
+  req "note onto a damaged file" body -X POST "${J[@]}" -d '{"doc":"a/1-doc.md","text":"must not wipe"}' "$B/api/notes"
+  req "notes from a damaged file" body "$B/api/notes"
+  req "edit on a damaged file"   body -X PUT "${J[@]}" -d '{"text":"x"}' "$B/api/notes/anything"
+  echo "## damaged file untouched";    cat "$R/notes/notes.json"; echo
+  cp "$WORK/notes.keep" "$R/notes/notes.json"
+  cp "$R/hub.json" "$WORK/hub.keep"; printf '{"title": "brok' > "$R/hub.json"
+  req "settings from a damaged file" body "$B/api/config"
+  req "settings onto a damaged file" body -X PUT "${J[@]}" -d '{"locks":{}}' "$B/api/config"
+  cp "$WORK/hub.keep" "$R/hub.json"
+  # Workspaces: an upload that becomes a workspace of its own, switching to it and back.
+  req "upload to own workspace"   body -X POST --data-binary $'# In Own\n\nBody.\n' "$B/api/upload?path=doc.md&workspace=My%20Space"
+  req "own workspace, odd name"   body -X POST --data-binary 'x' "$B/api/upload?path=a/b.md&workspace=..%2F..%2Fescape%3F"
+  req "own workspace, no name"    body -X POST --data-binary 'x' "$B/api/upload?path=a.md&workspace=..."
+  req "own workspace, bad path"   body -X POST --data-binary 'x' "$B/api/upload?path=../x.md&workspace=My%20Space"
+  req "own workspace, again"      body -X POST --data-binary 'x' "$B/api/upload?path=doc.md&workspace=My%20Space"
+  req "workspaces listed"         body "$B/api/workspaces"
+  req "switch to missing"         body -X POST "${J[@]}" -d '{"root":"/nowhere"}' "$B/api/workspace"
+  req "switch with no root"       body -X POST "${J[@]}" -d '{}' "$B/api/workspace"
+  WSROOT="$(curl -s -b "$JAR" "$B/api/workspaces" | python3 -c 'import sys,json; print([w["root"] for w in json.load(sys.stdin) if w["name"]=="My Space"][0])')"
+  req "switch to own"             body -X POST "${J[@]}" -d "{\"root\":\"$WSROOT\"}" "$B/api/workspace"
+  req "config in own"             body "$B/api/config"
+  req "docs in own"               body "$B/api/docs"
+  req "note in own"               body -X POST "${J[@]}" -d '{"doc":"doc.md","text":"in the other workspace"}' "$B/api/notes"
+  req "notes in own"              body "$B/api/notes"
+  req "switch home"               body -X POST "${J[@]}" -d "{\"root\":\"$R\"}" "$B/api/workspace"
+  req "notes at home"             status-only "$B/api/notes"
+  req "config at home"            body "$B/api/config"
   ID="$(curl -s -b "$JAR" "$B/api/devices" | python3 -c 'import sys,json; print(json.load(sys.stdin)[0]["id"])')"
   req "unpair"                  body -X DELETE "$B/api/devices/$ID"
   req "after unpairing"         body "$B/api/config"
@@ -201,18 +249,21 @@ run() { # run <port> <root> <log>: the request script
   req "workspaces"            body "$B/api/workspaces"
 }
 
-run $NODE_PORT "$WORK/node/ws" "$WORK/node.log" > "$WORK/node.out"
 run $CPP_PORT "$(cd "$WORK/cpp/ws" && pwd -P)" "$WORK/cpp.log" > "$WORK/cpp.out"
-# macOS temp folders are reached through a symlink; the servers report the real path.
-sed -i '' "s|$(cd "$WORK/node/ws" && pwd -P)|<root>|g; s|$(cd "$WORK/cpp/ws" && pwd -P)|<root>|g" "$WORK/node.out" "$WORK/cpp.out"
+# macOS temp folders are reached through a symlink; the server reports the real path.
+sed -i '' "s|$(cd "$WORK/cpp/ws" && pwd -P)|<root>|g; s|$(cd "$WORK/cpp/workspaces" && pwd -P)|<workspaces>|g" "$WORK/cpp.out"
 
-TOTAL=$(grep -c '^## ' "$WORK/node.out")
-if diff "$WORK/node.out" "$WORK/cpp.out" > "$WORK/diff.txt"; then
-  echo "PASS: $TOTAL requests, identical answers from both servers"
+EXPECTED="test/expected.txt"
+TOTAL=$(grep -c '^## ' "$WORK/cpp.out")
+if [ -n "${UPDATE:-}" ]; then
+  cp "$WORK/cpp.out" "$EXPECTED"
+  echo "recorded: $TOTAL requests written to $EXPECTED"
+elif diff "$EXPECTED" "$WORK/cpp.out" > "$WORK/diff.txt"; then
+  echo "PASS: $TOTAL requests, answers as recorded"
 else
-  echo "DIFFERENCES (< node, > c++):"
+  echo "DIFFERENCES (< recorded, > now):"
   cat "$WORK/diff.txt"
   echo "--- of $TOTAL requests"
-  [ -n "${KEEP:-}" ] && cp "$WORK/node.out" "$WORK/cpp.out" "$WORK/node.log" "$WORK/cpp.log" "$KEEP/"
+  [ -n "${KEEP:-}" ] && cp "$WORK/cpp.out" "$WORK/cpp.log" "$KEEP/"
   exit 1
 fi

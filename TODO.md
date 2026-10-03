@@ -14,17 +14,27 @@ Done from the first pass:
 Now, in order:
 
 1. [x] The certificate authority can vouch for the hub only (name constraints; its own key is never stored) (17). [ ] Remove the old "Hub local authority" from each device that has it; flash encryption on the board; the trust page should say what the fingerprint check is for (23)
-2. [ ] Quiet data loss: a damaged notes or settings file must not be overwritten; read the body before the list when a note is edited; check that a copy was really stored before marking it kept; do not drop a file from the outbox when its bytes are missing (19, 20, 21)
-3. [ ] Loose ends from the newest features: characters allowed in a hub's address; locked folders showing through in two lists; hidden and ignored files served by path; renew the pairing cookie (25, 28, 29, 30)
-4. [ ] The page's own folder must not be writable through the API; the storage limit's two gaps in Node (18, 22)
-5. [ ] Retire the Node server: workspaces in C++, then delete `hub/server.js`
+2. [x] Quiet data loss: a damaged notes or settings file must not be overwritten; read the body before the list when a note is edited; check that a copy was really stored before marking it kept; do not drop a file from the outbox when its bytes are missing (19, 20, 21)
+3. [x] Loose ends from the newest features: characters allowed in a hub's address; locked folders showing through in two lists; hidden and ignored files served by path; renew the pairing cookie (25, 28, 29, 30)
+4. [x] The page's own folder must not be writable through the API (18)
+5. [x] Retire the Node server: workspaces in C++, `hub/server.js` deleted, `./start.sh` (and `npm start`) run `hubd`. [ ] A full session in a browser against `hubd` as the only server
 6. [ ] A browser test suite in the repo; split `hub/app.js` into modules
-7. [ ] Efficiency for the board and for phones: one list request per burst of changes, "not modified" answers and compressed files, a guarded watcher that keeps one list, notes per document (32, 33, 24, 36); then the rest of 34 to 39
-8. [ ] Design and flow: the "rough edges" table in the review, starting with the note box on a phone, the contents button overlapping "edit front page", and playing a track without leaving the page
+7. Efficiency for the board and for phones. [x] One list request per burst of changes; "not modified" answers for the page's files; a guarded watcher; the folder walked at most once per interval; looking for an absent server less and less often; headings measured once per frame; the track list no longer rebuilt on play and pause (32, 33, 24, 37, 39). [ ] Compressed files; one shared list for the watcher and the document list; notes per document; files from another hub streamed; large files kept in pieces (33, 24, 36, 34, 35)
+8. Design and flow: [x] find (file names, text in documents, notes); [x] a document reopens where it was left; [x] wide tables as cards on a phone; [x] pressed and hover look; [x] instant start from the kept page, with "a newer version is ready"; [x] a track plays without leaving the page; [x] a switch to show only what is on the device; [x] the hub's own computer uses `http://localhost` with no certificate. [ ] The rest: the "rough edges" table in the review, starting with the note box on a phone, the contents button overlapping "edit front page", and playing a track without leaving the page
 9. [ ] Decide: devices encrypt before upload (the board only holds ciphertext), or the board encrypts the card itself
 10. [ ] Smaller items: pairing from other sites, tokens for other hubs, an undo for folder removal (26, 27, 31)
 
 Not yet checked on real devices: installing the authority on an iPhone and an Android phone, and the reader in Safari and Firefox (tested in Chrome only).
+
+## Other hubs (built 3 October 2026)
+
+- [x] A reader can be pointed at a hub on another machine: add it in settings by address, pair once, switch with a menu. Notes, uploads and find go to the hub being viewed
+- [x] What is kept from each hub is stored side by side; "everything on this device" lists it by hub
+- [ ] One merged list across hubs, in place of switching
+- [ ] Media from another hub streamed, not fetched whole (review, 34)
+- [ ] Hubs finding each other on the network, so no address has to be typed
+- [ ] A publicly trusted certificate (Tailscale, or a domain of your own), so no authority has to be installed on any device (`CERTIFICATES.md`, option 4)
+- [ ] Controls in the reader for network access and for retiring the authority (`CERTIFICATES.md`, "About a switch")
 
 ## Annotations that link (after review steps 1 to 3)
 
@@ -40,7 +50,7 @@ Not yet checked on real devices: installing the authority on an iPhone and an An
 
 **0. Restructure (done, except the last item)**
 - [x] Tracked starter content lives in `sample/`; the live workspace is `data/`, which git ignores. Notes, highlights, uploads and edits all happen in `data/`
-- [x] The Node server reads `data/` by default and fills it from `sample/` on first run
+- [x] The server reads `data/` by default and `start.sh` fills it from `sample/` on first run
 - [x] Uploaded files and notes that were in git moved to `data/` and are no longer tracked
 - [x] Those files removed from git history on this machine (backup of the old history: `../cs-learning-before-history-rewrite.bundle`)
 - [ ] Force-push `main` to GitHub so the old history there is replaced, and push `c-server` (not done: it overwrites what is on GitHub)
@@ -63,6 +73,7 @@ Not yet checked on real devices: installing the authority on an iPhone and an An
 - [x] Lock-screen / headset next and previous (media session), untested on a phone
 - [ ] Try real mp3 files (tested with generated .wav tones)
 - [x] Shuffle and repeat (repeat the queue, repeat one, or none); a queue of sound and video files, listed under the controls
+- [x] Pressing a track plays it where you are; the player page opens from the sidebar's footer and does not start anything by itself
 - [ ] Remember the last track and position
 
 **1c. Front pages**
@@ -72,7 +83,7 @@ Not yet checked on real devices: installing the authority on an iPhone and an An
 - [x] Uploading a folder asks for its front page: use the one it has, copy one of its top-level markdown files (its README by default), or make a new one
 - [ ] Front pages for folders that are already in the workspace (only made on upload, or by adding a `FRONTPAGE.md` by hand)
 - [ ] Video thumbnails (videos show as a labelled tile)
-- [ ] The C++ server cannot yet open an upload as its own workspace, so that path is Node-only
+- [x] The C++ server can open an upload as its own workspace
 
 **2. Working without the server (before HTTPS)**
 - [x] Both servers accept a note id and time made on the device, and ignore a repeat of the same note
@@ -152,18 +163,18 @@ Not yet checked on real devices: installing the authority on an iPhone and an An
 
 ## The C++ server (branch `c-server`, folder `server-cpp/`)
 
-Goal: serve the same `index.html` from an ESP32 with the documents on a microSD card, for one or two people. One C++ server for both desktop and board; the Node server goes once this one fully matches it.
+Goal: serve the same `index.html` from an ESP32 with the documents on a microSD card, for one or two people. One C++ server for both desktop and board. The Node server it was modelled on is gone (3 October 2026).
 
 Done:
 - [x] API written down as the contract: `server-cpp/API.md`
 - [x] Desktop server `hubd` (C++17, POSIX sockets, cJSON): pages, files, document list, settings, front page, notes and highlights, folder upload into the workspace, live reload by polling
-- [x] `test/contract.sh`: 107 requests sent to both servers, answers identical
+- [x] `test/contract.sh`: 123 requests, answers compared with `test/expected.txt`, recorded when both servers answered identically
 - [x] `make check` build with memory-error detection; clean on the contract test and on malformed requests
 - [x] Device profiles (desktop / small / esp32) picked at start-up, with caching of the page, scripts and document list
 - [x] Write-up: `docs/08-server-migration/node-to-cpp-server.md`
 
 Still to do:
-- [ ] Upload as its own workspace, and switching workspaces (answers 501 for now)
+- [x] Upload as its own workspace, and switching workspaces (not on the board, where the page lives inside the served folder)
 - [x] Send and receive files in pieces instead of reading them whole
 - [x] HTTP Range requests, so video can be played and a large PDF fetched a piece at a time. [ ] Cache headers: everything is still sent whole each time (review, 33)
 - [x] Keep connections open between requests
@@ -177,7 +188,7 @@ Still to do:
 - [ ] Try it on the board; measure SD read speed and how long the document list takes
 - [x] Copy the page and its scripts to the card (`hub/www/`): `make card CARD=/Volumes/…`. [ ] Serve them gzipped
 - [ ] Run the page against `hubd` in a browser for a full session (only the API has been compared so far)
-- [ ] When all of the above passes on desktop, delete `hub/server.js`
+- [x] `hub/server.js` deleted. The last commit that has it is `d8d878f`, if it is ever needed for comparison
 
 ## Idea: a C/C++ document parser for highlight continuity (EPUB and PDF)
 
@@ -193,7 +204,7 @@ Parse EPUB and PDF into a stable structure of pages / sections / paragraphs with
 ## Project structure
 
 - [ ] Decide whether the hub becomes its own code project (own branch or repo), using this repo's markdown files and folders as example content to develop with
-- [ ] Possible front-end rewrite in Preact with no build step, keeping the small Node server for file access and live reload
+- [ ] Possible front-end rewrite in Preact with no build step, keeping the server as it is
 
 ## Carried over from the first brainstorm
 

@@ -1,6 +1,6 @@
 # Hub HTTP API
 
-The contract between the page (`hub/index.html`) and whichever server is behind it. Two servers implement it: `hub/server.js` (Node) and `server-cpp/hubd` (C++). `test/contract.sh` sends the same requests to both and compares the answers. The page, its scripts and the trust routes are public; everything else needs a paired device (see Security).
+The contract between the page (`hub/index.html`) and whichever server is behind it. `server-cpp/hubd` implements it. `test/contract.sh` sends 123 requests and compares the answers with those recorded in `test/expected.txt`, which date from when `hubd` and the Node server it replaced answered identically. The page, its scripts and the trust routes are public; everything else needs a paired device (see Security).
 
 All JSON bodies are UTF-8. Errors are `{ "error": "message" }` with a 4xx or 5xx status. Paths are relative to the folder being served, use `/`, and may never contain `..`.
 
@@ -14,6 +14,10 @@ All JSON bodies are UTF-8. Errors are `{ "error": "message" }` with a 4xx or 5xx
 | `GET /vendor/marked.js`, `/vendor/highlight.js`, `/vendor/purify.js` | the three libraries the page loads |
 | `GET /raw/<path>` | the file as it is on disk, with a content type from its extension. 404 if missing |
 | `GET /api/doc?path=<path>` | the text of a markdown, HTML or source file. 404 if missing or not a readable type |
+
+## Search
+
+`GET /api/search?q=<words>` → `[{ "path", "line", "text" }]`: lines containing the words, in the documents that can be read as text. Letter case is ignored. At most 3 lines per document and 60 in all; `text` is the part of the line around the match. Hidden files, `notes/` and anything on the ignore list are not searched. 400 unless `q` is 2 to 100 characters. Every document is read for each search, so the reader waits for a pause in typing before asking.
 
 ## Listing
 
@@ -66,11 +70,17 @@ Stored in `notes/notes.json`.
 
 ## Uploads and workspaces
 
-`POST /api/upload?path=<path>` with the file as the raw body → `{ "saved": true, "root": "…" }`, or `{ "skipped": true }` if the file already exists (never overwritten). 400 for a path with `..`, a hidden part or `node_modules`. 413 over 50 MB.
+`POST /api/upload?path=<path>` with the file as the raw body → `{ "saved": true, "root": "…" }`, or `{ "skipped": true }` if the file already exists (never overwritten). 400 for a path with `..`, a hidden part or `node_modules`. 413 over the profile's upload limit (200 MB on a computer).
 
 `GET /api/workspaces` → `[{ "name", "root", "home", "current" }]`.
 
-Node only, for now: `POST /api/upload?...&workspace=<name>` (upload into a workspace of its own) and `POST /api/workspace { "root" }` (switch). The C++ server answers 501 to the first and always reports one workspace.
+The first entry is "home", the folder the server was started on; the rest are folders in the workspaces folder, in name order ignoring case.
+
+`POST /api/upload?path=<path>&workspace=<name>` puts the file in a workspace of its own instead, made on first use; `root` in the answer is that workspace's folder. The name is reduced to letters, digits, `_`, spaces, dots and hyphens, without leading or trailing dots or spaces; 400 if nothing is left. Storage is measured for that workspace's folder.
+
+`POST /api/workspace` with `{ "root": "…" }` opens that workspace in place of the one that is open, for every device, and answers with the list. 404 `no such workspace` unless `root` is one of the listed ones. The choice is remembered for the next start.
+
+The workspaces folder is `workspaces/` beside the page, or what `--workspaces` names. When the page lives inside the folder being served, as on the board, there is none: uploads with `workspace` get 501.
 
 ## Live reload
 
@@ -80,9 +90,9 @@ Node only, for now: `POST /api/upload?...&workspace=<name>` (upload into a works
 data: {"file":"relative/path.md"}
 ```
 
-Node uses the operating system's file-change notifications; the C++ server compares modification times at an interval set by the device profile, because the ESP32 has no notification API.
+The server compares modification times at an interval set by the device profile, because the ESP32 has no file-change notification to rely on.
 
-## Device profile (C++ server only)
+## Device profile
 
 `GET /api/device` → what the server detected and the limits it chose:
 
@@ -103,7 +113,7 @@ All three keep the document list until a file in the folder changes. `--profile 
 
 Both servers apply the same rules, in this order, to every request.
 
-**1. Known host names only.** The `Host` header must name this machine: `localhost`, `127.0.0.1`, `hub.local`, the machine's own name and addresses, or a name added with `--allow-host` (`HUB_HOSTS` in Node). Anything else gets 403 `unknown host name`. This is what defeats DNS rebinding, where a website points its own name at the hub's address.
+**1. Known host names only.** The `Host` header must name this machine: `localhost`, `127.0.0.1`, `hub.local`, the machine's own name and addresses, or a name added with `--allow-host` (`HUB_HOSTS` with `start.sh`). Anything else gets 403 `unknown host name`. This is what defeats DNS rebinding, where a website points its own name at the hub's address.
 
 **2. Encrypted beyond this machine.** Listening on anything but `127.0.0.1` turns HTTPS on. The hub is its own certificate authority: `hubd --make-cert` (or the first start with `--host 0.0.0.0`) writes its certificates to the state folder (`--state`, `HUB_STATE`, default `~/.config/hub`; never inside the served folder). There are three, in a chain:
 
@@ -111,7 +121,7 @@ Both servers apply the same rules, in this order, to every request.
 - `issuer.pem` (key in `issuer-key.pem`), which signs the server's certificates. Both it and the authority carry *name constraints*, marked critical: they may vouch only for names under `.local`, `localhost`, the machine's own host names as they were when the authority was made (`issuer.zones`), and addresses in the private ranges (127/8, 10/8, 172.16/12, 192.168/16, 169.254/16, 100.64/10). A certificate for anything else is refused by browsers even though the chain leads to an installed authority. So a copy of the state folder lets someone pose as the hub, and as nothing else.
 - `cert.pem` (key in `key.pem`), the server's certificate followed by the issuer's. It is re-issued when the machine's addresses change or it nears its end, and devices keep trusting it because the authority stays the same. A name the issuer may not vouch for (a public address, say) is left out of it and reported at start-up.
 
-`hubd --new-authority` makes a fresh authority (for a further name given with `--allow-host`, or to retire the old one); every device then installs the new one. State folders from before this layout held an authority with no constraints and kept its key (`ca-key.pem`): the first start replaces it, deletes that key, and says to remove the old authority, "Hub local authority", from every device that has it. A request sent in plain HTTP to the HTTPS port is answered in plain text with a redirect: `/` goes to `/trust`, everything else to the same address over `https://`.
+`hubd --new-authority` makes a fresh authority (for a further name given with `--allow-host`, or to retire the old one); every device then installs the new one. State folders from before this layout held an authority with no constraints and kept its key (`ca-key.pem`): the first start replaces it, deletes that key, and says to remove the old authority, "Hub local authority", from every device that has it. A request sent in plain HTTP to the HTTPS port from another machine is answered in plain text with a redirect: `/` goes to `/trust`, everything else to the same address over `https://`. From the machine itself (127.0.0.1) plain HTTP is served as it is: that connection never leaves the machine, and browsers treat `http://localhost` as secure, so the hub's own computer needs no authority installed.
 
 | Request (no pairing needed) | Answer |
 |---|---|
@@ -138,11 +148,15 @@ With no device paired yet and the server reachable from the network (or `--pair-
 
 **5. What a browser may do with each answer.** Every answer carries `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and `Cross-Origin-Resource-Policy: same-origin`, and a `Content-Security-Policy`:
 
+The page's own files (the page, its scripts, the manifest and icons) carry an `ETag` and `Cache-Control: no-cache`: a browser may keep them, and a request with `If-None-Match` for a file that has not changed is answered `304` with no body and the same headers. Everything else is `Cache-Control: no-store`.
+
 - the page: scripts from this server only and none inline; pictures, media, styles and fonts from this server only; connections to this server and to the hubs listed in `/api/hubs`, nothing else; cannot be framed. So a document cannot make the reader run code, and reading never contacts the internet.
 - `/raw/…`: `sandbox allow-same-origin` and no script source at all, so a saved HTML page or an SVG never runs code, whether shown in the reader's frame or opened in a tab of its own; pictures, styles and fonts from this server only. (PDFs are sent without it: a browser's PDF viewer does not start in a sandbox.)
 - everything else: `default-src 'none'; sandbox`.
 
 **6. Storage.** Uploads and new notes are refused with 507 `storage is full` when the folder would pass its quota (`--quota-mb`, `HUB_QUOTA_MB`; default by profile, 20 GB on a computer) or the disk would be left with under 16 MB.
+
+**7. Small protections.** `/raw/` and `/api/doc` refuse hidden names (404), as the list leaves them out. Uploads, folder removal and front-page writes are refused inside the page's own folder when that lies within the folder being served. A notes or settings file that exists but does not parse is never overwritten: requests that would write it get 500 `… is damaged and was left as it is`. The pairing cookie is sent again, with a fresh year, on the first request of each day. A hub address may contain only letters, digits, dots, hyphens, colons and brackets.
 
 ## Limits the C++ server enforces
 

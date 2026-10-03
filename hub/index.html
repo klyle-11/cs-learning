@@ -28,6 +28,8 @@
     --field: #fff;
     --quote: #3b382f;
     --c-kw: #8c2f1b; --c-str: #2f6f4f; --c-com: #8a8473; --c-num: #a05a00; --c-fn: #1f4e8c; --c-type: #6b3fa0;
+    --press: #1d163e; --press-ink: #fff;   /* a button or link being pressed (or pointed at, with a mouse) */
+    --accent2: var(--accent);              /* a second accent for small marks (progress, what is playing); most themes have just the one */
   }
   /* Themes. Each one only redefines the colour tokens above. */
   :root[data-theme="selenized"] { /* Selenized Light */
@@ -53,19 +55,64 @@
   }
   :root[data-theme="triple-m"] {
     color-scheme: dark;
+    --press: #fffffc; --press-ink: #1d163e;   /* this theme's page is the press colour, so the two swap */
     --paper: #1d163e; --shade: #271e54; --ink: #fffffc; --muted: #b3abd8; --rule: #3e3372;
-    --accent: #ff8fc7; --mark: #ffd166; --reply: #2a2563; --field: #150f31; --quote: #dcd7f2;
+    --accent: #8f6a14; --accent2: #ff8fc7; --mark: #ffd166; --reply: #2a2563; --field: #150f31; --quote: #dcd7f2;   /* the same golden sepia as Pale Sky, with pink for the small marks */
     --c-kw: #ff8fc7; --c-str: #9be7c4; --c-com: #8d84b8; --c-num: #ffd166; --c-fn: #8ec5ff; --c-type: #c9a7ff;
+  }
+  :root[data-theme="periwinkle"] { /* Periwinkle: pale lavender paper, deep indigo ink; the accent is the ink itself, as in the screen it was taken from */
+    --paper: #e8e4f7; --shade: #dcd8ee; --ink: #1c163c; --muted: #49426d; --rule: #cfc9e4;
+    --accent: #1c163c; --accent2: #c9a227; --mark: #f3dc8a; --reply: #f0edf8; --field: #f0edf8; --quote: #49426d;
+    --c-kw: #6b2fa0; --c-str: #1f6f55; --c-com: #6e6890; --c-num: #8f6a14; --c-fn: #1f4e8c; --c-type: #49426d;
+  }
+  /* Gold, in small amounts: the line over the active pane and tab, the reading-progress line, the current heading's edge, the playing track. */
+  :root[data-theme="periwinkle"] .pane.active .tabs { box-shadow: inset 0 3px 0 var(--accent2); }
+  :root[data-theme="periwinkle"] .pane.active .tab.active { border-top-color: var(--accent2); }
+  :root[data-theme="periwinkle"] .md blockquote { border-left-color: var(--accent2); }
+  /* Sun Sound: the whole reader is one colour at a time, and that colour moves
+     through hot pinks and oranges so slowly it is hardly seen to change. It is a
+     colour animated over time, not a gradient across the page: every panel,
+     dialog and drawer shows the same colour at the same moment. */
+  @property --sun { syntax: '<color>'; inherits: true; initial-value: #ff69b4; }
+  :root[data-theme="sun-sound"] {
+    --paper: var(--sun);
+    --shade: rgba(27, 6, 18, .07); --ink: #1b0612; --muted: #4a1030; --rule: rgba(27, 6, 18, .26);
+    --accent: #0047ab; --accent2: #fffdf7; --mark: #fffdf4; --reply: rgba(255, 255, 255, .22); --field: rgba(255, 255, 255, .3); --quote: #3a0c22;
+    --press: #1b0612; --press-ink: #fffdf7;
+    --c-kw: #5a0050; --c-str: #0b4d2c; --c-com: #5a2a3a; --c-num: #6b2400; --c-fn: #0047ab; --c-type: #3a1a8a;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    :root[data-theme="sun-sound"] { animation: sunSound 180s linear infinite; }
+  }
+  @keyframes sunSound {
+    0%, 100% { --sun: #ff69b4; }   /* hot pink */
+    16.6% { --sun: #ff1493; }      /* deep pink */
+    33.3% { --sun: #ff6347; }      /* tomato */
+    50% { --sun: #ff4500; }        /* orange red */
+    66.6% { --sun: #ffa500; }      /* orange */
+    83.3% { --sun: #ff8c00; }      /* dark orange */
   }
   :root[data-font="sans"] { --body: var(--sans); --head: var(--serif); }
 
   * { box-sizing: border-box; }
+  /* Scroll bars: no track of their own, so the theme's colour shows through; the handle is a tint of the ink. */
+  * { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--ink) 30%, transparent) transparent; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; background: transparent; }
+  ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--ink) 30%, transparent); border-radius: 5px; border: 2px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--ink) 50%, transparent); background-clip: padding-box; }
   html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
   body { margin: 0; overflow: hidden; background: var(--paper); color: var(--ink); font: var(--fs, 18px)/1.65 var(--body); }
 
   /* Keyboard focus is always obvious. */
   :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
   [role="button"] { cursor: pointer; }
+  /* Buttons and links show they are being pressed; with a mouse, also when pointed at.
+     Colour swatches and the drag handles keep their own look. */
+  button:not(:disabled):not(.sw):not(#grip):not(#sideEdge):active, a:active { background: var(--press) !important; color: var(--press-ink) !important; border-color: var(--press) !important; text-decoration: none; }
+  @media (hover: hover) and (pointer: fine) {
+    button:not(:disabled):not(.sw):not(#grip):not(#sideEdge):hover, a:hover { background: var(--press) !important; color: var(--press-ink) !important; border-color: var(--press) !important; text-decoration: none; }
+  }
 
   /* Roomier text: more space between lines, words and paragraphs. */
   body.roomy .md { line-height: 1.95; letter-spacing: .015em; word-spacing: .08em; }
@@ -130,6 +177,22 @@
   /* the outline takes what it needs, up to under half; the files get the rest */
   #tree { flex: 1 1 0; }
   #toc { flex: 0 1 auto; max-height: 45%; }
+  #fresh { flex: none; display: block; margin: 0 10px 6px 0; padding: 4px 8px; text-align: left; border-color: var(--accent); color: var(--accent); font-size: 12.5px; }
+  #fresh[hidden] { display: none; }
+  .file.playing .name::before { content: '♪ '; color: var(--accent2); }
+  #keptOnly { flex: none; display: block; margin: 0 10px 6px 0; padding: 3px 8px; text-align: left; background: var(--shade); font-size: 12.5px; }
+  #keptOnly[hidden] { display: none; }
+  /* find: the box above the file list, and the lines it found inside documents and notes */
+  #find { flex: none; margin: 0 10px 6px 0; padding: 4px 8px; border: 1px solid var(--rule); background: var(--field); color: var(--ink); font: 13px var(--head); }
+  #found { flex: 0 1 auto; max-height: 45%; min-height: 0; overflow-y: auto; margin: 0 10px 8px 0; padding: 4px 8px; border: 1px solid var(--rule); background: var(--shade); font-size: 12.5px; }
+  #found[hidden] { display: none; }
+  #found .sub { color: var(--muted); padding: 2px 0 4px; }
+  .hit { padding: 5px 0; border-top: 1px solid var(--rule); }
+  .hit b { display: block; font-weight: 600; }
+  .hit small { display: block; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hit span { display: block; overflow-wrap: anywhere; }
+  .hit:hover b { color: var(--accent); }
+  .found { outline: 3px solid var(--accent); outline-offset: 4px; }
   #tree summary { cursor: pointer; padding: 2px 0; font-weight: 600; }
   #tree .kids { padding-left: 14px; }
   .file { display: flex; align-items: baseline; gap: 6px; padding: 2px 4px; cursor: pointer; color: var(--muted); }
@@ -143,7 +206,7 @@
   #toc a { display: block; padding: 3px 0 3px 8px; color: var(--muted); text-decoration: none; border-left: 2px solid transparent; }
   #toc a.l1 { color: var(--ink); font-weight: 600; margin-top: 8px; }
   #toc a.l3 { padding-left: 22px; font-size: 13px; }
-  #toc a.active { color: var(--accent); border-left-color: var(--accent); }
+  #toc a.active { color: var(--accent); border-left-color: var(--accent2); }
 
   /* workspace: one or two panes, each with tabs along the top */
   #work { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
@@ -151,7 +214,7 @@
   .pane { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
   /* how far through the document the reader is */
   .progress { flex: none; height: 3px; background: var(--shade); }
-  .progress i { display: block; height: 100%; width: 0; background: var(--accent); }
+  .progress i { display: block; height: 100%; width: 0; background: var(--accent2); }
   .pane.active .tabs { box-shadow: inset 0 3px 0 var(--accent); }
   .dragging iframe { pointer-events: none; }
   .tabs { display: flex; align-items: stretch; background: var(--shade); border-bottom: 1px solid var(--rule); font: 13px var(--head); overflow-x: auto; flex: none; }
@@ -216,7 +279,10 @@
   .track { display: flex; gap: 10px; align-items: baseline; padding: 6px 6px; border-top: 1px solid var(--rule); cursor: pointer; }
   .track.cur { color: var(--accent); font-weight: 700; background: var(--shade); }
   .track.gone { color: var(--muted); cursor: default; }
-  .track span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The file's name comes first: it takes the room it needs, and the folder beside it gets what is left and is cut short first. */
+  .track span { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .track small { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+  .track small + small { flex: none; }
   .track .st { border: 0; padding: 0 4px; font-size: 12px; color: var(--muted); }
   .track .st.kept { color: #3f8f4f; }
   /* the queue: its button on a row, and the list under the controls */
@@ -367,8 +433,9 @@
   .listing { margin-top: 14px; font-size: 14.5px; }
   .listing h5 { margin: 16px 0 4px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 400; }
   .listing .item { display: flex; gap: 8px; align-items: baseline; padding: 4px 2px; border-top: 1px solid var(--rule); cursor: pointer; }
-  .listing .item span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .listing .item small { color: var(--muted); }
+  .listing .item span { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .listing .item small { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; color: var(--muted); }
+  .listing .item small + small { flex: none; }
   .thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
   .thumb { display: block; padding: 0; border: 1px solid var(--rule); background: var(--shade); aspect-ratio: 1; overflow: hidden; position: relative; }
   .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -430,6 +497,8 @@
 
     /* icons and settings sized for a thumb */
     #sideHead .ic, .label.row .ic { width: 38px; height: 38px; padding: 8px; }
+    #find { font-size: 16px; padding: 8px 10px; }   /* 16px: smaller makes an iPhone zoom the page on focus */
+    #found { font-size: 14px; }
     #mini .pl-row .ic { width: 36px; height: 36px; padding: 8px; }
     #mini { font-size: 13.5px; }
     #sideTools { gap: 6px; }
@@ -442,6 +511,14 @@
     #tree summary { padding: 7px 0; }
     #toc a { padding: 7px 0 7px 8px; }
     .scroller { padding: 0 16px; }
+    /* a table with more than three columns: each row becomes a card, one line per cell under its heading */
+    .md table.wide, .md table.wide tbody { display: block; overflow: visible; }
+    .md table.wide thead { display: none; }
+    .md table.wide tr { display: block; margin: 0 0 12px; border: 1px solid var(--rule); }
+    .md table.wide td { display: block; border: 0; border-top: 1px solid var(--rule); padding: 6px 10px; }
+    .md table.wide td:first-child { border-top: 0; background: var(--shade); font-weight: 600; }
+    .md table.wide td:empty { display: none; }
+    .md table.wide td[data-label]::before { content: attr(data-label); display: block; font: 400 11px var(--head); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
     .md { padding: 8px 0 60px; }
     .md h1 { font-size: 1.45em; }
     .tab { padding: 9px 8px 8px 12px; }
@@ -468,7 +545,7 @@
     </div>
     <div id="settings" hidden>
       <div class="label">Text</div>
-      <div id="sideTools"><select id="theme" title="Theme"><option value="plain">Plain</option><option value="selenized">Selenized Light</option><option value="lime">Pale Lime</option><option value="sky">Pale Sky</option><option value="eva">Eva Dark</option><option value="triple-m">Triple-M</option></select><button id="fontToggle"></button><button id="focusToggle" title="Fade everything except the paragraph you are reading">reading focus</button><button id="roomyToggle" title="More space between lines and words">roomy text</button><button id="smaller" aria-label="Smaller text" title="Smaller text">A−</button><button id="bigger" aria-label="Larger text" title="Larger text">A+</button></div>
+      <div id="sideTools"><select id="theme" title="Theme"><option value="plain">Plain</option><option value="selenized">Selenized Light</option><option value="lime">Pale Lime</option><option value="sky">Pale Sky</option><option value="eva">Eva Dark</option><option value="triple-m">Triple-M</option><option value="sun-sound">Sun Sound</option><option value="periwinkle">Periwinkle</option></select><button id="fontToggle"></button><button id="focusToggle" title="Fade everything except the paragraph you are reading">reading focus</button><button id="roomyToggle" title="More space between lines and words">roomy text</button><button id="smaller" aria-label="Smaller text" title="Smaller text">A−</button><button id="bigger" aria-label="Larger text" title="Larger text">A+</button></div>
       <div class="label">Connection</div>
       <div id="net" role="status" aria-live="polite"></div>
       <div class="label">This device</div>
@@ -480,6 +557,10 @@
     <select id="hubSel" title="Which hub to look at" hidden></select>
     <select id="workspace" title="Workspace" hidden></select>
     <div class="label row">Files<button id="addBtn" class="ic" aria-label="Add files" title="Add files from this device. If the server is out of reach they are held here and sent later."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></button><input id="fileInput" type="file" multiple hidden><button id="uploadBtn" class="ic" aria-label="Upload a folder" title="Bring a folder from your computer into the hub"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h6l2 2h10v11H3z"/><path d="M12 17v-6M9.5 13.5L12 11l2.5 2.5"/></svg></button><input id="folderInput" type="file" webkitdirectory multiple hidden></div>
+    <button id="fresh" hidden title="The reader itself has changed since this page was kept on this device">A newer version of the reader is ready. Reload</button>
+    <button id="keptOnly" hidden title="The lists are showing only what is kept on this device. Press to show everything."></button>
+    <input id="find" type="search" placeholder="Find a file, or words in files and notes" aria-label="Find a file, or words in files and notes" autocomplete="off" spellcheck="false">
+    <div id="found" hidden role="status"></div>
     <div id="tree"></div>
     <div class="label">Outline</div>
     <div id="toc"></div>
