@@ -1,0 +1,5 @@
+# The live workspace: your notes, highlights, uploads and edits. Never committed.
+data/
+# Scratch copies used for testing
+data-test/
+.DS_Store

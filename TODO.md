@@ -1,5 +1,42 @@
 # Hub — to do
 
+## Current plan, in order
+
+**0. Restructure (done, except the last item)**
+- [x] Tracked starter content lives in `sample/`; the live workspace is `data/`, which git ignores. Notes, highlights, uploads and edits all happen in `data/`
+- [x] The Node server reads `data/` by default and fills it from `sample/` on first run
+- [x] Uploaded files and notes that were in git moved to `data/` and are no longer tracked
+- [ ] Remove those files from git history as well (needs the restructure committed first; rewrites history, so GitHub needs a force-push afterwards)
+
+**1. Media and partial files**
+- [x] Both servers list pictures, video and sound, know their types, and send part of a file on request (HTTP Range), which video playback and large PDFs need
+- [ ] Viewer in the reader for images and video: smooth, fits the pane, zoom to full size, button to open in a new tab / the default browser
+- [ ] Relative `<video>` and `<audio>` paths inside markdown load from storage, as images already do
+
+**2. Working without the board (before HTTPS)**
+- [x] Both servers accept a note id and time made on the device, and ignore a repeat of the same note
+- [ ] Documents kept in the browser's own storage on the device
+- [ ] Outbox: notes and highlights made while disconnected are held and sent when the board answers again
+- [ ] Adding files from the device while disconnected: held locally, uploaded on reconnect. Removing a local copy is one tap
+- [ ] Every file shows its state clearly: on this device, on the board only, or waiting to upload
+- [ ] A status line: connected / not reachable, and how many changes are waiting
+- [ ] Pictures and video kept offline, opt-in per file (after documents work)
+
+**3. HTTPS and opening with no board at all (once the ESP32 build exists)**
+- [ ] HTTPS on the board with a certificate each device trusts once
+- [ ] The trust step is part of the interface: it says what is happening, why, and whether it worked, in plain words
+- [ ] Service worker so the reader opens from the home screen with the board off
+- [ ] "Add to Home Screen" polish: manifest, icon, theme colour
+
+**4. Security**
+- [x] Links inside an HTML page never navigate the frame: other documents open in the reader, other sites open in a new browser tab
+- [x] A page that tries to leave by script or redirect is brought back once, then stopped
+- [x] Both servers refuse changes sent from another website (Origin check)
+- [ ] Optional WireGuard tunnel on the board, so only devices holding a key can reach it and traffic is encrypted. Note: this protects the connection but does not count as HTTPS to a browser, so it does not replace step 3 for offline use
+- [ ] Option to block a saved HTML page from loading anything from the internet (images, fonts, trackers)
+- [ ] Confirm on a real phone that an external link opens the default browser (could not be observed in the test browser)
+
+
 ## Next phase: highlight and annotate, Hypothesis-style
 
 **Formats**
@@ -80,13 +117,6 @@ Parse EPUB and PDF into a stable structure of pages / sections / paragraphs with
 - [ ] Where it runs: compiled to WebAssembly it could run in the browser, which keeps the ESP32 as a plain file server; on the board itself only small documents would be realistic
 - [ ] Per-person highlight files, so two readers of one document do not overwrite each other
 - Open question: how this relates to the browser-side EPUB/PDF rendering planned above. One option is the browser renders, the parser only produces the paragraph map used for anchoring
-
-## Using it like an app on a phone
-
-- [ ] "Add to Home Screen" polish: a web manifest, an icon and a theme colour, so it opens full-screen from an icon. No reinstall is needed after changes; it loads the current page from the server each time
-- [ ] Offline is the hard part on the ESP32: the browser feature that lets an installed web app work offline (a service worker) only runs on HTTPS or localhost, and the board serves plain HTTP on a local address
-- [ ] Alternative for offline reading: "export a snapshot", one self-contained HTML file holding the reader, the documents and the notes at that moment
-- [ ] Keep documents and unsent notes in the browser's own storage, and send notes to the board when it is reachable again
 
 ## Project structure
 

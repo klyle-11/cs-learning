@@ -4,12 +4,17 @@ A self-directed CS learning environment. The user works in small steps, irregula
 
 ## Layout
 
-- `FRONTPAGE.md` — landing page of the reader; its `# Heading` is the title, the rest the description. The user's to edit.
-- `docs/`, `c-lessons-project/`, `discrete-math/sources/`, root `.md` files — the material being read. Do not edit `discrete-math/sources/`.
-- `notes/notes.json` — the user's notes, written from the reader UI. A separate layer from the documents.
-- `responses/` — docs Claude writes in answer to the notes.
-- `references.md` — log of everything cited (books, sites, videos, courses) with links.
-- `hub/` — the reader (see `hub/README.md`). Run with `cd hub && npm start`, then http://localhost:4321.
+- `hub/` — the reader page and Node server; `server-cpp/` — the C++ server. Code, tracked in git.
+- `sample/` — starter content tracked in git (the C lessons, project guides, discrete-math sources and lessons). Example material to develop the reader against.
+- `data/` — the **live workspace**, ignored by git. It starts as a copy of `sample/`. The user's notes, highlights, uploads and front-page edits are here, and this is what the reader shows. Paths below are relative to `data/`.
+  - `FRONTPAGE.md` — landing page; its `# Heading` is the title. The user's to edit.
+  - `notes/notes.json` — the user's notes and highlights, written from the reader.
+  - `responses/` — docs Claude writes in answer to the notes.
+  - `references.md` — log of everything cited, with links.
+  - `discrete-math/sources/` — do not edit.
+- Run with `cd hub && npm start`, then http://localhost:4321.
+
+New learning material the user should keep goes in `data/` (so they see it) and, if it is meant as part of the starter set, in `sample/` too. Never commit anything from `data/`. For testing, work on a scratch copy (`data-test/`, also ignored), not on `data/`.
 
 ## Notes
 

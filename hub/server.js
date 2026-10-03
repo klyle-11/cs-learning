@@ -1,6 +1,7 @@
 // Local markdown reader with a notes layer. Point it at any folder of .md files
 // (source code files are listed too, shown as a code block):
-//   node server.js [folder]      (default: the folder containing hub/)
+//   node server.js [folder]      (default: ../data, the live workspace, which is
+//                                 not in git; first run fills it from ../sample)
 // Per-folder settings live in <folder>/hub.json, notes in <folder>/notes/notes.json.
 const http = require('http');
 const fs = require('fs');
@@ -9,7 +10,12 @@ const path = require('path');
 // HOME is the folder the hub was started on. Uploaded folders can be opened as
 // workspaces of their own; those are kept in hub/workspaces/ and ROOT points at
 // whichever one is open.
-const HOME = path.resolve(process.argv[2] || process.env.HUB_ROOT || path.join(__dirname, '..'));
+const DATA = path.join(__dirname, '..', 'data'), SAMPLE = path.join(__dirname, '..', 'sample');
+const HOME = path.resolve(process.argv[2] || process.env.HUB_ROOT || DATA);
+// The live workspace starts as a copy of the sample content that ships with the code.
+if (HOME === DATA && !fs.existsSync(DATA)) {
+  if (fs.existsSync(SAMPLE)) fs.cpSync(SAMPLE, DATA, { recursive: true }); else fs.mkdirSync(DATA, { recursive: true });
+}
 const WORKSPACES = path.join(__dirname, 'workspaces');
 const CURRENT = path.join(WORKSPACES, '.current');
 const MAX_UPLOAD = 50 * 1024 * 1024;
@@ -18,7 +24,12 @@ const FRONT = 'FRONTPAGE.md';
 const PORT = process.env.PORT || 4321;
 const SKIP_DIRS = new Set(['node_modules', 'notes']);
 const CODE = new Set(['.c', '.h', '.cpp', '.hpp', '.cc', '.py', '.js', '.ts', '.rs', '.go', '.java', '.sh']);
-const MIME = { '.html': 'text/html', '.htm': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.mjs': 'text/javascript', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.pdf': 'application/pdf', '.woff2': 'font/woff2' };
+const MIME = { '.html': 'text/html', '.htm': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.mjs': 'text/javascript', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.pdf': 'application/pdf', '.woff2': 'font/woff2', '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.ogv': 'video/ogg', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.wav': 'audio/wav', '.ogg': 'audio/ogg' };
+// Pictures, video and sound are listed too; the reader shows them in a viewer.
+const MEDIA = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.mp4', '.m4v', '.mov', '.webm', '.ogv', '.mp3', '.m4a', '.wav', '.ogg']);
+const isMedia = (name) => MEDIA.has(path.extname(name).toLowerCase());
+const MAX_RANGE = 4 * 1024 * 1024; // most bytes sent in answer to one partial request
+const withCharset = (type) => (/^text\/|javascript|json/.test(type) ? type + '; charset=utf-8' : type);
 const isHtml = (name) => /\.html?$/.test(name);
 const readable = (name) => name.endsWith('.md') || isHtml(name) || CODE.has(path.extname(name)) || name === 'Makefile';
 
@@ -83,7 +94,7 @@ function listDocs() {
       if (e.isDirectory()) {
         if (SKIP_DIRS.has(e.name) || abs === __dirname) continue;
         walk(abs, r);
-      } else if (readable(e.name)) {
+      } else if (readable(e.name) || isMedia(e.name)) {
         docs.push({ path: r, group: rel, title: titleOf(abs), side: matches(r, cfg.side), front: r === FRONT });
       }
     }
@@ -92,7 +103,7 @@ function listDocs() {
 }
 
 function send(res, status, body, type = 'application/json') {
-  res.writeHead(status, { 'Content-Type': type + '; charset=utf-8', 'Cache-Control': 'no-store' });
+  res.writeHead(status, { 'Content-Type': withCharset(type), 'Cache-Control': 'no-store' });
   res.end(type === 'application/json' ? JSON.stringify(body) : body);
 }
 
@@ -180,7 +191,21 @@ const server = http.createServer(async (req, res) => {
     if (p.startsWith('/raw/')) {
       const abs = path.resolve(ROOT, decodeURIComponent(p.slice(5)));
       if (!abs.startsWith(ROOT + path.sep) || !fs.existsSync(abs) || !fs.statSync(abs).isFile()) return send(res, 404, { error: 'no such file' });
-      return send(res, 200, fs.readFileSync(abs), MIME[path.extname(abs).toLowerCase()] || 'text/plain');
+      // Sent as a stream, and in pieces when asked (Range), which is what lets a
+      // browser play and seek video and read a large PDF a part at a time.
+      const size = fs.statSync(abs).size;
+      const head = { 'Content-Type': withCharset(MIME[path.extname(abs).toLowerCase()] || 'text/plain'), 'Cache-Control': 'no-store', 'Accept-Ranges': 'bytes' };
+      const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+      if (range && (range[1] || range[2])) {
+        const start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]));
+        let end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+        if (start >= size || start > end) { res.writeHead(416, { ...head, 'Content-Range': `bytes */${size}`, 'Content-Length': 0 }); return res.end(); }
+        end = Math.min(end, start + MAX_RANGE - 1);
+        res.writeHead(206, { ...head, 'Content-Range': `bytes ${start}-${end}/${size}`, 'Content-Length': end - start + 1 });
+        return fs.createReadStream(abs, { start, end }).pipe(res);
+      }
+      res.writeHead(200, { ...head, 'Content-Length': size });
+      return fs.createReadStream(abs).pipe(res);
     }
     if (p === '/api/events') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
@@ -254,15 +279,21 @@ const server = http.createServer(async (req, res) => {
       const b = await readBody(req);
       // A highlight is a note with a quote and no text yet.
       if (!b.doc || (!b.text && !b.quote)) return send(res, 400, { error: 'doc and text or quote required' });
+      // A note written while the board was out of reach arrives later with the id
+      // and time it was given on the device. Sending the same one twice is harmless.
+      const existing = readNotes().find((n) => n.id === b.id);
+      if (existing) return send(res, 200, existing);
+      const ownId = typeof b.id === 'string' && /^[A-Za-z0-9_-]{6,40}$/.test(b.id);
+      const ownTs = typeof b.ts === 'string' && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?Z$/.test(b.ts);
       const note = {
-        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        id: ownId ? b.id : Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
         doc: b.doc,
         heading: b.heading || '',
         headingText: b.headingText || '',
         quote: b.quote || '',
         type: b.type || '',
         text: b.text || '',
-        ts: new Date().toISOString(),
+        ts: ownTs ? b.ts : new Date().toISOString(),
         status: b.text ? 'open' : 'highlight',
       };
       const notes = readNotes();
@@ -270,7 +301,7 @@ const server = http.createServer(async (req, res) => {
       writeNotes(notes);
       return send(res, 200, note);
     }
-    const m = p.match(/^\/api\/notes\/([\w]+)$/);
+    const m = p.match(/^\/api\/notes\/([\w-]+)$/);
     if (m) {
       const notes = readNotes();
       const i = notes.findIndex((n) => n.id === m[1]);

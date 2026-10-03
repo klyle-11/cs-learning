@@ -1,7 +1,7 @@
 // The hub's server, in C++: the same HTTP API as hub/server.js (see ../API.md),
 // serving the same hub/index.html.
 //
-//   hubd [folder] [--port 4321] [--host 127.0.0.1] [--www <folder>/hub] [--profile desktop|small|esp32]
+//   hubd <folder> [--port 4321] [--host 127.0.0.1] [--www <folder>/hub] [--profile desktop|small|esp32]
 //
 // File access goes through dirent/stat/stdio only, which ESP-IDF maps onto an
 // SD card, so these handlers are meant to move to the ESP32 unchanged.
@@ -130,12 +130,20 @@ static bool readable(const string &name) {
   return ends_with(name, ".md") || is_html(name) || name == "Makefile" ||
          std::find(CODE_EXT.begin(), CODE_EXT.end(), ext_of(name)) != CODE_EXT.end();
 }
+// Pictures, video and sound are listed too; the reader shows them in a viewer.
+static bool is_media(const string &name) {
+  static const Strings media = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".mp4", ".m4v", ".mov", ".webm", ".ogv", ".mp3", ".m4a", ".wav", ".ogg"};
+  return std::find(media.begin(), media.end(), lower(ext_of(name))) != media.end();
+}
+static const size_t MAX_RANGE = 4u << 20; // most bytes sent in answer to one partial request
 static const char *mime_of(const string &name) {
   static const std::pair<const char *, const char *> types[] = {
       {".html", "text/html"}, {".htm", "text/html"}, {".css", "text/css"}, {".js", "text/javascript"},
       {".mjs", "text/javascript"}, {".json", "application/json"}, {".svg", "image/svg+xml"}, {".png", "image/png"},
       {".jpg", "image/jpeg"}, {".jpeg", "image/jpeg"}, {".gif", "image/gif"}, {".webp", "image/webp"},
-      {".pdf", "application/pdf"}, {".woff2", "font/woff2"}};
+      {".pdf", "application/pdf"}, {".woff2", "font/woff2"}, {".mp4", "video/mp4"}, {".m4v", "video/mp4"},
+      {".mov", "video/quicktime"}, {".webm", "video/webm"}, {".ogv", "video/ogg"}, {".mp3", "audio/mpeg"},
+      {".m4a", "audio/mp4"}, {".wav", "audio/wav"}, {".ogg", "audio/ogg"}};
   string ext = lower(ext_of(name));
   for (const auto &t : types) if (ext == t.first) return t.second;
   return "text/plain";
@@ -331,7 +339,7 @@ static void walk(const string &dir, const string &rel, const Strings &ignore, co
     if (is_dir(abs)) {
       if (name == "node_modules" || name == "notes" || abs == WWW) continue;
       walk(abs, r, ignore, side, out);
-    } else if (readable(name)) {
+    } else if (readable(name) || is_media(name)) {
       cJSON *doc = cJSON_CreateObject();
       cJSON_AddStringToObject(doc, "path", r.c_str());
       cJSON_AddStringToObject(doc, "group", rel.c_str());
@@ -487,7 +495,51 @@ static http::Response route(http::Request &req) {
   if (starts_with(p, "/raw/")) {
     Strings parts;
     if (!clean_parts(p.substr(5), parts, false)) return http::error(404, "not found");
-    return file_response(ROOT + "/" + join(parts), mime_of(parts.back()));
+    string abs = ROOT + "/" + join(parts);
+    struct stat st;
+    if (::stat(abs.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) return http::error(404, "no such file");
+    const unsigned long long size = static_cast<unsigned long long>(st.st_size);
+    http::Response r;
+    r.type = mime_of(parts.back());
+    r.extra = "Accept-Ranges: bytes\r\n";
+    // "Range: bytes=a-b", "bytes=a-" or "bytes=-n" (the last n): send that part
+    // only. This is what lets a browser play and seek video, and read a large
+    // PDF a piece at a time.
+    auto rh = req.headers.find("range");
+    unsigned long long start = 0, end = size == 0 ? 0 : size - 1;
+    bool partial = false;
+    if (rh != req.headers.end() && starts_with(rh->second, "bytes=")) {
+      string spec = rh->second.substr(6);
+      size_t dash = spec.find('-');
+      string a = dash == string::npos ? "" : spec.substr(0, dash), b = dash == string::npos ? "" : spec.substr(dash + 1);
+      auto digits = [](const string &t) { return !t.empty() && t.size() < 19 && std::all_of(t.begin(), t.end(), [](unsigned char c) { return std::isdigit(c); }); };
+      if (dash != string::npos && (a.empty() || digits(a)) && (b.empty() || digits(b)) && !(a.empty() && b.empty())) {
+        partial = true;
+        if (a.empty()) { unsigned long long n = std::stoull(b); start = n >= size ? 0 : size - n; }
+        else { start = std::stoull(a); if (!b.empty()) end = std::min(std::stoull(b), size == 0 ? 0 : size - 1); }
+        if (size == 0 || start >= size || start > end) {
+          r.status = 416;
+          r.extra += "Content-Range: bytes */" + std::to_string(size) + "\r\n";
+          return r;
+        }
+        end = std::min(end, start + MAX_RANGE - 1);
+      }
+    }
+    std::ifstream f(abs, std::ios::binary);
+    if (!f) return http::error(404, "no such file");
+    if (partial) {
+      r.status = 206;
+      r.extra += "Content-Range: bytes " + std::to_string(start) + "-" + std::to_string(end) + "/" + std::to_string(size) + "\r\n";
+      r.body.resize(static_cast<size_t>(end - start + 1));
+      f.seekg(static_cast<std::streamoff>(start));
+      f.read(&r.body[0], static_cast<std::streamsize>(r.body.size()));
+      r.body.resize(static_cast<size_t>(f.gcount()));
+    } else {
+      std::ostringstream ss;
+      ss << f.rdbuf();
+      r.body = ss.str();
+    }
+    return r;
   }
 
   // The event stream: answer the headers here and keep the socket for watch_loop.
@@ -595,15 +647,23 @@ static http::Response route(http::Request &req) {
     if (doc.empty() || (text.empty() && quote.empty())) return http::error(400, "doc and text or quote required");
     std::lock_guard<std::mutex> g(store_lock);
     Json notes(read_notes());
+    // A note written while the board was out of reach arrives later with the id
+    // and time it was given on the device. Sending the same one twice is harmless.
+    string own_id = str_of(body.p, "id"), own_ts = str_of(body.p, "ts");
+    const cJSON *seen;
+    cJSON_ArrayForEach(seen, notes.p) if (!own_id.empty() && str_of(seen, "id") == own_id) return json_response(seen);
+    bool id_ok = own_id.size() >= 6 && own_id.size() <= 40 && std::all_of(own_id.begin(), own_id.end(), [](unsigned char c) { return std::isalnum(c) || c == '_' || c == '-'; });
+    bool ts_ok = own_ts.size() >= 20 && own_ts.size() <= 30 && own_ts.back() == 'Z' && own_ts[4] == '-' && own_ts[7] == '-' && own_ts[10] == 'T' && own_ts[13] == ':' && own_ts[16] == ':' &&
+                 std::all_of(own_ts.begin(), own_ts.end() - 1, [](unsigned char c) { return std::isdigit(c) || c == '-' || c == 'T' || c == ':' || c == '.'; });
     cJSON *note = cJSON_CreateObject();
-    cJSON_AddStringToObject(note, "id", new_id().c_str());
+    cJSON_AddStringToObject(note, "id", id_ok ? own_id.c_str() : new_id().c_str());
     cJSON_AddStringToObject(note, "doc", doc.c_str());
     cJSON_AddStringToObject(note, "heading", str_of(body.p, "heading").c_str());
     cJSON_AddStringToObject(note, "headingText", str_of(body.p, "headingText").c_str());
     cJSON_AddStringToObject(note, "quote", quote.c_str());
     cJSON_AddStringToObject(note, "type", str_of(body.p, "type").c_str());
     cJSON_AddStringToObject(note, "text", text.c_str());
-    cJSON_AddStringToObject(note, "ts", now_iso().c_str());
+    cJSON_AddStringToObject(note, "ts", ts_ok ? own_ts.c_str() : now_iso().c_str());
     cJSON_AddStringToObject(note, "status", text.empty() ? "highlight" : "open");
     cJSON_AddItemToArray(notes.p, note);
     if (!write_notes(notes.p)) return http::error(500, "could not save");
@@ -680,7 +740,8 @@ int main(int argc, char **argv) {
   char resolved[4096];
   if (!::realpath(folder.c_str(), resolved) || !is_dir(resolved)) { std::fprintf(stderr, "not a folder: %s\n", folder.c_str()); return 1; }
   ROOT = resolved;
-  if (www.empty()) www = ROOT + "/hub";
+  // The page lives beside the server (../hub from server-cpp/), or inside the folder being served.
+  if (www.empty()) www = is_file(ROOT + "/hub/index.html") ? ROOT + "/hub" : is_file("../hub/index.html") ? "../hub" : "hub";
   if (!::realpath(www.c_str(), resolved) || !is_file(string(resolved) + "/index.html")) { std::fprintf(stderr, "no index.html in %s\n", www.c_str()); return 1; }
   WWW = resolved;
   if (port <= 0 || port > 65535) { std::fprintf(stderr, "bad port\n"); return 1; }

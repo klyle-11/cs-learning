@@ -5,8 +5,6 @@
     "responses/"
   ],
   "ignore": [
-    "CLAUDE.md",
-    "build/",
-    "server-cpp/"
+    "CLAUDE.md"
   ]
 }

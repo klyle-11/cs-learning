@@ -3,10 +3,12 @@
 Reads any folder of `.md` files, however deeply nested. `.html` files are rendered as they are, in a frame. Source files (`.c`, `.h`, `.cpp`, `.py`, … and `Makefile`) are listed too and shown as code. Nothing in here is specific to one topic.
 
 ```
-cd hub && npm install && npm start        # http://localhost:4321, reads the folder containing hub/
+cd hub && npm install && npm start        # http://localhost:4321, reads ../data
 node hub/server.js path/to/other/folder   # or point it somewhere else
 PORT=4400 npm start                       # run two environments at once
 ```
+
+`../data` is the live workspace and is not in git. The first run creates it as a copy of `../sample`, the starter content that is. Delete `data/` to start again from the samples.
 
 ## Using it
 

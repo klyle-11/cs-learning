@@ -36,6 +36,7 @@ struct Response {
   int status = 200;
   std::string type = "application/json";
   std::string body;
+  std::string extra;  // further header lines, each ending in \r\n
   bool hold = false; // the handler wrote its own response and keeps the socket (event stream)
 };
 
@@ -45,6 +46,8 @@ using BodyLimit = std::function<size_t(const std::string &path)>;
 inline const char *reason(int status) {
   switch (status) {
     case 200: return "OK";
+    case 206: return "Partial Content";
+    case 416: return "Range Not Satisfiable";
     case 400: return "Bad Request";
     case 403: return "Forbidden";
     case 404: return "Not Found";
@@ -85,7 +88,9 @@ inline std::string url_decode(const std::string &in, bool plus_is_space) {
 
 inline void write_response(int fd, const Response &r) {
   std::string head = "HTTP/1.1 " + std::to_string(r.status) + " " + reason(r.status) + "\r\n";
-  head += "Content-Type: " + r.type + "; charset=utf-8\r\n";
+  bool text = r.type.compare(0, 5, "text/") == 0 || r.type.find("javascript") != std::string::npos || r.type.find("json") != std::string::npos;
+  head += "Content-Type: " + r.type + (text ? "; charset=utf-8" : "") + "\r\n";
+  head += r.extra;
   head += "Content-Length: " + std::to_string(r.body.size()) + "\r\n";
   head += "Cache-Control: no-store\r\nConnection: close\r\n\r\n";
   if (send_all(fd, head)) send_all(fd, r.body);
