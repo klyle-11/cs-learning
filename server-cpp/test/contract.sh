@@ -6,12 +6,22 @@
 #   ./test/contract.sh            (from server-cpp/, after `make`)
 #   UPDATE=1 ./test/contract.sh   record the answers as the new expected ones,
 #                                 after reading the differences and meaning them
+#   HUBD=build/hubd-own ./test/contract.sh   test another copy of the server
+#                                 than ./hubd ("make test-own" builds and tests that one)
 set -u
 cd "$(dirname "$0")/.."
 REPO="$(cd .. && pwd)"
 WORK="$(mktemp -d)"
 CPP_PORT=4412
-case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) EXE=.exe ;; *) EXE= ;; esac
+# The folder's real path as the server reports it. On Windows that is the
+# Windows form (C:/...), not the shell's own (/tmp/...).
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) EXE=.exe; real() { cygpath -m "$(cd "$1" && pwd -P)"; } ;;
+  *) EXE=; real() { (cd "$1" && pwd -P); } ;;
+esac
+# Python: on Windows "python3" can be the Store's placeholder, which runs nothing.
+PY=python3; "$PY" -c '' 2>/dev/null || PY=python
+export PYTHONUTF8=1   # Windows Python would otherwise read the answers in the system's code page
 trap 'kill $CPP_PID 2>/dev/null; wait 2>/dev/null; rm -rf "$WORK"' EXIT
 
 fixture() {
@@ -19,13 +29,38 @@ fixture() {
   printf '# Fixture Title\n\nDescription.\n' > "$1/FRONTPAGE.md"
   printf '# First\n\nBody one.\n' > "$1/a/1-doc.md"
   printf '# Tenth\n' > "$1/a/10-doc.md"
+  printf '# Same  Words\n\nA *first* paragraph, with a [link](http://example.com/x) &amp; more.\n\n- item one\n- item one\n\n```c\nint x = 1;\n```\n\n| h1 | h2 |\n|----|----|\n| c1 | c2 |\n' > "$1/a/blocks.md"
+  printf '<html><head><title>T</title><style>p { color: red }</style></head><body><h1>Same Words</h1><p>A <em>first</em> paragraph, with a <a href="http://example.com/x">link</a> &amp; more.</p><ul><li>item one</li><li>item one</li></ul><pre><code>int x = 1;\n</code></pre><table><tr><th>h1</th><th>h2</th></tr><tr><td>c1</td><td>c2</td></tr></table><script>var hidden = 1;</script><!-- hidden too --></body></html>\n' > "$1/b/blocks.html"
   printf 'no heading here\n' > "$1/a/2-doc.md"
   printf '<html><head><title> A Page </title></head><body><h1>Hi</h1></body></html>\n' > "$1/b/page.html"
   printf 'int main(void) { return 0; }\n' > "$1/code.c"
+  # A small book: two pages in reading order, a contents that names them, a picture. One page is written twice over so that it packs.
+  "$PY" - "$1/b/book.epub" <<'PYEOF'
+import sys, zipfile
+page = '<?xml version="1.0" encoding="utf-8"?>\n<html xmlns="http://www.w3.org/1999/xhtml"><head><title>%s</title></head><body><h1>%s</h1>%s</body></html>\n'
+with zipfile.ZipFile(sys.argv[1], 'w') as z:
+    z.writestr('mimetype', 'application/epub+zip', zipfile.ZIP_STORED)
+    z.writestr('META-INF/container.xml', '<container><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>', zipfile.ZIP_DEFLATED)
+    z.writestr('OEBPS/content.opf', '<package><metadata><dc:title>A Small Book</dc:title></metadata><manifest>'
+               '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/><item id="two" href="text/ch2.xhtml" media-type="application/xhtml+xml"/>'
+               '<item id="one" href="text/ch1.xhtml" media-type="application/xhtml+xml"/><item id="dot" href="img/dot.png" media-type="image/png"/>'
+               '</manifest><spine toc="ncx"><itemref idref="one"/><itemref idref="two"/><itemref idref="missing"/></spine></package>', zipfile.ZIP_DEFLATED)
+    z.writestr('OEBPS/toc.ncx', '<ncx><docTitle><text>A Small Book</text></docTitle><navMap>'
+               '<navPoint><navLabel><text>The  First &amp; Best</text></navLabel><content src="text/ch1.xhtml#top"/></navPoint>'
+               '</navMap><pageList><pageTarget><navLabel><text>ii</text></navLabel><content src="text/ch2.xhtml"/></pageTarget></pageList></ncx>', zipfile.ZIP_DEFLATED)
+    z.writestr('OEBPS/text/ch1.xhtml', page % ('One', 'Same Words', '<p>A <em>first</em> paragraph, with a <a href="ch2.xhtml">link</a> &amp; more.</p>' + '<p>item one</p>' * 2 + '<p><img src="../img/dot.png" alt=""/></p>'), zipfile.ZIP_DEFLATED)
+    z.writestr('OEBPS/text/ch2.xhtml', page % ('Two', 'Second', '<p>Not packed.</p>'), zipfile.ZIP_STORED)
+    z.writestr('OEBPS/img/dot.png', b'not really a png either', zipfile.ZIP_STORED)
+PYEOF
   printf '# ignored\n' > "$1/CLAUDE.md"
   printf '# Refs\n' > "$1/references.md"
   printf 'secret\n' > "$1/.hidden.md"
-  printf '{\n  "title": "From hub.json",\n  "side": ["references.md"],\n  "ignore": ["CLAUDE.md"]\n}\n' > "$1/hub.json"
+  printf '<html><body><script>document.title = "ran"</script></body></html>\n' > "$1/b/app.html"
+  printf '{"items":[{"src":"https:\\/\\/img.example\\/a%%20b.JPG?x=1\\u0026y=2","page":"https://site.example/post/1"},{"src":"https://img.example/a%%20b.JPG?x=1&y=2"}]}\nSee https://v.example/clip.mp4, and (https://pbs.example/media/abc?format=png). Not http://plain.example/x.jpg\n<b>"https://x.example/a"b</b>\n' > "$1/b/saved.json"
+  printf 'No addresses in this one.\n' > "$1/b/plain.txt"
+  printf '[{"mediaUrl":"https://i.example/thumb.jpg?x=1","postUrl":"https://site.example/search","linkUrl":"https://site.example/watch?v=1&t=2","title":"A <Saved> Video","isVideo":false,"directUrls":["https://cdn.example/videoplayback?itag=401&mime=video%%2Fmp4","https://cdn.example/videoplayback?itag=251&mime=audio%%2Fwebm"]},{"nested":{"mediaUrl":"https://i.example/pic.png","ytDlpUrls":[]}},{"directUrls":["https://c.example/loop.webm"]},{"mediaUrl":"https://t.example/small.webm","isVideo":true,"title":"Clip as thumbnail","linkUrl":"https://site.example/item","directUrls":["https://d.example/full.mp4"]},{"mediaUrl":"https://t.example/only.webm","isVideo":true},{"thumbnailUrl":"https://t.example/new.jpg","sourcePage":"https://site.example/found","mediaPage":"https://site.example/leads","title":"New names","directMedia":["https://d.example/new.mp4"]},{"ThumbnailURL":"https://t.example/case.jpg","directMedia":"https://d.example/one.mp4"},{"postUrl":"https://site.example/untitled"}]\n' > "$1/b/items.json"
+  printf '<!DOCTYPE NETSCAPE-Bookmark-file-1>\n<TITLE>Bookmarks</TITLE>\n<DL><p>\n<DT><A HREF="https://v.example/a.mp4" ADD_DATE="1">A clip &amp; more</A>\n<DT><A HREF="https://site.example/page">A page</A>\n<DT><A HREF="http://plain.example/">Not kept</A>\n</DL>\n' > "$1/b/marks.html"
+  printf '{\n  "title": "From hub.json",\n  "side": ["references.md"],\n  "ignore": ["CLAUDE.md"],\n  "scripts": ["b/app.html", "page.html"]\n}\n' > "$1/hub.json"
   echo '[]' > "$1/notes/notes.json"
   printf '0123456789abcdefghij' > "$1/b/clip.mp4"
   printf 'not really a png' > "$1/b/pic.png"
@@ -36,7 +71,7 @@ fixture "$WORK/cpp/ws"
 # It is told to ask even this machine to pair, so the requests below prove
 # that nothing is answered without a paired device's token.
 mkdir -p "$WORK/cpp/workspaces"
-./hubd$EXE "$WORK/cpp/ws" --port $CPP_PORT --www "$REPO/hub" --state "$WORK/cpp/state" --workspaces "$WORK/cpp/workspaces" --pair-local > "$WORK/cpp.log" 2>&1 &
+"${HUBD:-./hubd$EXE}" "$WORK/cpp/ws" --port $CPP_PORT --www "$REPO/hub" --state "$WORK/cpp/state" --workspaces "$WORK/cpp/workspaces" --pair-local > "$WORK/cpp.log" 2>&1 &
 CPP_PID=$!
 # wait until it answers (the memory-checked build starts slowly)
 for port in $CPP_PORT; do
@@ -47,13 +82,14 @@ code_in() { grep -o 'pairing code: [A-Z0-9-]*' "$1" | tail -1 | awk '{print $3}'
 # Print "status body" with the parts that legitimately differ (folder path,
 # ids, timestamps) replaced, and JSON keys sorted.
 norm() {
-  python3 -c '
+  "$PY" -c '
 import sys, json, re
+sys.stdout.reconfigure(newline="\n")   # Windows Python would end lines with CR LF
 status, root = sys.argv[1], sys.argv[2]
 raw = sys.stdin.read()
 def scrub(v):
     if isinstance(v, dict):
-        return {k: ("<" + k + ">" if k in ("id", "ts", "code", "created", "seen", "used", "free") else scrub(x)) for k, x in v.items()}
+        return {k: ("<" + k + ">" if k in ("id", "ts", "code", "created", "seen", "used", "free", "changed") else scrub(x)) for k, x in v.items()}
     if isinstance(v, list): return [scrub(x) for x in v]
     if isinstance(v, str): return v.replace(root, "<root>")
     return v
@@ -109,6 +145,7 @@ run() { # run <port> <root> <log>: the request script
   req "own page fetches"        status-only -H 'Sec-Fetch-Site: same-origin' "$B/api/notes"
   hreq "page headers"           "$B/"
   hreq "html file headers"      "$B/raw/b/page.html"
+  hreq "page allowed its scripts" "$B/raw/b/app.html"
   hreq "svg file headers"       "$B/raw/b/drawing.svg"
   hreq "api headers"            "$B/api/doc?path=a/1-doc.md"
   head -c 1100000 /dev/zero | tr '\0' 'a' > "$WORK/big"
@@ -142,7 +179,39 @@ run() { # run <port> <root> <log>: the request script
   req "own id is usable"      body -X PUT "${J[@]}" -d '{"text":"edited by its own id"}' "$B/api/notes/made-on-phone-1"
   req "note with bad id"      body -X POST "${J[@]}" -d '{"id":"../x","ts":"yesterday","doc":"a/1-doc.md","text":"bad id and time"}' "$B/api/notes"
   req "note bad"              body -X POST "${J[@]}" -d '{"doc":"a/1-doc.md"}' "$B/api/notes"
-  ID="$(curl -s -b "$JAR" "$B/api/notes" | python3 -c 'import sys,json; print([n for n in json.load(sys.stdin) if n["status"] == "highlight"][0]["id"])')"
+  req "highlight with anchor" body -X POST "${J[@]}" -d '{"id":"anchored-1","ts":"2026-01-02T03:04:05.678Z","doc":"a/1-doc.md","quote":"one","anchor":{"block":"00ff00ff00ff00ff","nth":1,"start":4,"before":"Body","after":".","extra":"dropped"}}' "$B/api/notes"
+  req "anchor not hex"        body -X POST "${J[@]}" -d '{"id":"anchored-2","ts":"2026-01-02T03:04:05.678Z","doc":"a/1-doc.md","quote":"one","anchor":{"block":"../x","start":-3}}' "$B/api/notes"
+  req "anchor replaced"       body -X PUT "${J[@]}" -d '{"quote":"Body","anchor":{"block":"abc","start":0}}' "$B/api/notes/anchored-1"
+  req "quote without anchor"  body -X PUT "${J[@]}" -d '{"quote":"Body one"}' "$B/api/notes/anchored-1"
+  req "anchored note gone"    body -X DELETE "$B/api/notes/anchored-1"
+  req "anchored note 2 gone"  body -X DELETE "$B/api/notes/anchored-2"
+  req "blocks of markdown"    body "$B/api/blocks?path=a/blocks.md"
+  req "blocks of a page"      body "$B/api/blocks?path=b/blocks.html"
+  req "blocks of code"        body "$B/api/blocks?path=code.c"
+  req "blocks, no such doc"   body "$B/api/blocks?path=a/none.md"
+  req "blocks, not a doc"     body "$B/api/blocks?path=b/pic.png"
+  req "blocks, traversal"     body "$B/api/blocks?path=../x.md"
+  req "links in a file"       body "$B/api/links?path=b/saved.json"
+  # The nonce is new each time: it is left out of what is compared.
+  hreq "links as a gallery"            "$B/cards/b/saved.json" | sed -E 's/nonce-[0-9a-f]+/nonce-N/; s/nonce="[0-9a-f]+"/nonce="N"/'
+  hreq "saved items as a gallery"      "$B/cards/b/items.json?paper=101010&ink=eeeeee&accent=zzzzzz&rule=abc&size=999" | sed -E 's/nonce-[0-9a-f]+/nonce-N/; s/nonce="[0-9a-f]+"/nonce="N"/'
+  req "saved items in a file" body "$B/api/links?path=b/items.json"
+  req "bookmarks"             body "$B/api/links?path=b/marks.html"
+  req "links, none in it"     body "$B/api/links?path=b/plain.txt"
+  req "links, not that kind"  body "$B/api/links?path=a/1-doc.md"
+  req "links, no such file"   body "$B/api/links?path=b/none.txt"
+  req "cards, hidden"         body "$B/cards/.hidden.txt"
+  req "book page"             body "$B/api/doc?path=b/book.epub/OEBPS/text/ch1.xhtml"
+  hreq "book page, raw"                "$B/raw/b/book.epub/OEBPS/text/ch1.xhtml"
+  req "book page, not packed" body "$B/raw/b/book.epub/OEBPS/text/ch2.xhtml"
+  hreq "book picture"                  "$B/raw/b/book.epub/OEBPS/img/dot.png"
+  req "book page blocks"      body "$B/api/blocks?path=b/book.epub/OEBPS/text/ch1.xhtml"
+  req "book, no such page"    body "$B/api/doc?path=b/book.epub/OEBPS/text/none.xhtml"
+  req "book, not a page"      body "$B/api/doc?path=b/book.epub/OEBPS/content.opf"
+  req "book, no such file"    body "$B/raw/b/book.epub/OEBPS/none.png"
+  req "book, hidden name"     body "$B/raw/b/book.epub/.secret"
+  req "not a book"            body "$B/raw/a/1-doc.md/x.xhtml"
+  ID="$(curl -s -b "$JAR" "$B/api/notes" | "$PY" -c 'import sys,json; print([n for n in json.load(sys.stdin) if n["status"] == "highlight"][0]["id"])' | tr -d '\r')"
   req "highlight gets text"   body -X PUT "${J[@]}" -d '{"text":"now annotated ünïcode"}' "$B/api/notes/$ID"
   req "note retype"           body -X PUT "${J[@]}" -d '{"type":"unclear","ignored":"x"}' "$B/api/notes/$ID"
   req "notes list"            body "$B/api/notes"
@@ -235,7 +304,7 @@ run() { # run <port> <root> <log>: the request script
   req "workspaces listed"         body "$B/api/workspaces"
   req "switch to missing"         body -X POST "${J[@]}" -d '{"root":"/nowhere"}' "$B/api/workspace"
   req "switch with no root"       body -X POST "${J[@]}" -d '{}' "$B/api/workspace"
-  WSROOT="$(curl -s -b "$JAR" "$B/api/workspaces" | python3 -c 'import sys,json; print([w["root"] for w in json.load(sys.stdin) if w["name"]=="My Space"][0])')"
+  WSROOT="$(curl -s -b "$JAR" "$B/api/workspaces" | "$PY" -c 'import sys,json; print([w["root"] for w in json.load(sys.stdin) if w["name"]=="My Space"][0])' | tr -d '\r')"
   req "switch to own"             body -X POST "${J[@]}" -d "{\"root\":\"$WSROOT\"}" "$B/api/workspace"
   req "config in own"             body "$B/api/config"
   req "docs in own"               body "$B/api/docs"
@@ -244,17 +313,17 @@ run() { # run <port> <root> <log>: the request script
   req "switch home"               body -X POST "${J[@]}" -d "{\"root\":\"$R\"}" "$B/api/workspace"
   req "notes at home"             status-only "$B/api/notes"
   req "config at home"            body "$B/api/config"
-  ID="$(curl -s -b "$JAR" "$B/api/devices" | python3 -c 'import sys,json; print(json.load(sys.stdin)[0]["id"])')"
+  ID="$(curl -s -b "$JAR" "$B/api/devices" | "$PY" -c 'import sys,json; print(json.load(sys.stdin)[0]["id"])' | tr -d '\r')"
   req "unpair"                  body -X DELETE "$B/api/devices/$ID"
   req "after unpairing"         body "$B/api/config"
   req "docs after changes"    body "$B/api/docs"
   req "workspaces"            body "$B/api/workspaces"
 }
 
-run $CPP_PORT "$(cd "$WORK/cpp/ws" && pwd -P)" "$WORK/cpp.log" > "$WORK/cpp.out"
+run $CPP_PORT "$(real "$WORK/cpp/ws")" "$WORK/cpp.log" > "$WORK/cpp.out"
 # macOS temp folders are reached through a symlink; the server reports the real path.
 # (written to a second file: "sed -i" takes different arguments on macOS and elsewhere)
-sed "s|$(cd "$WORK/cpp/ws" && pwd -P)|<root>|g; s|$(cd "$WORK/cpp/workspaces" && pwd -P)|<workspaces>|g" "$WORK/cpp.out" > "$WORK/cpp.norm" && mv "$WORK/cpp.norm" "$WORK/cpp.out"
+sed "s|$(real "$WORK/cpp/ws")|<root>|g; s|$(real "$WORK/cpp/workspaces")|<workspaces>|g" "$WORK/cpp.out" > "$WORK/cpp.norm" && mv "$WORK/cpp.norm" "$WORK/cpp.out"
 
 EXPECTED="test/expected.txt"
 TOTAL=$(grep -c '^## ' "$WORK/cpp.out")

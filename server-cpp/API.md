@@ -14,6 +14,34 @@ All JSON bodies are UTF-8. Errors are `{ "error": "message" }` with a 4xx or 5xx
 | `GET /vendor/marked.js`, `/vendor/highlight.js`, `/vendor/purify.js` | the three libraries the page loads |
 | `GET /raw/<path>` | the file as it is on disk, with a content type from its extension. 404 if missing |
 | `GET /api/doc?path=<path>` | the text of a markdown, HTML or source file. 404 if missing or not a readable type |
+| `GET /api/blocks?path=<path>` | `{ "blocks": [{ "hash", "nth", "len" }] }`: the document as a row of blocks (paragraph, heading, list item, table cell, block of code), in order. `hash` is FNV-1a (64 bits, 16 hex digits) of the block's text with everything but letters and digits removed and ASCII letters lowered; `nth` counts earlier blocks with the same hash; `len` is the folded text's length in bytes. Blocks with no letters or digits are left out. A source file is one block. 404 as for `/api/doc`; 413 for a file too large to hold in memory (16 MB on a computer, 1 MB on the board). See `src/anchor.hpp` |
+
+## Pages that may run their own scripts
+
+`hub.json` may hold `"scripts": ["folder/page.html"]`: HTML pages, by exact path, that are small programs of the user's own. `GET /raw/<such a page>` is answered with a policy that allows its inline scripts, files picked or dropped into it, and pictures, media and connections over `https:`, inside a sandbox without `allow-same-origin`. Every other file under `/raw/` keeps the policy with no scripts. `GET /api/config` passes the list through, and the reader frames such a page to match; `PUT /api/config` does not write it.
+
+## Files of saved links
+
+A `.txt`, `.json`, `.jsonl`, `.ndjson` or `.csv` file is listed (with `"links": true`) only if an `https://` address is found in its first 64 KB; a browser's bookmark export (`.html` beginning `NETSCAPE-Bookmark-file`) is listed with `"links": true` as well.
+
+| Request | Answer |
+|---|---|
+| `GET /api/links?path=<file>` | `{ "items": [{ "title", "thumb", "preview", "page", "media": [{ "url", "kind" }] }], "more" }`: what is saved in the file, all of it (on the `esp32` profile at most 2000, and `more` says there were more). In JSON, an item is any object with `thumbnailUrl` or `directMedia` (and `title`, `mediaPage`, `sourcePage` if there); the older names `mediaUrl`, `directUrls`, `ytDlpUrls`, `linkUrl`, `postUrl` are read the same way, and upper and lower case are not told apart. `media` is what `directMedia` lists (a list, or one address); a `thumbnailUrl` that is a picture is `thumb`; one that is a clip is `preview` (a moving thumbnail) when there is direct media, and is itself the media when there is none; `page` is `mediaPage`, or `sourcePage` if there is none; in a bookmark export, each `<a href>`; otherwise, and in JSON with no such objects, each `https://` address once. `kind` is `video` or `audio`, told from the address's ending (the kinds of file a browser shows or plays: `.jpg .jpeg .jfif .png .apng .gif .webp .avif .bmp .svg .ico`; `.mp4 .m4v .webm .mov .ogv .mkv`; `.mp3 .m4a .aac .ogg .oga .opus .wav .flac .weba`) or from `format=`, `fm=` or `mime=` in it. The type need not be at the very end: a slash after it is ignored (`…/394826.mp4/`), and failing all that, a media type anywhere after the site's name counts (`…/clip.mp4/play`, `…?file=clip.mp4&x=1`), video looked for first. An address that is none of these is a page, under whichever name it was saved (a `thumbnailUrl` or a `directMedia` entry that is a web page is not drawn or played: it becomes the item's `page` if it has none, and an item with nothing but pages goes in the table of pages, not the grid). Only `https:` addresses are kept |
+| `GET /cards/<file>` | a gallery made from the same items, as one page: a grid of cards for what is a picture, a video or sound, shown 60 at a time, each opening a viewer with an arrow to the one before and after and a reel of those nearby; under the grid, a table (name, site, address) of the items that are only pages, sorted by site; at the side, a list of everything in the file, each line a way to that item. The page has filters of its own (a kind; one of the entries an item of a JSON file has, "thumbnail", "video", "webm" (a `.webm` clip is named apart from other video, in the kinds too), "picture", "sound", "page", "linked page" or "source page", the list offering those the file has; and words in the name or in any of the item's addresses), worked by its script. A `thumbnailUrl` that is a video file other than a `.webm` (an `.mp4`, say) is taken for the video itself, not a thumbnail. The viewer's bar has the exact address of what it shows (the video, else the picture, else the sound) as a link, and under the bar every address the item groups, the one on show marked. `?rev=1` turns the order round (last in the file first; the table of pages too); the page's "reverse" button tells the reader by `postMessage({ cardsReversed })`, and the reader loads the page again with it (the page itself may not ask the server for anything). `?size=` (70 to 420) is how wide a card starts; the page tells the reader, by `postMessage({ cardSize })`, when its slider is moved. `?paper=&shade=&ink=&muted=&rule=&accent=` (six hex digits each) give it the reader's colours; anything else is ignored. Sent with a policy that allows pictures over `https:` and `data:` (the browser's own player draws its buttons from `data:` pictures) and media over `https:`, and one script: the server's own, named by a nonce made for each answer (it stops what is playing when the viewer moves on, starts a `.webm` clip when it is come to, plays the clips in the grid silently while they are in sight, has a video with no picture of its own show its first frame once it is in sight, puts a play button on each card with a video (not on one whose thumbnail is a clip already playing), which plays it in the card, one at a time, and gives the arrow keys their use). The size slider and page buttons stay at the top while the grid scrolls. The sandbox has no `allow-same-origin`; the reader shows the page in a frame |
+
+404 for a file of another kind, a hidden name, or none; 413 for a file larger than is held in memory at once. See `src/links.hpp`.
+
+## Books (EPUB)
+
+An `.epub` file is listed as a folder of its pages, in reading order: each page is a document whose path goes into the book, `shelf/book.epub/OEBPS/text/ch1.xhtml`, with `group` the book's path and `title` the page's name in the book's table of contents (the file's own name for a page the contents leave out). Such a path works wherever a document's path does:
+
+| Request | Answer |
+|---|---|
+| `GET /raw/<book.epub>/<path inside>` | that file of the book, whole (no `Range`), with its type (`application/xhtml+xml` for a page) and the same content policy as any `/raw/` file. Pictures, styles and fonts beside a page are found this way |
+| `GET /api/doc?path=<book.epub>/<page>` | the page's text; 404 for anything that is not a page |
+| `GET /api/blocks?path=<book.epub>/<page>` | the page's blocks |
+
+404 if the book or the file in it is missing; 413 if the file is larger than is held in memory at once (16 MB on a computer, 1 MB on the board); 500 if the zip is damaged or uses what is not handled (zip64, encryption, a method other than stored or deflate). Each entry is checked against the size and CRC the zip records. A book whose pages cannot be found is not listed. Books are not searched by `/api/search`. See `src/zip.hpp` (the zip reader and inflate) and `src/epub.hpp`.
 
 ## Search
 
@@ -24,10 +52,12 @@ All JSON bodies are UTF-8. Errors are `{ "error": "message" }` with a 4xx or 5xx
 `GET /api/docs` → array, in display order (folders walked in natural name order):
 
 ```json
-{ "path": "a/1-doc.md", "group": "a", "title": "First", "side": false, "front": false }
+{ "path": "a/1-doc.md", "group": "a", "title": "First", "side": false, "front": false, "changed": 1759570000 }
 ```
 
-`title` is the first `# Heading` (markdown), `<title>` (HTML), or the file name. Hidden files, `node_modules`, `notes/`, the server's own folder and anything matching `ignore` are left out.
+`changed` is when the file was last changed, in seconds since 1970 (the pages of a book have none): the reader lists the added folders with the one most recently added to first.
+
+`title` is the first `# Heading` (markdown), `<title>` (HTML), or the file name. Pictures, video, sound and PDFs are listed by their file names. Hidden files, `node_modules`, `notes/`, the server's own folder and anything matching `ignore` are left out.
 
 ## Settings
 
@@ -64,13 +94,13 @@ Stored in `notes/notes.json`.
 | Request | Answer |
 |---|---|
 | `GET /api/notes` | all notes |
-| `POST /api/notes` | body needs `doc` and one of `text`, `quote`. Returns the new note. `status` is `open` with text, `highlight` without |
-| `PUT /api/notes/<id>` | updates any of `text`, `quote`, `heading`, `headingText`, `type`; other keys are ignored. A highlight that gains text becomes `open`. 404 for an unknown id |
+| `POST /api/notes` | body needs `doc` and one of `text`, `quote`. Returns the new note. `status` is `open` with text, `highlight` without. An `anchor` object is kept if its `block` is hex (at most 32 digits): `{ block, nth, start, before, after }`, numbers floored and not negative, `before` and `after` at most 200 bytes; other keys in it are dropped, and an anchor that is not usable is left off |
+| `PUT /api/notes/<id>` | updates any of `text`, `quote`, `heading`, `headingText`, `type`, `anchor`; other keys are ignored. A new `quote` sent without an `anchor` removes the old anchor, which was for the old quote. A highlight that gains text becomes `open`. 404 for an unknown id |
 | `DELETE /api/notes/<id>` | `{ "ok": true }`, or 404 |
 
 ## Uploads and workspaces
 
-`POST /api/upload?path=<path>` with the file as the raw body → `{ "saved": true, "root": "…" }`, or `{ "skipped": true }` if the file already exists (never overwritten). 400 for a path with `..`, a hidden part or `node_modules`. 413 over the profile's upload limit (200 MB on a computer).
+`POST /api/upload?path=<path>` with the file as the raw body → `{ "saved": true, "root": "…" }`, or `{ "skipped": true }` if the file already exists (never overwritten). 400 for a path with `..`, a hidden part or `node_modules`, or one longer than the system will open (on Windows, 259 characters for the whole path, the served folder included). 413 over the profile's upload limit (200 MB on a computer).
 
 `GET /api/workspaces` → `[{ "name", "root", "home", "current" }]`.
 

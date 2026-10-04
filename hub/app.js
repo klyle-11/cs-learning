@@ -7,6 +7,7 @@ const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls)
 const panesEl = $('panes'), treeEl = $('tree'), tocEl = $('toc'), notesEl = $('notes'), input = $('input'), titleEl = $('hubTitle');
 
 let docs = [], config = { title: '' }, notes = [], pendingQuote = '', pendingHead = null, activeHl = null, editing = false;
+let pendingAt = null;   // where the selection behind pendingQuote begins: { article, node, offset }
 // Layout: one or two panes, each with its open tabs. Saved per folder.
 // Pane 0 is the main reader; pane 1, when present, sits in the right column above or below the notes.
 let state = { panes: [{ tabs: [], active: null, preview: null }], active: 0, notesOpen: true, sideOpen: true, notesW: 300, notesH: 40, notesTop: false, opened: [] };
@@ -114,11 +115,13 @@ function shortPath(where) {
 const pathLabel = (where) => { const e = el('small', '', shortPath(where)); if (shortPath(where) !== where) e.title = where; return e; };
 // Run at most once per frame, however often it is asked for (scrolling asks constantly).
 const perFrame = (fn) => { let waiting = false; return () => { if (waiting) return; waiting = true; requestAnimationFrame(() => { waiting = false; fn(); }); }; };
-const isHtml = (path) => /\.html?$/.test(path);
+const isHtml = (path) => /\.x?html?$/.test(path);   // .xhtml: a page of a book
 const isImage = (path) => /\.(png|jpe?g|gif|webp|svg)$/i.test(path);
 const isVideo = (path) => /\.(mp4|m4v|mov|webm|ogv)$/i.test(path);
 const isAudio = (path) => /\.(mp3|m4a|wav|ogg)$/i.test(path);
 const isMedia = (path) => isImage(path) || isVideo(path) || isAudio(path);
+const isPdf = (path) => /\.pdf$/i.test(path);
+const isBinary = (path) => isMedia(path) || isPdf(path);   // kept on the device as the file itself, not as text
 // A front page: the workspace's own, or one inside a folder.
 const isFront = (path) => !!path && (path === 'FRONTPAGE.md' || path.endsWith('/FRONTPAGE.md'));
 const folderOf = (path) => path.split('/').slice(0, -1).join('/');
@@ -139,13 +142,61 @@ function setFont(f) {
 $('fontToggle').onclick = () => setFont(document.documentElement.dataset.font === 'serif' ? 'sans' : 'serif');
 setFont(store.get('font') || 'serif');
 
+// A page of a book (an .epub) takes the colours of the pane it is in and the
+// reader's text size: a book is text to be poured into whatever is reading it.
+// The page is in a frame, where the reader's own styles do not reach, so the
+// colours are worked out here and written into a style element in the page.
+// Other HTML pages are left looking as their author made them.
+const isBookPage = (path) => /\.epub\//i.test(path);
+function dressBook(v) {
+  if (!v?.dress || !v.body) return;
+  const probe = el('span'), c = {};
+  v.body.append(probe);
+  for (const name of ['paper', 'ink', 'accent']) { probe.style.color = `var(--${name})`; c[name] = getComputedStyle(probe).color; }
+  probe.remove();
+  // A dark pane gets the browser's dark scrollbar too.
+  const [r, g, b] = c.paper.match(/[\d.]+/g).map(Number), dark = r * 0.299 + g * 0.587 + b * 0.114 < 128;
+  v.dress.textContent =
+    `html { font-size: ${view.fs}px !important; background: ${c.paper} !important; color-scheme: ${dark ? 'dark' : 'light'}; }` +
+    ` body { font-size: 1rem !important; background: ${c.paper} !important; color: ${c.ink} !important; }` +
+    ' body *:not(mark) { color: inherit !important; background-color: transparent !important; }' +
+    ` body a:any-link, body a:any-link * { color: ${c.accent} !important; }`;
+}
+const dressBooks = () => { views.forEach(dressBook); for (const f of document.querySelectorAll('iframe.pdf')) f.paint?.(); };   // a PDF's night follows the theme too
+
 function setTheme(t) {
   document.documentElement.dataset.theme = t;
   $('theme').value = t;
   store.set('theme', t);
+  dressBooks();
 }
 $('theme').onchange = () => setTheme($('theme').value);
 setTheme({ focus: 'sun-sound' }[store.get('theme')] || store.get('theme') || 'plain');   // "Focus Aid" was renamed
+// The left pane (files and outline) and the right pane (the side document and
+// notes) can each have a theme of their own; '' means the same as the reader.
+// "one theme" switches that off: while it is pressed the whole reader has the
+// one theme and the two pane menus are out of use. What they were set to is
+// kept, and comes back when it is released.
+const paneThemes = [['themeSide', 'side', 'Left'], ['themeRight', 'right', 'Right']];
+let oneTheme = store.get('themeOne') ?? !paneThemes.some(([id]) => store.get(id));   // on, unless a pane already had a theme of its own
+function applyPaneThemes() {
+  $('themeOne').setAttribute('aria-pressed', oneTheme);
+  for (const [id, target] of paneThemes) {
+    const sel = $(id), t = oneTheme ? '' : sel.value;
+    sel.disabled = oneTheme;
+    if (t) $(target).dataset.theme = t; else delete $(target).dataset.theme;
+  }
+  dressBooks();
+}
+for (const [id, , name] of paneThemes) {
+  const sel = $(id);
+  sel.append(new Option(name + ': same', ''), ...[...$('theme').options].map((o) => new Option(name + ': ' + o.text, o.value)));
+  sel.value = store.get(id) || '';
+  if (sel.selectedIndex < 0) sel.value = '';
+  sel.onchange = () => { store.set(id, sel.value); applyPaneThemes(); };
+}
+$('themeOne').onclick = () => { oneTheme = !oneTheme; store.set('themeOne', oneTheme); applyPaneThemes(); };
+applyPaneThemes();
 
 // Reading aids: text size, roomier spacing, and a focus mode that fades
 // everything except the block being read.
@@ -157,6 +208,7 @@ function applyView() {
   $('roomyToggle').setAttribute('aria-pressed', view.roomy);
   $('focusToggle').setAttribute('aria-pressed', view.focus);
   store.set('view', view);
+  dressBooks();
 }
 $('roomyToggle').onclick = () => { view.roomy = !view.roomy; applyView(); };
 $('focusToggle').onclick = () => { view.focus = !view.focus; applyView(); };
@@ -353,6 +405,7 @@ async function runUpload(files, workspace, folder, front, lock) {
   showGate(`Upload “${folder}”`, (card) => { box = card; card.append(line); });
   let saved = 0, skipped = 0, failed = 0, root = '';
   const whyNot = new Map(); // reason -> how many files
+  const notSaved = [];      // the first few files that were tried and refused, by name
   for (const [i, { rel, file }] of files.entries()) {
     line.textContent = `Uploading ${i + 1} of ${files.length}…`;
     const path = workspace ? rel.split('/').slice(1).join('/') : rel;
@@ -363,12 +416,19 @@ async function runUpload(files, workspace, folder, front, lock) {
       const r = await res.json().catch(() => ({}));
       if (r.saved) { saved++; root = r.root; } else if (r.skipped) skipped++; else why = r.error || 'error ' + res.status;
       stop = res.status === 401 || res.status === 403 || res.status === 507; // the rest would fail the same way
-    } catch { why = 'the server was not reachable'; stop = true; }
-    if (why) { failed++; whyNot.set(why, (whyNot.get(why) || 0) + 1); }
+    } catch {
+      // The connection broke on this file. That need not mean the server has
+      // gone, so it is asked: if it answers, only this file is counted as failed
+      // and the rest go on.
+      const there = await call('/api/config').then((r) => r.ok, () => false);
+      why = there ? 'the connection was dropped while sending it' : 'the server was not reachable';
+      stop = !there;
+    }
+    if (why) { failed++; whyNot.set(why, (whyNot.get(why) || 0) + 1); if (notSaved.length < 5) notSaved.push(rel.split('/').pop() + ` (${(file.size / 1048576).toFixed(1)} MB)`); }
     if (stop) { const rest = files.length - i - 1; if (rest) { failed += rest; whyNot.set('not tried after that', rest); } break; }
   }
   line.textContent = `${saved} added` + (skipped ? `, ${skipped} already here and left alone` : '') + '.';
-  if (failed) box.append(el('p', 'say', `${failed} not saved: ` + [...whyNot].map(([w, n]) => `${n} × ${w}`).join('; ') + '. Nothing was lost on your computer; upload the folder again to retry (files already here are skipped).'));
+  if (failed) box.append(el('p', 'say', `${failed} not saved: ` + [...whyNot].map(([w, n]) => `${n} × ${w}`).join('; ') + (notSaved.length ? '. Refused: ' + notSaved.join('; ') : '') + '. Nothing was lost on your computer; upload the folder again to retry (files already here are skipped).'));
   const done = el('button', 'main', 'OK');
   done.onclick = closeGate;
   box.append(done);
@@ -909,9 +969,9 @@ async function rememberDoc(path, text) {
 async function keepCopy(path, quiet) {
   let stored = true;   // false only when the device had no room
   try {
-    const r = await call(isHtml(path) || isMedia(path) ? rawUrl(path) : '/api/doc?path=' + encodeURIComponent(path));
+    const r = await call(isHtml(path) || isBinary(path) ? rawUrl(path) : '/api/doc?path=' + encodeURIComponent(path));
     if (r.ok) {
-      const body = isMedia(path) ? { blob: await r.blob() } : { text: await r.text() };
+      const body = isBinary(path) ? { blob: await r.blob() } : { text: await r.text() };
       if (await idb.put('docs', { key: keyOf(path), root: config.root, path, ...body, ts: Date.now() })) { kept.add(path); askDurable(); }
       else { stored = false; net.said = `There was no room on this device to keep “${path.split('/').pop()}”.`; setTimeout(() => { net.said = ''; renderNet(); }, 8000); }
     }
@@ -1101,7 +1161,13 @@ let serverDocs = [];
 // ten minutes in the background). The list of locked folders, with a salted
 // hash to check the password against, is part of the workspace's settings,
 // so every device sees the same locks and they hold without the server too.
-// A lock with no hash yet is one whose password is chosen on first open.
+// A lock with no hash yet is one whose password is given on first open.
+//
+// There is one password for all of them. The first folder locked chooses it;
+// every folder locked after that is given the same salt and hash, after the
+// password has been typed to show it is known. Typing it opens every folder
+// that has it. (Folders locked before this, each with a password of its own,
+// keep theirs until their lock is removed and set again.)
 //
 // This is a lock on the reader, not on the files: they are stored as they
 // are, and removing the folder and uploading it again takes the lock off.
@@ -1149,33 +1215,44 @@ async function lockHash(password, salt) {
 // The password form: to open a locked folder, or to choose the password of one that has none yet.
 function lockForm(box, folder, done) {
   const lock = locks()[folder], fresh = !lock?.hash;
+  const shared = Object.values(locks()).find((l) => l.hash), choose = fresh && !shared;   // the one password, if a folder has it already
   if (!globalThis.crypto?.subtle) { box.append(el('p', 'say', 'Folder locks need an encrypted (HTTPS) connection, or localhost.')); return; }
-  const [w1, p1] = field(fresh ? 'New password' : 'Password', 'password'), say = el('p', 'say');
-  box.append(el('p', '', fresh ? 'Choose a password for this folder. It is asked for each time the reader is opened.' : 'This folder is locked. Type its password to see what is in it.'), w1);
+  const [w1, p1] = field(choose ? 'New password' : 'Password', 'password'), say = el('p', 'say');
+  box.append(el('p', '', choose ? 'Choose a password. It is the one password for every locked folder, and is asked for each time the reader is opened.' : fresh ? 'Locked folders share one password. Type it to lock this folder with it.' : 'This folder is locked. Type the password to see what is in it.'), w1);
   let p2 = null;
-  if (fresh) {
+  if (choose) {
     const [w2, again] = field('The same again', 'password');
     p2 = again;
     p1.autocomplete = p2.autocomplete = 'new-password';
     box.append(w2);
   }
-  const go = el('button', 'main', fresh ? 'Set password' : 'Unlock');
+  const go = el('button', 'main', choose ? 'Set password' : fresh ? 'Lock' : 'Unlock');
   const run = async () => {
     say.textContent = '';
     if (!p1.value || go.disabled) return;
-    if (fresh && p1.value !== p2.value) { say.textContent = 'The two do not match.'; return; }
+    if (choose && p1.value !== p2.value) { say.textContent = 'The two do not match.'; return; }
     go.disabled = true;
-    if (fresh) {
+    // What the typed password is checked against: this folder's own, or the shared one it is about to be given.
+    const known = fresh ? shared : lock;
+    let mine = known;
+    if (choose) {
       const salt = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));
-      try { await saveLocks({ ...locks(), [folder]: { salt, hash: await lockHash(p1.value, salt) } }); }
-      catch (e) { go.disabled = false; say.textContent = e.offline ? 'The server is not reachable. A password can only be set while connected.' : e.message; return; }
-    } else if ((await lockHash(p1.value, lock.salt)) !== lock.hash) {
+      mine = { salt, hash: await lockHash(p1.value, salt) };
+    } else if ((await lockHash(p1.value, known.salt)) !== known.hash) {
       go.disabled = false;
       say.textContent = 'That is not the password.';
       p1.select();
       return;
     }
-    unlocked.add(folder);
+    if (fresh) {
+      // This folder, and any other still waiting for a password, take the one password.
+      const next = { ...locks(), [folder]: { salt: mine.salt, hash: mine.hash } };
+      for (const f of Object.keys(next)) if (!next[f].hash) next[f] = { salt: mine.salt, hash: mine.hash };
+      try { await saveLocks(next); }
+      catch (e) { go.disabled = false; say.textContent = e.offline ? 'The server is not reachable. A folder can only be locked while connected.' : e.message; return; }
+    }
+    // The password has been typed: every folder that has it is open.
+    for (const [f, l] of Object.entries(locks())) if (f === folder || l.hash === mine.hash) unlocked.add(f);
     done();
   };
   go.onclick = run;
@@ -1291,7 +1368,7 @@ async function findInside(q) {
   const hits = [];
   for (const d of docs) {
     if (hits.length >= 60) break;
-    if (isMedia(d.path) || !kept.has(d.path) || gateOf(d.path)) continue;
+    if (isBinary(d.path) || !kept.has(d.path) || gateOf(d.path)) continue;
     const copy = await idb.get('docs', keyOf(d.path));
     if (!copy?.text) continue;
     const lines = copy.text.split('\n');
@@ -1347,20 +1424,24 @@ function renderTree() {
   for (const d of docs) {
     if (d.front || !matchesFind(d) || !inView(d)) continue;
     let node = root;
-    for (const part of d.path.split('/').slice(0, -1)) node = node.dirs[part] ??= { dirs: {}, files: [] };
+    // A book is one folder of pages in reading order: the folders inside its file are not shown.
+    for (const part of d.path.split('/').slice(0, -1)) { node = node.dirs[part] ??= { dirs: {}, files: [] }; if (/\.epub$/i.test(part)) break; }
     node.files.push(d);
   }
   const front = docs.find((d) => d.front);
-  if (front && matchesFind(front)) treeEl.append(fileRow(front, 'Front page'));
-  (function draw(node, parent, prefix) {
+  if (front && matchesFind(front)) treeEl.append(fileRow(front, config.title || 'Front page'));
+  const draw = (node, parent, prefix) => {
     // A folder's own front page comes first, under that name.
     const fp = prefix ? node.files.find((f) => isFront(f.path)) : null;
     if (fp) parent.append(fileRow(fp, gateOf(fp.path) ? 'Locked: open to unlock' : 'Front page'));
     for (const [name, sub] of Object.entries(node.dirs)) {
-      const det = el('details');
+      const det = el('details'), sum = el('summary', '', name);
       det.open = !!finding || state.opened.includes(prefix + name);   // folders start closed; while finding, everything that matches shows
-      det.append(el('summary', '', name));
+      sum.dataset.folder = prefix + name;
+      paintQuick(sum);
+      det.append(sum);
       det.addEventListener('toggle', () => {
+        pinNext();
         // Closing a folder forgets what was open inside it, so it comes back with its subfolders closed.
         state.opened = state.opened.filter((p) => p !== prefix + name && (det.open || !p.startsWith(prefix + name + '/')));
         if (det.open) state.opened.push(prefix + name);
@@ -1372,10 +1453,59 @@ function renderTree() {
       draw(sub, kids, prefix + name + '/');
       parent.append(det);
     }
-    for (const f of node.files) if (f !== fp) parent.append(fileRow(f));
-  })(root, treeEl, '');
+    for (const f of node.files) if (f !== fp) parent.append(fileRow(f, /\.epub\//i.test(f.path) ? f.title : undefined));   // a page of a book goes by its name in the contents
+  };
+  // Sections. What hub.json lists under "starter" (the material every copy
+  // begins with) is kept together, first. Each other top-level folder, added
+  // since, is a section by itself; files added loose come last.
+  const starter = new Set((config.starter || []).map((s) => s.replace(/\/$/, '')));
+  const base = { dirs: {}, files: root.files.filter((f) => starter.has(f.path)) }, loose = root.files.filter((f) => !starter.has(f.path));
+  const section = (cls, heading) => { const s = el('div', 'sect' + cls); if (heading) s.append(el('div', 'sect-h', heading)); treeEl.append(s); return s; };
+  drawGroups(section);
+  for (const [name, sub] of Object.entries(root.dirs)) if (starter.has(name)) base.dirs[name] = sub;
+  if (Object.keys(base.dirs).length || base.files.length) draw(base, section('', 'Starter'), '');
+  // inbox/ (where "add files…" puts things) leads the added folders, so what was just added is easy to find.
+  // Under it, the folder most recently added to comes first (by the newest file in each; folders the server gave no time for keep their order, last).
+  const newest = {};
+  for (const d of docs) { const top = d.path.split('/')[0]; if (d.changed > (newest[top] || 0)) newest[top] = d.changed; }
+  const added = Object.entries(root.dirs).filter(([name]) => !starter.has(name)).sort(([a], [b]) => (b === 'inbox') - (a === 'inbox') || (newest[b] || 0) - (newest[a] || 0));
+  for (const [name, sub] of added) draw({ dirs: { [name]: sub }, files: [] }, section(' up'), '');
+  if (loose.length) draw({ dirs: {}, files: loose }, section('', starter.size ? 'Other files' : 'Files'), '');
+  treeEl.append(nextPin);
   treeEl.scrollTop = y;
+  pinNext();
 }
+// Quick open: a closed folder's line carries the document last opened inside
+// it (at any depth), so that can be returned to without opening the folder.
+function paintQuick(sum) {
+  sum.querySelector('.quick')?.remove();
+  const d = docOf(state.last?.[sum.dataset.folder]);
+  if (!d || !inView(d) || gateOf(d.path)) return;
+  const b = el('button', 'quick', d.front || isFront(d.path) ? 'Front page' : d.title || d.path.split('/').pop());
+  b.title = 'Open what was last opened in this folder: ' + d.path;
+  b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); openDoc(d.path); };   // not a press on the folder's line: it stays closed
+  sum.append(b);
+}
+// A handle to get past an open folder: while a top-level folder (or group)
+// that is open runs off the bottom of the list, the line of the one after it
+// in the list is held at the bottom edge; pressing it brings that folder to
+// the top. It goes once the folder itself has come into sight. What is inside
+// the open folder (its subfolders, its books) is never what is held there.
+const nextPin = el('button', 'nextPin');
+let pinTo = null, pinAsked = 0;
+function pinNext() {
+  const edge = treeEl.getBoundingClientRect().bottom - (nextPin.hidden ? 0 : nextPin.offsetHeight);
+  const tops = [...treeEl.querySelectorAll('.sect > details')];
+  const cut = tops.findIndex((d) => { const r = d.getBoundingClientRect(); return d.open && r.top < edge && r.bottom > edge + 1; });
+  pinTo = cut >= 0 ? tops[cut + 1]?.querySelector('summary') || null : null;
+  nextPin.hidden = !pinTo;
+  if (pinTo) nextPin.textContent = '↓ ' + (pinTo.dataset.folder?.split('/').pop() || pinTo.firstChild.textContent);
+}
+nextPin.hidden = true;
+nextPin.onclick = () => { if (pinTo) { treeEl.scrollTop += pinTo.getBoundingClientRect().top - treeEl.getBoundingClientRect().top; pinNext(); } };
+const askPin = () => { if (!pinAsked) pinAsked = requestAnimationFrame(() => { pinAsked = 0; pinNext(); }); };
+treeEl.addEventListener('scroll', askPin, { passive: true });
+addEventListener('resize', askPin);
 
 function fileRow(d, label) {
   const row = el('div', 'file');
@@ -1479,6 +1609,7 @@ async function openDoc(path, { pane = state.active, side = false, hash, keep = f
     }
   }
   if (!back && p.active !== path) leave(pane);
+  for (let f = folderOf(path); f; f = folderOf(f)) (state.last ||= {})[f] = path;   // the last opened in each folder it is in: the folder's quick open
   p.active = path;
   state.active = pane;
   if (rebuilt) await buildPanes(); else { renderTabs(pane); await showDoc(pane, hash); }
@@ -1622,6 +1753,7 @@ async function showDoc(pane, hash, keepScroll) {
   parkVideo(views[pane]?.body);
   try { await drawDoc(pane, hash, keepScroll); }
   catch (e) { if (e?.offline) throw e; views[pane]?.body.replaceChildren(problemBox(e, 'This document could not be shown')); }
+  finally { lightboxSync(); }
 }
 async function drawDoc(pane, hash, keepScroll) {
   const v = views[pane], path = state.panes[pane].active;
@@ -1631,6 +1763,8 @@ async function drawDoc(pane, hash, keepScroll) {
   if (gateOf(path)) { showLock(pane, gateOf(path)); return; }
 
   if (isAudio(path)) { showPlayer(pane, path); return; }
+  if (docOf(path)?.links) { showLinks(pane, path); return; }
+  if (isPdf(path)) { showPdf(pane, path); return; }
   if (isMedia(path)) {
     if (playable(path)) showMedia(pane, path);
     else v.body.replaceChildren(el('p', 'empty', 'The server is not reachable, and this file has not been kept on this device.'));
@@ -1643,7 +1777,14 @@ async function drawDoc(pane, hash, keepScroll) {
     // A page's own scripts never run: the frame forbids them here, and the
     // server forbids them wherever the file is opened. The reader can still
     // reach in to read headings and draw highlights.
-    frame.setAttribute('sandbox', 'allow-same-origin');
+    // The exception is a page named under "scripts" in hub.json: a small
+    // program of the user's own. It may run, but as a stranger: its frame is
+    // given no share in the reader's origin, so it cannot read the reader's
+    // data or ask the server for anything, and the reader cannot reach into it
+    // either (no outline, no highlights there).
+    const app = !hub.url && (config.scripts || []).includes(path);
+    frame.setAttribute('sandbox', app ? 'allow-scripts allow-downloads allow-popups allow-modals allow-forms' : 'allow-same-origin');
+    if (app) frame.allow = 'clipboard-write; picture-in-picture; fullscreen';
     frame.referrerPolicy = 'no-referrer';
     let bounced = false;
     if (net.online && !isPending(path) && !hub.url) {
@@ -1656,6 +1797,7 @@ async function drawDoc(pane, hash, keepScroll) {
       frame.srcdoc = copy;
     }
     frame.onload = () => {
+      if (app) { v.heads = []; v.surface = null; if (pane === state.active) { renderOutline(); renderContext(); } return; }
       try {
         const d = frame.contentDocument, used = new Set();
         v.heads = [...d.querySelectorAll('h1, h2, h3')];
@@ -1668,6 +1810,8 @@ async function drawDoc(pane, hash, keepScroll) {
           ' body { overflow-wrap: anywhere; } img, video, svg, canvas, iframe { max-width: 100%; height: auto; }' +
           ' pre { max-width: 100%; overflow-x: auto; }';
         d.head.append(lock);
+        if (isBookPage(path)) { v.dress = d.createElement('style'); d.head.append(v.dress); dressBook(v); }
+        if (frame.step) d.addEventListener('keydown', (e) => { if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) stepKey(e); });
         const wide = d.documentElement.clientWidth;
         for (const t of d.querySelectorAll('table')) {
           if (t.scrollWidth > wide) Object.assign(t.style, { display: 'block', maxWidth: '100%', overflowX: 'auto' });
@@ -1693,7 +1837,7 @@ async function drawDoc(pane, hash, keepScroll) {
         d.addEventListener('selectionchange', () => {
           const sel = d.getSelection();
           if (sel.isCollapsed || !sel.rangeCount) return;
-          takeSelection(sel.toString(), pane, sel.getRangeAt(0).startContainer);
+          takeSelection(sel.toString(), pane, sel.getRangeAt(0).startContainer, sel.getRangeAt(0).startOffset);
           if (touch.matches) { clearTimeout(touchTimer); touchTimer = setTimeout(() => offerFlyout(true), 400); }
         });
         d.addEventListener('pointerup', () => setTimeout(() => offerFlyout(false)));
@@ -1735,6 +1879,25 @@ async function drawDoc(pane, hash, keepScroll) {
       if (pane === state.active) { renderOutline(); renderContext(); }
     };
     v.frame = frame;
+    // A page of a book has the page before and the page after at its sides:
+    // faint arrows, and the left and right arrow keys, in the book's reading order.
+    if (isBookPage(path)) {
+      const book = path.slice(0, path.search(/\.epub\//i) + 5);
+      const pages = docs.filter((x) => x.path.startsWith(book + '/') && inView(x)), at = pages.findIndex((x) => x.path === path);
+      const wrap = el('div', 'bookwrap');
+      frame.step = (dir) => pages[at + dir] && openDoc(pages[at + dir].path, { pane });
+      wrap.append(frame);
+      for (const [dir, sign, label] of [[-1, '‹', 'The page before in this book (←)'], [1, '›', 'The next page in this book (→)']]) {
+        const b = el('button', 'step ' + (dir < 0 ? 'prev' : 'next'), sign);
+        b.title = label;
+        b.setAttribute('aria-label', label);
+        b.disabled = at < 0 || !pages[at + dir];
+        b.onclick = () => frame.step(dir);
+        wrap.append(b);
+      }
+      v.body.replaceChildren(wrap);
+      return;
+    }
     v.body.replaceChildren(frame);
     return;
   }
@@ -1743,9 +1906,13 @@ async function drawDoc(pane, hash, keepScroll) {
   if (views[pane] !== v || state.panes[pane].active !== path) return; // changed while loading
   const scroller = el('div', 'scroller'), article = el('article', 'md');
   article.replaceChildren(safeHtml(md));
+  // The main front page gives up its right-hand corner to the latest notes and
+  // highlights. The box sits outside the article, so it is not itself highlighted.
+  if (docOf(path)?.front) { scroller.classList.add('has-latest'); scroller.append(el('aside', 'latest')); }
   scroller.append(article);
   v.body.replaceChildren(scroller);
   Object.assign(v, { scroller, article, surface: article });
+  renderLatest();
 
   const used = new Set();
   for (const h of article.querySelectorAll('h1, h2, h3')) {
@@ -2038,6 +2205,27 @@ function showPlayer(pane, path) {
   // Opening the page does not start anything. With nothing loaded yet, this track is made ready, paused.
   if (!music.path) playTrack(path, false); else renderPlayers();
 }
+// The rows of the queue, in order. `where` adds the folder beside each name (the player has room for it; the sidebar does not).
+function queueRows(where) {
+  const rows = [];
+  for (const p of queue) {
+    if (gateOf(p)) continue;   // in a locked folder: not named until it is opened
+    const ok = !!docOf(p) && playable(p);
+    const row = el('div', 'track' + (p === nowPath() ? ' cur' : '') + (ok ? '' : ' gone'));
+    row.dataset.path = p;
+    row.tabIndex = 0;
+    row.setAttribute('role', 'button');
+    row.append(el('span', '', p.split('/').pop()));
+    if (where) row.append(isVideo(p) ? el('small', '', 'video') : pathLabel(p.split('/').slice(0, -1).join(' / ') || 'top level'));
+    const out = iconBtn('remove', 'Take out of the queue', 'q');
+    out.onclick = (e) => { e.stopPropagation(); toggleQueue(p); };
+    row.append(out);
+    row.onclick = () => ok && playPath(p);
+    rows.push(row);
+  }
+  return rows;
+}
+const miniQ = { now: null, top: 0 };   // the sidebar's queue: what was playing when it was last drawn, and how far it was scrolled
 function renderPlayers() {
   const name = music.path ? music.path.split('/').pop() : 'Nothing playing', dir = music.path ? music.path.split('/').slice(0, -1).join(' / ') || 'top level' : '';
   for (const box of document.querySelectorAll('.player')) {
@@ -2045,23 +2233,13 @@ function renderPlayers() {
     // The queue, under the controls: what plays next, in order.
     box.append(el('h5', '', 'Queue' + (queue.length ? ' · ' + queue.length : '')));
     if (!queue.length) box.append(el('p', 'qnone', 'Nothing queued, so the player goes through every track. Press the queue button on a track or a video to line it up.'));
-    for (const p of queue) {
-      if (gateOf(p)) continue;   // in a locked folder: not named until it is opened
-      const ok = !!docOf(p) && playable(p);
-      const row = el('div', 'track' + (p === nowPath() ? ' cur' : '') + (ok ? '' : ' gone'));
-      row.tabIndex = 0;
-      row.setAttribute('role', 'button');
-      row.append(el('span', '', p.split('/').pop()), isVideo(p) ? el('small', '', 'video') : pathLabel(p.split('/').slice(0, -1).join(' / ') || 'top level'));
-      const out = iconBtn('remove', 'Take out of the queue', 'q');
-      out.onclick = (e) => { e.stopPropagation(); toggleQueue(p); };
-      row.append(out);
-      row.onclick = () => ok && playPath(p);
-      box.append(row);
-    }
+    box.append(...queueRows(true));
     if (queue.length) {
       const clear = el('button', 'qlink', 'clear the queue');
       clear.onclick = () => { queue = []; saveQueue(); renderPlayers(); };
-      box.append(clear);
+      const keep = el('button', 'qlink', 'save as a group…');
+      keep.onclick = () => startPick(queue.filter((p) => !gateOf(p)).map((p) => ({ label: p.split('/').pop(), target: encPath(p) })));
+      box.append(clear, keep);
     }
     box.append(el('h5', '', 'All tracks'));
     // One list of everything, unless "group by folder" is chosen.
@@ -2075,6 +2253,7 @@ function renderPlayers() {
       if (grouped && folder !== group) { group = folder; box.append(el('h5', '', folder)); }
       const here = kept.has(t.path), ok = playable(t.path);
       const row = el('div', 'track' + (t.path === music.path ? ' cur' : '') + (ok ? '' : ' gone'));
+      row.dataset.path = t.path;
       row.tabIndex = 0;
       row.setAttribute('role', 'button');
       const st = el('button', 'st' + (here ? ' kept' : ''), here ? '●' : '○');
@@ -2106,11 +2285,25 @@ function renderPlayers() {
     mini.replaceChildren(title, row);
   } else if (music.path) {
     const title = el('a', '', '♪ ' + name);
-    title.title = 'Open the player and playlist';
-    title.onclick = () => openDoc(music.path);
+    title.title = 'Open the player and playlist to the side; press again to open it in the main pane';
+    // The player opens to the right first, leaving what is being read where it is.
+    // With the player already there, the next press opens it in the main pane.
+    title.onclick = () => openDoc(music.path, isAudio(state.panes[1]?.active) ? { pane: 0 } : { pane: 0, side: true });
     const row = transport(false);
     row.append(el('span', 'pl-time', ''));
     mini.replaceChildren(title, row);
+  }
+  // The queue, under the small controls: three rows show at a time, the rest by scrolling.
+  if (!mini.hidden && queue.length) {
+    const list = el('div', 'mini-q'), now = nowPath();
+    list.append(...queueRows(false));
+    mini.append(list);
+    // Keep the place it was scrolled to, unless what is playing has changed.
+    const cur = list.querySelector('.cur');
+    list.scrollTop = now === miniQ.now || !cur ? miniQ.top : cur.offsetTop;
+    miniQ.now = now;
+    list.onscroll = () => { miniQ.top = list.scrollTop; };
+    miniQ.top = list.scrollTop;
   }
   paintQueueBtns();
   markPlaying();
@@ -2131,9 +2324,50 @@ function tickPlayers() {
 
 // Pictures, video and sound. A picture starts fitted to the pane; clicking it
 // (or the button) switches to its real size, keeping the clicked spot in place.
+//
+// On a phone the viewer is a lightbox: it takes the whole screen (the top bar
+// and the tabs give way, the note box stays below it), so its bar carries its
+// own way to the notes and its own close. A picture at its real size there is
+// "immersive": the screen is the picture, with the bar, the arrows and the reel
+// laid over it, and the browser's own bars put away where the browser allows.
+// That is kept while stepping from one picture to the next.
+let immersive = false;
+function setImmersive(on) {
+  on = on && phone.matches;
+  if (immersive === on) return;
+  immersive = on;
+  document.body.classList.toggle('immersive', on);
+  if (on) document.documentElement.requestFullscreen?.({ navigationUI: 'hide' })?.catch(() => {});   // an iPhone has none: the page alone is filled
+  else if (document.fullscreenElement) document.exitFullscreen?.()?.catch(() => {});
+}
+// Full screen left by the device's own gesture or key: the picture goes back to fitting.
+document.addEventListener('fullscreenchange', () => {
+  if (document.fullscreenElement || !immersive) return;
+  const box = views[state.active]?.body.querySelector(':scope > .viewer.lb');
+  if (box?.unzoom) box.unzoom(); else setImmersive(false);
+});
+function lightboxSync() {
+  const on = !!views[state.active]?.body.querySelector(':scope > .viewer.lb');
+  document.body.classList.toggle('lightbox', on);
+  if (!on) setImmersive(false);
+}
+// Close leaves the pictures altogether: back past the ones stepped through, to the page they were opened from.
+function lightboxBtns(pane) {
+  const notesB = el('button', 'lbOnly', 'notes'), x = el('button', 'lbOnly x', '×');
+  notesB.onclick = () => drawer('right');
+  x.title = 'Close';
+  x.setAttribute('aria-label', 'Close');
+  x.onclick = () => {
+    setImmersive(false);
+    const t = trail[pane] || [];
+    while (t.length && (isImage(t[t.length - 1]) || isVideo(t[t.length - 1]))) t.pop();
+    if (backTo(pane)) goBack(pane); else closeTab(pane, state.panes[pane].active);
+  };
+  return [notesB, x];
+}
 function showMedia(pane, path) {
   const v = views[pane], url = rawUrl(path);
-  const box = el('div', 'viewer'), bar = el('div', 'viewbar'), stage = el('div', 'stage fit');
+  const box = el('div', 'viewer lb'), bar = el('div', 'viewbar'), stage = el('div', 'stage fit');
   bar.append(el('span', '', path.split('/').pop()));
   const open = el('a', '', 'open in new tab');
   open.href = url;
@@ -2146,14 +2380,25 @@ function showMedia(pane, path) {
     const size = el('button', '', 'full size');
     const setFit = (fit, at) => {
       // Where the pointer is, as a fraction of the picture, so that spot stays put.
-      const r = img.getBoundingClientRect(), s = stage.getBoundingClientRect();
-      const fx = at ? (at.clientX - r.left) / r.width : 0.5, fy = at ? (at.clientY - r.top) / r.height : 0.5;
+      // (Fitted, the picture is drawn in the middle of a box the size of the stage: the fraction is of what is drawn, not of the box.)
+      const frame = img.getBoundingClientRect(), s = stage.getBoundingClientRect();
+      const k = stage.classList.contains('fit') && img.naturalWidth ? Math.min(frame.width / img.naturalWidth, frame.height / img.naturalHeight) : 0;
+      const r = k ? { left: frame.left + (frame.width - img.naturalWidth * k) / 2, top: frame.top + (frame.height - img.naturalHeight * k) / 2, width: img.naturalWidth * k, height: img.naturalHeight * k } : frame;
+      const clamp = (x) => Math.min(1, Math.max(0, x));
+      const fx = at ? clamp((at.clientX - r.left) / r.width) : 0.5, fy = at ? clamp((at.clientY - r.top) / r.height) : 0.5;
       const px = at ? at.clientX - s.left : s.width / 2, py = at ? at.clientY - s.top : s.height / 2;
       stage.classList.toggle('fit', fit);
       size.textContent = fit ? 'full size' : 'fit to window';
+      setImmersive(!fit);
       if (!fit) { stage.scrollLeft = fx * img.naturalWidth - px; stage.scrollTop = fy * img.naturalHeight - py; }
     };
-    img.onload = () => { bar.firstChild.textContent = `${img.alt}  ·  ${img.naturalWidth} × ${img.naturalHeight}`; };
+    box.unzoom = () => setFit(true);
+    // Stepped to from a picture at its real size on a phone: this one opens the same way, on its middle.
+    if (immersive) { stage.classList.remove('fit'); size.textContent = 'fit to window'; }
+    img.onload = () => {
+      bar.firstChild.textContent = `${img.alt}  ·  ${img.naturalWidth} × ${img.naturalHeight}`;
+      if (!stage.classList.contains('fit')) { stage.scrollLeft = (stage.scrollWidth - stage.clientWidth) / 2; stage.scrollTop = (stage.scrollHeight - stage.clientHeight) / 2; }
+    };
     img.onclick = (e) => setFit(!stage.classList.contains('fit'), e);
     size.onclick = () => setFit(!stage.classList.contains('fit'));
     mediaSrc(path).then((src) => { img.src = src; });
@@ -2172,8 +2417,11 @@ function showMedia(pane, path) {
     queueMicrotask(() => { if (playing) video.play().catch(() => {}); });
     const full = el('button', '', 'full screen');
     full.onclick = () => (video.requestFullscreen || video.webkitEnterFullscreen)?.call(video);
+    // A video always fits; reached while the pictures were filling the screen, it offers the way back out.
+    const unzoom = el('button', 'immOnly', 'fit to window');
+    unzoom.onclick = box.unzoom = () => setImmersive(false);
     stage.append(video);
-    bar.append(queueBtn(path), full);
+    bar.append(queueBtn(path), full, unzoom);
   } else {
     const audio = el('audio');
     audio.controls = true;
@@ -2183,9 +2431,201 @@ function showMedia(pane, path) {
   }
   bar.append(keepBtn(path));
   if (!hub.url) bar.append(open);   // a tab of its own could not show this device's token to another hub
-  box.append(bar, stage);
+  bar.append(...lightboxBtns(pane));
+  // The other pictures and videos in the same folder: arrows to the one before
+  // and the one after, and a reel of the few on either side to jump to.
+  const around = isImage(path) || isVideo(path) ? docs.filter((d) => (isImage(d.path) || isVideo(d.path)) && folderOf(d.path) === folderOf(path) && inView(d) && !gateOf(d.path)) : [];
+  const at = around.findIndex((d) => d.path === path);
+  const wrap = el('div', 'stagewrap');
+  wrap.append(stage);
+  box.append(bar, wrap);
+  if (at >= 0 && around.length > 1) {
+    const go = (i) => around[i] && openDoc(around[i].path, { pane });
+    box.step = (dir) => go(at + dir);   // for the arrow keys
+    bar.firstChild.after(el('small', '', `${at + 1} of ${around.length}`));
+    for (const [dir, sign, label] of [[-1, '‹', 'Previous in this folder (←)'], [1, '›', 'Next in this folder (→)']]) {
+      const b = el('button', 'step ' + (dir < 0 ? 'prev' : 'next'), sign);
+      b.title = label;
+      b.setAttribute('aria-label', label);
+      b.disabled = !around[at + dir];
+      b.onclick = () => go(at + dir);
+      wrap.append(b);
+    }
+    const reel = el('div', 'reel');
+    for (let i = Math.max(0, at - 4); i <= Math.min(around.length - 1, at + 4); i++) {
+      const d = around[i], t = el('div', 'thumb' + (i === at ? ' cur' : ''));
+      t.dataset.path = d.path;
+      t.tabIndex = 0;
+      t.setAttribute('role', 'button');
+      t.title = d.path.split('/').pop();
+      if (i === at) t.setAttribute('aria-current', 'true');
+      if (isImage(d.path)) { const small = el('img'); small.loading = 'lazy'; small.alt = ''; mediaSrc(d.path).then((src) => { small.src = src; }); t.append(small); }
+      else t.append(videoThumb(d.path));
+      t.onclick = () => go(i);
+      reel.append(t);
+    }
+    box.append(reel);
+  }
   v.bar.style.width = '0%';
   v.body.replaceChildren(box);
+  // A reel wider than the screen is scrolled to have the current one in its middle.
+  const reel = box.querySelector('.reel'), cur = reel?.querySelector('.cur');
+  if (cur) { const r = reel.getBoundingClientRect(), c = cur.getBoundingClientRect(); reel.scrollLeft += c.left + c.width / 2 - (r.left + r.width / 2); }
+}
+// A PDF is shown by the browser's own PDF viewer, in a frame. Its pages are
+// fixed drawings, so they cannot take the theme's colours as a book's page
+// does; what can be done is "night": the frame's colours are turned inside
+// out (and the hues turned back), which gives dark pages with light text.
+// Night follows the pane's theme, dark or light, until the button is pressed;
+// after that it stays as chosen, for every PDF on this device.
+// A phone's browser usually has no PDF viewer for a frame: there, and for a
+// copy kept on the device, "open" hands the file to the device's own viewer.
+function showPdf(pane, path) {
+  const v = views[pane], box = el('div', 'viewer'), bar = el('div', 'viewbar');
+  bar.append(el('span', '', path.split('/').pop()));
+  const open = el('a', '', 'open in new tab');
+  open.target = '_blank';
+  open.rel = 'noopener';
+  v.bar.style.width = '0%';
+  box.append(bar);
+  v.body.replaceChildren(box);
+  if (net.online && !hub.url) {
+    const frame = el('iframe', 'pdf'), night = el('button', '', 'night');
+    frame.title = path.split('/').pop();
+    frame.referrerPolicy = 'no-referrer';
+    const paint = () => {
+      const probe = el('span');
+      box.append(probe);
+      probe.style.color = 'var(--paper)';
+      const [r, g, b] = getComputedStyle(probe).color.match(/[\d.]+/g).map(Number);
+      probe.remove();
+      const on = state.pdfNight ?? (r * 0.299 + g * 0.587 + b * 0.114 < 128);
+      frame.classList.toggle('night', on);
+      night.setAttribute('aria-pressed', on);
+    };
+    night.title = 'Dark pages with light text. Pictures in the PDF are turned too.';
+    night.onclick = () => { state.pdfNight = !frame.classList.contains('night'); save(); paint(); };
+    frame.paint = paint;
+    frame.src = open.href = rawUrl(path);
+    bar.append(night, keepBtn(path), open);
+    box.append(frame);
+    paint();
+    return;
+  }
+  // No server in reach, or another hub's file: the frame may only show this server's own address.
+  bar.append(keepBtn(path));
+  if (kept.has(path)) { mediaSrc(path).then((src) => { if (src) { open.href = src; bar.append(open); } }); box.append(el('p', 'empty', 'This PDF is kept on this device. "open in new tab" hands it to the PDF viewer of this device.')); }
+  else box.append(el('p', 'empty', hub.url ? 'A PDF on another hub is shown once a copy is kept on this device: press the keep button, then "open in new tab".' : 'The server is not reachable, and this file has not been kept on this device.'));
+}
+// A video's thumbnail: the video itself, silent and still, showing its first
+// frame. Nothing of it is fetched until the tile is in sight.
+const thumbSeen = new IntersectionObserver((all) => {
+  for (const e of all) {
+    if (!e.isIntersecting) continue;
+    thumbSeen.unobserve(e.target);
+    mediaSrc(e.target.dataset.video).then((src) => { if (src) e.target.src = src + '#t=0.1'; });
+  }
+}, { rootMargin: '200px' });
+function videoThumb(path) {
+  const v = el('video');
+  v.muted = true;
+  v.playsInline = true;
+  v.preload = 'metadata';
+  v.tabIndex = -1;
+  v.dataset.video = path;
+  thumbSeen.observe(v);
+  return v;
+}
+// Left and right arrows step through the folder's pictures and videos (not while typing, and not while a video has the keys: there they seek).
+document.addEventListener('keydown', (e) => {
+  if ((e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  if (e.target.matches?.('input, textarea, select, video, audio, [contenteditable]')) return;
+  stepKey(e);
+});
+// The same keys turn the pages of a book. Pressed inside a book's page they arrive in its frame, which hands them here.
+function stepKey(e) {
+  const stepper = views[state.active]?.body.querySelector('.viewer, .bookwrap iframe');
+  if (!stepper?.step || gateOpen()) return;
+  e.preventDefault();
+  stepper.step(e.key === 'ArrowLeft' ? -1 : 1);
+}
+
+// A text or JSON file of web addresses, as media cards. The cards are a page
+// the server makes, shown in a frame apart from the reader: that page loads
+// pictures and media from the web; the reader itself still loads nothing from
+// anywhere but its server.
+function cardsFrame(path, within = document.body) {
+  const frame = el('iframe', 'cards');
+  // Its one script is the server's own; without allow-same-origin the page stays a stranger to the reader.
+  frame.setAttribute('sandbox', 'allow-scripts allow-popups allow-popups-to-escape-sandbox');
+  frame.referrerPolicy = 'no-referrer';
+  frame.allow = 'fullscreen; picture-in-picture';
+  frame.title = 'Media from ' + path.split('/').pop();
+  // The gallery is told the colours of the pane it will sit in, so it looks like the reader's own.
+  const probe = el('span'), look = [];
+  within.append(probe);
+  for (const name of ['paper', 'shade', 'ink', 'muted', 'rule', 'accent']) {
+    probe.style.color = `var(--${name})`;
+    const rgb = getComputedStyle(probe).color.match(/[\d.]+/g);
+    if (rgb) look.push(name + '=' + rgb.slice(0, 3).map((x) => Math.round(Number(x)).toString(16).padStart(2, '0')).join(''));
+  }
+  probe.remove();
+  frame.src = '/cards/' + path.split('/').map(encodeURIComponent).join('/') + '?' + look.join('&') + '&size=' + cardSize() + (state.cardsReversed ? '&rev=1' : '');
+  return frame;
+}
+// How wide a card is in a gallery: set by the slider there, kept for this device.
+const cardSize = () => Math.min(420, Math.max(70, Number(state.cardSize) || 150));
+let cardSaved = 0;
+function setCardSize(n) {
+  if (!(n >= 70 && n <= 420)) return;
+  state.cardSize = Math.round(n);
+  for (const g of document.querySelectorAll('.thumbs')) g.style.setProperty('--card', state.cardSize + 'px');
+  clearTimeout(cardSaved);
+  cardSaved = setTimeout(save, 400);
+}
+// The gallery of a file of links is a page apart; its slider says what it was set to.
+window.addEventListener('message', (e) => {
+  const from = [...document.querySelectorAll('iframe.cards')].find((f) => f.contentWindow === e.source);
+  if (!from) return;
+  // "reverse" in the gallery: remembered here, and the gallery is loaded again in that order.
+  if (typeof e.data?.cardsReversed === 'boolean') {
+    state.cardsReversed = e.data.cardsReversed;
+    save();
+    const u = new URL(from.src);
+    u.searchParams.set('rev', state.cardsReversed ? '1' : '0');
+    from.src = u.href;
+  }
+  if (typeof e.data?.cardSize === 'number') setCardSize(e.data.cardSize);
+});
+// A card takes the shape of its picture once that is known (kept within reason).
+const shapeCard = (m) => { const w = m.naturalWidth || m.videoWidth, h = m.naturalHeight || m.videoHeight; if (w && h) m.parentNode.style.aspectRatio = String(Math.min(2.5, Math.max(0.4, w / h))); };
+// Opening the file loads nothing from the web: it lists what is in it, as
+// text. The pictures and media are fetched only when asked for, since that
+// tells the sites they are on that this device is looking; the choice is
+// remembered for the file.
+function showLinks(pane, path) {
+  const v = views[pane], box = el('div', 'viewer lb'), bar = el('div', 'viewbar');
+  bar.append(el('span', '', path.split('/').pop()), ...lightboxBtns(pane));
+  box.append(bar);
+  v.bar.style.width = '0%';
+  v.body.replaceChildren(box);
+  if (hub.url || !net.online) { box.append(el('p', 'empty', 'The media in this file is shown by the server it is on, when that is in reach.')); return; }
+  const show = () => { box.replaceChildren(bar, cardsFrame(path, v.root)); };
+  if ((state.linksShown || []).includes(path)) return show();
+  const ask = el('div', 'linksAsk'), go = el('button', 'main', 'Show the pictures and media'), list = el('div', 'fly');
+  ask.append(el('p', '', 'This file holds web addresses. Showing its pictures and media loads them from the sites they are on, which tells those sites this device\'s address. Nothing has been loaded yet.'), go, list);
+  go.onclick = () => { state.linksShown = [...(state.linksShown || []), path]; save(); show(); };
+  box.append(ask);
+  api('/api/links?path=' + encodeURIComponent(path)).then((r) => {
+    if (!ask.isConnected) return;
+    const sites = new Set(r.items.flatMap((it) => [it.thumb, ...it.media.map((m) => m.url)]).filter(Boolean).map((u) => u.split('/')[2]));
+    go.textContent = `Show the pictures and media (${r.items.length}${r.more ? '+' : ''} saved, from ${sites.size} site${sites.size === 1 ? '' : 's'})`;
+    list.replaceChildren(...r.items.map((it) => {
+      const row = el('div', '', it.title || (it.page || it.media[0]?.url || it.thumb).replace(/^https:\/\//, ''));
+      row.prepend(el('small', '', it.media[0]?.kind || (it.thumb ? 'image' : 'page')));
+      return row;
+    }));
+  }).catch(() => {});
 }
 
 // "Check Yourself" blocks: hide the answer until asked for.
@@ -2232,6 +2672,14 @@ function appendBrowse(article, pane, folder) {
     mode.style.cssText = 'border: 0; padding: 0; color: var(--accent); text-decoration: underline;';
     mode.onclick = () => { state.grouped = !grouped; save(); draw(); renderPlayers(); };
     listing.append(mode);
+    if (open === 'all' || open === 'media') {
+      const wide = el('label', 'cardSize', 'size '), slide = el('input');
+      slide.type = 'range'; slide.min = 70; slide.max = 420; slide.value = cardSize();
+      slide.setAttribute('aria-label', 'Size of the cards');
+      slide.oninput = () => setCardSize(Number(slide.value));
+      wide.append(slide);
+      listing.append(wide);
+    }
     const whereOf = (d) => (folderOf(d.path).slice(folder ? folder.length + 1 : 0) || 'here').replace(/\//g, ' / ');
     const section = (title, items, build) => { if (items.length) { listing.append(el('h5', '', title)); build(items); } };
     const rows = (items) => {
@@ -2240,14 +2688,52 @@ function appendBrowse(article, pane, folder) {
         const where = whereOf(d);
         if (grouped && where !== group) { group = where; listing.append(el('h5', '', where)); }
         const row = el('div', 'item');
+        row.dataset.path = d.path;
         row.tabIndex = 0;
         row.setAttribute('role', 'button');
-        row.append(el('span', '', isMedia(d.path) ? d.path.split('/').pop() : d.title));
+        row.append(el('span', '', isBinary(d.path) ? d.path.split('/').pop() : d.title));
         if (!grouped && where !== 'here') row.append(pathLabel(where));
         if (kept.has(d.path)) row.append(el('small', '', 'on this device'));
         if (isAudio(d.path) || isVideo(d.path)) row.append(queueBtn(d.path));
         row.onclick = (e) => (isAudio(d.path) && playable(d.path) && !(e.metaKey || e.ctrlKey || e.altKey) ? playTrack(d.path) : openDoc(d.path, { pane, side: e.metaKey || e.ctrlKey || e.altKey }));
         listing.append(row);
+      }
+    };
+    // A file of saved links is one card. Pointing at it lists the addresses;
+    // pressing it opens the card out into the media itself, scrolling inside the card.
+    const linkCards = (items) => {
+      for (const d of items) {
+        const card = el('div', 'linkcard'), head = el('div', 'head'), fly = el('div', 'fly'), count = el('small', '', 'saved links');
+        card.dataset.path = d.path;
+        head.tabIndex = 0;
+        head.setAttribute('role', 'button');
+        head.title = 'Show the media in this file';
+        head.append(el('b', '', d.title), count);
+        fly.hidden = true;
+        let asked = false;   // the addresses are fetched the first time they are wanted
+        const load = async () => {
+          if (asked) return;
+          asked = true;
+          try {
+            const r = await api('/api/links?path=' + encodeURIComponent(d.path));
+            count.textContent = r.items.length + (r.more ? '+' : '') + ' saved';
+            fly.replaceChildren(...r.items.map((it) => {
+              const row = el('div', '', it.title || (it.page || it.media[0]?.url || it.thumb).replace(/^https:\/\//, ''));
+              row.prepend(el('small', '', it.media[0]?.kind || (it.thumb ? 'image' : 'page')));
+              return row;
+            }));
+          } catch { asked = false; }
+        };
+        card.onmouseenter = () => { if (card.classList.contains('super')) return; load(); fly.hidden = false; };
+        card.onmouseleave = () => { fly.hidden = true; };
+        head.onclick = () => {
+          const on = card.classList.toggle('super');
+          fly.hidden = true;
+          card.querySelector('iframe')?.remove();
+          if (on) { load(); card.append(cardsFrame(d.path, card)); }
+        };
+        card.append(head, fly);
+        listing.append(card);
       }
     };
     const thumbs = (items) => {
@@ -2259,13 +2745,15 @@ function appendBrowse(article, pane, folder) {
     };
     const thumbGrid = (items) => {
       const grid = el('div', 'thumbs');
+      grid.style.setProperty('--card', cardSize() + 'px');
       for (const d of items) {
         const t = el('div', 'thumb');
+        t.dataset.path = d.path;
         t.tabIndex = 0;
         t.setAttribute('role', 'button');
         t.title = d.path;
-        if (isImage(d.path)) { const img = el('img'); img.loading = 'lazy'; img.alt = ''; mediaSrc(d.path).then((src) => { img.src = src; }); t.append(img); }
-        else t.append(el('i', '', 'video'));
+        if (isImage(d.path)) { const img = el('img'); img.loading = 'lazy'; img.alt = ''; img.onload = () => shapeCard(img); mediaSrc(d.path).then((src) => { img.src = src; }); t.append(img); }
+        else { const still = videoThumb(d.path); still.addEventListener('loadedmetadata', () => shapeCard(still)); t.append(still); }
         t.append(el('b', '', d.path.split('/').pop()), keepBtn(d.path));
         t.onclick = (e) => openDoc(d.path, { pane, side: e.metaKey || e.ctrlKey || e.altKey });
         grid.append(t);
@@ -2275,7 +2763,8 @@ function appendBrowse(article, pane, folder) {
     if (open === 'all') {
       section('Pictures and video', files.filter((d) => isImage(d.path) || isVideo(d.path)), thumbs);
       section('Music', files.filter((d) => isAudio(d.path)), rows);
-      section('Documents', files.filter((d) => !isMedia(d.path)), rows);
+      section('Saved links', files.filter((d) => d.links), linkCards);
+      section('Documents', files.filter((d) => !isMedia(d.path) && !d.links), rows);
     } else if (open === 'media') thumbs(files);
     else rows(files);
     if (!files.length) listing.append(el('p', 'empty', 'Nothing of this kind here yet.'));
@@ -2367,6 +2856,10 @@ function track(pane) {
 function renderOutline() {
   const v = views[state.active];
   tocEl.innerHTML = '';
+  // The label says which document the outline is of; cut short with … when it does not fit.
+  const of = docOf(activeDoc()), name = of ? (of.front ? config.title : of.title) : '';
+  $('tocLabel').textContent = 'Outline' + (name ? ' · ' + name : '');
+  $('tocLabel').title = name;
   if (!v) return;
   v.heads.forEach((h, k) => {
     const a = el('a', 'l' + h.tagName[1], h.textContent);
@@ -2430,6 +2923,8 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !dial.hi
 // Everything outside the panes that depends on which document has focus.
 function chrome() {
   views.forEach((v, i) => v.root.classList.toggle('active', i === state.active));
+  lightboxSync();
+  for (const sum of treeEl.querySelectorAll('summary[data-folder]')) paintQuick(sum);
   for (const row of treeEl.querySelectorAll('.file')) {
     row.classList.toggle('active', row.dataset.path === activeDoc());
     row.classList.toggle('open', state.panes.some((p) => p.tabs.includes(row.dataset.path)));
@@ -2450,11 +2945,12 @@ function chrome() {
 }
 
 // ---- selection → what the note is about ---------------------------------------
-function takeSelection(raw, pane, node) {
+function takeSelection(raw, pane, node, offset = 0) {
   const text = raw.replace(/\s+/g, ' ').trim();
   if (text.length < 3) return;
   if (pane !== state.active) { state.active = pane; chrome(); }
   pendingQuote = text;
+  pendingAt = node && views[pane].surface ? { article: views[pane].surface, node, offset } : null;
   activeHl = null;
   // The heading the selection sits under (not merely the one scrolled to).
   pendingHead = node ? views[pane].heads.filter((h) => h.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING).pop() || null : null;
@@ -2467,7 +2963,7 @@ document.addEventListener('selectionchange', () => {
   const node = sel.getRangeAt(0).commonAncestorContainer;
   const pane = views.findIndex((v) => v.article?.contains(node));
   if (pane < 0) return;
-  takeSelection(sel.toString(), pane, sel.getRangeAt(0).startContainer);
+  takeSelection(sel.toString(), pane, sel.getRangeAt(0).startContainer, sel.getRangeAt(0).startOffset);
   if (!touch.matches) return;
   clearTimeout(touchTimer);
   touchTimer = setTimeout(() => {
@@ -2518,10 +3014,11 @@ $('composer').onsubmit = async (e) => {
   e.preventDefault();
   const text = input.value.trim(), doc = activeDoc();
   if (!text || !doc) return;
+  endRefs();
   input.value = '';
   const hl = hlNote();
   if (hl && !hl.text) await noteOp({ kind: 'set', id: hl.id, fields: { text } });
-  else if (hl) await noteOp({ kind: 'add', note: makeNote({ doc: hl.doc, text, quote: hl.quote, type: hl.type, heading: hl.heading, headingText: hl.headingText }) });
+  else if (hl) await noteOp({ kind: 'add', note: makeNote({ doc: hl.doc, text, quote: hl.quote, type: hl.type, heading: hl.heading, headingText: hl.headingText, ...(hl.anchor ? { anchor: hl.anchor } : {}) }) });
   else await createNote(text);
   pendingQuote = '';
   activeHl = null;
@@ -2532,7 +3029,248 @@ $('composer').onsubmit = async (e) => {
 };
 input.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('composer').requestSubmit(); }
+  if (e.key === 'Escape') endRefs();
 });
+
+// ---- references inside a note ----------------------------------------------------
+// Typing "//" in the note box (not followed by a space, and not the "//" of a
+// web address) puts a link button on every file, heading, note, highlight and
+// media item on the page. Pressing one writes a reference where the "//" was;
+// any number can be added. Typing anything else, sending the note or Escape
+// takes the buttons away again.
+// A reference is written [label](path), [label](path#heading-slug) or
+// [label](path#note:id), with the path counted from the top of the workspace.
+const ref = { on: false, at: 0, len: 0, n: 0 };
+const REF_TARGETS = '#tree .file[data-path], .listing .item[data-path], .thumb[data-path], .track[data-path], #toc a, #notes .note[data-id], .latest .tick[data-id]';
+const REF_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>';
+const refWatch = new MutationObserver(() => paintRefs());   // lists are redrawn while the buttons are showing
+// What an item on the page is, as a label and a target to open: a file, a heading, a note or highlight.
+const encPath = (p) => p.split('/').map(encodeURIComponent).join('/').replace(/\(/g, '%28').replace(/\)/g, '%29');
+function refParts(node) {
+  const label = (s) => { const t = s.replace(/[\[\]\s]+/g, ' ').trim(); return t.length > 60 ? t.slice(0, 60) + '…' : t; };
+  if (node.dataset.id) {
+    const n = notes.find((x) => x.id === node.dataset.id);
+    return n ? { label: label(n.text || n.quote) || 'note', target: `${encPath(n.doc)}#note:${n.id}` } : null;
+  }
+  if (node.matches('#toc a')) {
+    const d = activeDoc(), slug = (node.getAttribute('href') || '').slice(1);
+    return d ? { label: label(node.textContent) || 'heading', target: encPath(d) + (slug ? '#' + slug : '') } : null;
+  }
+  const path = node.dataset.path, d = docOf(path);
+  return { label: label(d && !isMedia(path) ? (d.front ? config.title : d.title) : path.split('/').pop()), target: encPath(path) };
+}
+function refTo(node) {
+  const p = refParts(node);
+  return p ? `[${p.label}](${p.target})` : '';
+}
+// The buttons on the items: a link button while references are being added
+// to a note, a "+" while items are being picked for a group.
+function paintRefs() {
+  if (!ref.on && !pick.on) return;
+  for (const node of document.querySelectorAll(REF_TARGETS)) {
+    const host = node.querySelector('.meta') || node;
+    if (ref.on && !node.querySelector('.refBtn')) {
+      const b = el('button', 'refBtn');
+      b.type = 'button';
+      b.innerHTML = REF_ICON;
+      b.title = 'Add a reference to this in the note';
+      b.setAttribute('aria-label', b.title);
+      b.onmousedown = (e) => e.preventDefault();   // the note box keeps the cursor
+      b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); const t = refTo(node); if (t) addRef(t); };
+      host.append(b);
+    }
+    if (pick.on && !node.querySelector('.pickBtn')) {
+      const item = refParts(node);
+      if (!item) continue;
+      const b = el('button', 'pickBtn');
+      b.type = 'button';
+      b.dataset.target = item.target;
+      b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); togglePick(item); };
+      host.append(b);
+      paintPick(b);
+    }
+  }
+}
+const watchItems = () => { if (ref.on || pick.on) refWatch.observe(document.body, { childList: true, subtree: true }); else refWatch.disconnect(); };
+function startRefs(at) {
+  Object.assign(ref, { on: true, at, len: 2, n: 0 });
+  document.body.classList.add('reffing');
+  paintRefs();
+  watchItems();
+}
+function endRefs() {
+  if (!ref.on) return;
+  ref.on = false;
+  watchItems();
+  document.body.classList.remove('reffing');
+  for (const b of document.querySelectorAll('.refBtn')) b.remove();
+}
+
+// ---- focus groups -------------------------------------------------------------
+// A group is a list of items under a name of the reader's choosing, "#name":
+// files, headings, notes, highlights, media, in any mix. Making one: press "#"
+// beside Files, press "+" on each item wanted (anywhere on the page), give the
+// name, save. A queue of music can be saved as one too. Groups are listed at
+// the top of the file list, closed until opened, and are kept on this device.
+let groups = [];
+const pick = { on: false, items: [] };
+const saveGroups = () => store.set('groups:' + config.root, groups);
+function loadGroups() {
+  const g = store.get('groups:' + config.root);
+  groups = Array.isArray(g) ? g.filter((x) => x && typeof x.tag === 'string' && Array.isArray(x.items)) : [];
+}
+const pickBar = el('div'), pickCount = el('span'), pickName = el('input'), pickSave = el('button', 'main', 'save'), pickStop = el('button', '', 'cancel');
+pickBar.id = 'pickBar';
+pickBar.hidden = true;
+pickName.placeholder = 'name';
+pickName.setAttribute('aria-label', 'Name of the group');
+pickName.maxLength = 40;
+pickBar.append(pickCount, el('b', '', '#'), pickName, pickSave, pickStop);
+treeEl.before(pickBar);
+const groupBtn = el('button', 'ic', '#');
+groupBtn.id = 'groupBtn';
+groupBtn.title = 'Make a focus group: pick items, then name it';
+groupBtn.setAttribute('aria-label', groupBtn.title);
+$('addBtn').before(groupBtn);
+function paintPick(b) {
+  const inIt = pick.items.some((x) => x.target === b.dataset.target);
+  b.textContent = inIt ? '✓' : '+';
+  b.setAttribute('aria-pressed', inIt);
+  b.title = inIt ? 'In the group being made. Press to take it out.' : 'Add to the group being made';
+  b.setAttribute('aria-label', b.title);
+}
+function paintPicks() {
+  pickCount.textContent = pick.items.length ? `${pick.items.length} picked · save as` : 'Press + on what belongs together · save as';
+  for (const b of document.querySelectorAll('.pickBtn')) paintPick(b);
+}
+function togglePick(item) {
+  const at = pick.items.findIndex((x) => x.target === item.target);
+  if (at >= 0) pick.items.splice(at, 1); else pick.items.push(item);
+  paintPicks();
+}
+function startPick(items = []) {
+  pick.on = true;
+  pick.items = [...items];
+  pickBar.hidden = false;
+  pickName.value = '';
+  document.body.classList.add('picking');
+  groupBtn.setAttribute('aria-pressed', 'true');
+  paintRefs();
+  paintPicks();
+  watchItems();
+  if (items.length) pickName.focus();
+}
+function endPick() {
+  pick.on = false;
+  pick.items = [];
+  pickBar.hidden = true;
+  watchItems();
+  document.body.classList.remove('picking');
+  groupBtn.setAttribute('aria-pressed', 'false');
+  for (const b of document.querySelectorAll('.pickBtn')) b.remove();
+}
+function savePick() {
+  const tag = pickName.value.replace(/^#+/, '').trim().replace(/\s+/g, '-');
+  if (!tag) { pickName.focus(); return; }
+  if (!pick.items.length) return;
+  // A name already in use: the items join that group.
+  const had = groups.find((g) => g.tag === tag);
+  if (had) { for (const it of pick.items) if (!had.items.some((x) => x.target === it.target)) had.items.push(it); }
+  else groups.push({ tag, items: pick.items });
+  saveGroups();
+  state.groupsOpen = [...new Set([...(state.groupsOpen || []), tag])];   // shown open this once, to see what was made
+  save();
+  endPick();
+  renderTree();
+}
+groupBtn.onclick = () => (pick.on ? endPick() : startPick());
+pickSave.onclick = savePick;
+pickStop.onclick = endPick;
+pickName.addEventListener('keydown', (e) => { if (e.key === 'Enter') savePick(); if (e.key === 'Escape') endPick(); });
+// The groups, at the top of the file list.
+function drawGroups(section) {
+  for (const g of groups) {
+    const det = el('details'), kids = el('div', 'kids'), sum = el('summary', '', '#' + g.tag);
+    sum.append(el('small', '', ' · ' + g.items.length));
+    det.open = (state.groupsOpen || []).includes(g.tag);
+    det.addEventListener('toggle', () => {
+      pinNext();
+      state.groupsOpen = (state.groupsOpen || []).filter((t) => t !== g.tag);
+      if (det.open) state.groupsOpen.push(g.tag);
+      save();
+    });
+    for (const item of g.items) {
+      const row = el('div', 'file'), out = el('button', '', '×');
+      row.tabIndex = 0;
+      row.setAttribute('role', 'button');
+      row.title = item.label;
+      out.title = 'Take out of this group';
+      out.setAttribute('aria-label', out.title);
+      out.onclick = (e) => { e.stopPropagation(); g.items = g.items.filter((x) => x !== item); if (!g.items.length) groups = groups.filter((x) => x !== g); saveGroups(); renderTree(); };
+      row.append(el('span', 'name', item.label), out);
+      row.onclick = (e) => openRef(item.target, e.metaKey || e.ctrlKey || e.altKey);
+      kids.append(row);
+    }
+    // What can be played goes to the queue in one press.
+    const plays = g.items.map((x) => { try { return x.target.includes('#') ? '' : decodeURIComponent(x.target); } catch { return ''; } }).filter((p) => p && (isAudio(p) || isVideo(p)) && docOf(p));
+    const foot = el('div', 'group-foot');
+    if (plays.length) {
+      const play = el('button', 'qlink', 'add to the queue');
+      play.onclick = () => { queue = [...queue, ...plays.filter((p) => !queue.includes(p))]; saveQueue(); renderPlayers(); };
+      foot.append(play);
+    }
+    const drop = el('button', 'qlink', 'delete group');
+    drop.onclick = () => { if (drop.textContent === 'delete group') return (drop.textContent = 'really delete?'); groups = groups.filter((x) => x !== g); saveGroups(); renderTree(); };
+    foot.append(drop);
+    kids.append(foot);
+    det.append(sum, kids);
+    section(' group').append(det);
+  }
+}
+
+// The first reference takes the place of the "//"; later ones follow it.
+function addRef(token) {
+  const v = input.value, put = (ref.n ? ' ' : '') + token;
+  input.value = v.slice(0, ref.at) + put + v.slice(ref.at + ref.len);
+  Object.assign(ref, { at: ref.at + put.length, len: 0, n: ref.n + 1 });
+  input.focus();
+  input.setSelectionRange(ref.at, ref.at);
+}
+input.addEventListener('input', () => {
+  const before = input.value.slice(0, input.selectionStart);
+  if (/(^|[^:\/])\/\/$/.test(before)) startRefs(before.length - 2); else endRefs();
+});
+// A note's text is shown as typed, except that a reference in it is a link.
+function noteText(text) {
+  const box = el('div', 'text'), re = /\[([^\]\n]+)\]\(([^)\s]+)\)/g;
+  let at = 0;
+  for (let m; (m = re.exec(text));) {
+    const a = el('a', 'ref', m[1]);
+    a.href = '#';
+    a.onclick = (e) => { e.preventDefault(); e.stopPropagation(); openRef(m[2], e.metaKey || e.ctrlKey || e.altKey); };
+    box.append(text.slice(at, m.index), a);
+    at = re.lastIndex;
+  }
+  box.append(text.slice(at));
+  return box;
+}
+async function openRef(target, side) {
+  if (/^https?:/i.test(target)) return void window.open(target, '_blank', 'noopener');
+  const cut = target.indexOf('#'), hash = cut < 0 ? '' : target.slice(cut + 1), id = hash.startsWith('note:') ? hash.slice(5) : '';
+  let path;
+  try { path = decodeURIComponent(cut < 0 ? target : target.slice(0, cut)); } catch { return; }
+  if (!docOf(path)) return;
+  await openDoc(path, { side, hash: id ? undefined : hash || undefined });
+  if (id) showNote(id);
+}
+// Bring a note or highlight into view: its passage in the open document, and its entry in the notes.
+function showNote(id) {
+  const n = notes.find((x) => x.id === id);
+  if (!n) return;
+  const mark = views[state.active].surface?.querySelector(`mark[data-note="${CSS.escape(id)}"]`);
+  if (mark) flash(mark); else if (n.heading) goTo(state.active, n.heading);
+  if (n.quote) selectHighlight(id); else flash(notesEl.querySelector(`.note[data-id="${CSS.escape(id)}"]`));
+}
 
 // A note or highlight on the current selection (or, with no selection, on the
 // section being read).
@@ -2541,6 +3279,7 @@ async function createNote(text) {
   const note = makeNote({
     doc: activeDoc(), text, quote: pendingQuote, type: pendingQuote ? curType().id : '',
     heading: head?.dataset?.slug || '', headingText: head?.textContent || '',
+    ...pendingAnchor(),
   });
   await noteOp({ kind: 'add', note });
   return note;
@@ -2700,7 +3439,8 @@ function renderNotes(rehighlight = true) {
       div.append(q);
     }
     if (n.id === activeHl) div.classList.add('on');
-    if (n.text) div.append(el('div', 'text', n.text));
+    if (lost.has(n.id)) div.classList.add('lost');
+    if (n.text) div.append(noteText(n.text));
 
     const meta = el('div', 'meta');
     meta.append(new Date(n.ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }));
@@ -2713,7 +3453,7 @@ function renderNotes(rehighlight = true) {
     }
     if (pendingQuote) {
       const attach = el('button', '', n.quote ? 'move to selection' : 'attach selection');
-      attach.onclick = async () => { await noteOp({ kind: 'set', id: n.id, fields: { quote: pendingQuote } }); pendingQuote = ''; renderContext(); loadNotes(); };
+      attach.onclick = async () => { await noteOp({ kind: 'set', id: n.id, fields: { quote: pendingQuote, ...pendingAnchor() } }); pendingQuote = ''; renderContext(); loadNotes(); };
       meta.append(attach);
     }
     const del = el('button', '', 'delete');
@@ -2735,54 +3475,215 @@ function renderNotes(rehighlight = true) {
     notesEl.append(div);
   }
   if (rehighlight) views.forEach((v, i) => v.surface && highlightAll(v.surface, state.panes[i].active));
+  renderLatest();
+}
+// The latest notes and highlights from every document, newest first, beside
+// the main front page. Pressing one opens its document at that passage.
+function renderLatest() {
+  const cut = (s, n) => { const t = s.replace(/\[([^\]\n]+)\]\([^)\s]+\)/g, '$1').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n) + '…' : t; };
+  for (const box of document.querySelectorAll('.latest')) {
+    const recent = notes.filter((n) => docOf(n.doc) && !gateOf(n.doc)).sort((x, y) => (y.ts > x.ts ? 1 : y.ts < x.ts ? -1 : 0)).slice(0, 15);
+    box.replaceChildren(el('h5', '', 'Latest notes and highlights'));
+    if (!recent.length) box.append(el('p', 'empty', 'None yet.'));
+    for (const n of recent) {
+      const row = el('div', 'tick');
+      row.dataset.id = n.id;
+      row.tabIndex = 0;
+      row.setAttribute('role', 'button');
+      if (n.type) row.style.borderLeftColor = typeOf(n.type).color;
+      if (n.quote) row.append(el('div', 'quote', '“' + cut(n.quote, n.text ? 70 : 120) + '”'));
+      if (n.text) row.append(el('div', 'said', cut(n.text, 120)));
+      row.append(el('div', 'meta', new Date(n.ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) + ' · ' + docOf(n.doc).title));
+      row.onclick = async () => { await openDoc(n.doc); showNote(n.id); };
+      box.append(row);
+    }
+  }
 }
 
 // Wrap each note's quote in <mark>. Matching ignores whitespace so a selection
 // that crossed paragraphs or inline formatting still finds its place.
+// ---- anchors: where in a document a highlight belongs ---------------------------
+// A highlight used to be found by its words alone, so words that occur twice
+// were always marked at the first place. It now carries an anchor as well:
+//
+//   block, nth   the block it is in (a paragraph, heading, list item, cell):
+//                a hash of the block's letters and digits, and which one of
+//                the blocks with that hash (0 for the first)
+//   start        how far into the block it begins, counted in characters
+//                that are not spaces
+//   before, after   the few characters on either side
+//
+// Placing one: the block and offset if the words are still there; otherwise
+// every place the words occur, choosing the one whose surroundings fit best;
+// otherwise (a note from before anchors) the first place under its heading.
+// A highlight that cannot be placed is said to be lost, not dropped.
+// The server folds and hashes the same way (server-cpp/src/anchor.hpp).
+const BLOCK_TAGS = new Set('P LI H1 H2 H3 H4 H5 H6 PRE TD TH DT DD BLOCKQUOTE FIGCAPTION DIV SECTION ARTICLE MAIN ASIDE HEADER FOOTER NAV BODY DETAILS SUMMARY CAPTION ADDRESS FORM UL OL DL TABLE THEAD TBODY TR FIGURE'.split(' '));
+// Text inside <script> and <style> is not part of what the reader sees.
+const VISIBLE = { acceptNode: (n) => (/^(SCRIPT|STYLE|NOSCRIPT)$/i.test(n.parentNode.nodeName) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT) };
+const lost = new Set();   // highlights whose words were not found in the document as it is now
+// Letters and digits only, ASCII letters lowered.
+function fold(s) {
+  let out = '';
+  for (const ch of s) {
+    const c = ch.codePointAt(0);
+    if (c < 0x80) { if ((c >= 48 && c <= 57) || (c >= 97 && c <= 122)) out += ch; else if (c >= 65 && c <= 90) out += ch.toLowerCase(); }
+    else if (!(c === 0xA0 || c === 0x1680 || (c >= 0x2000 && c <= 0x206F) || c === 0x3000 || c === 0xFEFF)) out += ch;
+  }
+  return out;
+}
+// FNV-1a, 64 bits, as 16 hex digits. The number is kept as two halves, since a
+// JavaScript number holds 53 bits exactly: multiplying by the prime
+// 2^40 + 0x1b3 is a shift of the low half into the high one, plus two small products.
+function hash64(text) {
+  let hi = 0xcbf29ce4, lo = 0x84222325;
+  for (const byte of new TextEncoder().encode(text)) {
+    lo = (lo ^ byte) >>> 0;
+    const low = lo * 0x1b3;
+    hi = (hi * 0x1b3 + Math.floor(low / 4294967296) + lo * 256) % 4294967296;
+    lo = low % 4294967296;
+  }
+  return hi.toString(16).padStart(8, '0') + lo.toString(16).padStart(8, '0');
+}
+// The document's text with the spaces taken out, where each character of it
+// is in the page, and where each block begins.
+function textMap(article) {
+  const walker = article.ownerDocument.createTreeWalker(article, NodeFilter.SHOW_TEXT, VISIBLE);
+  const at = [], starts = [];
+  let flat = '', node, last = null;
+  while ((node = walker.nextNode())) {
+    let block = node.parentNode;
+    while (block && block !== article && !BLOCK_TAGS.has(block.nodeName.toUpperCase())) block = block.parentNode;
+    const s = node.data;
+    for (let i = 0; i < s.length; i++) {
+      if (/\s/.test(s[i])) continue;
+      if (block !== last) { starts.push(flat.length); last = block; }
+      flat += s[i];
+      at.push([node, i]);
+    }
+  }
+  return { flat, at, starts, blocks: null };
+}
+// Each block's hash, worked out the first time one is asked for.
+function blocksOf(map) {
+  if (map.blocks) return map.blocks;
+  const seen = new Map();
+  map.blocks = map.starts.map((start, k) => {
+    const folded = fold(map.flat.slice(start, map.starts[k + 1] ?? map.flat.length)), hash = folded ? hash64(folded) : '';
+    const nth = seen.get(hash) || 0;
+    if (hash) seen.set(hash, nth + 1);
+    return { start, hash, nth };
+  });
+  return map.blocks;
+}
+// The anchor of the words that begin at `start` in the map.
+function anchorAt(map, start, length) {
+  const block = blocksOf(map).filter((b) => b.start <= start).pop();
+  if (!block?.hash) return null;
+  return { block: block.hash, nth: block.nth, start: start - block.start, before: map.flat.slice(Math.max(0, start - 24), start), after: map.flat.slice(start + length, start + length + 24) };
+}
+// The anchor for the text now selected, as { anchor } to add to a note; {} if it cannot be worked out.
+function pendingAnchor() {
+  const p = pendingAt, needle = pendingQuote.replace(/\s+/g, '');
+  if (!p || !needle || !p.article.isConnected) return {};
+  try {
+    const map = textMap(p.article), point = p.article.ownerDocument.createRange();
+    point.setStart(p.node, p.offset);
+    point.collapse(true);
+    // The first character at or after the start of the selection (the map is in page order).
+    let lo = 0, hi = map.at.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (point.comparePoint(map.at[mid][0], map.at[mid][1]) < 0) lo = mid + 1; else hi = mid; }
+    // What the browser gives as the selected text can differ a little from the page's text at that point.
+    let start = map.flat.startsWith(needle, lo) ? lo : map.flat.indexOf(needle, Math.max(0, lo - needle.length));
+    if (start < 0 || Math.abs(start - lo) > needle.length + 40) return {};
+    const anchor = anchorAt(map, start, needle.length);
+    return anchor ? { anchor } : {};
+  } catch { return {}; }
+}
+// Where a note's words are in the map; -1 if they are not there.
+function placeOf(map, n, article) {
+  const needle = n.quote.replace(/\s+/g, ''), a = n.anchor;
+  if (!needle) return -1;
+  if (a?.block) {
+    const block = blocksOf(map).find((b) => b.hash === a.block && b.nth === (a.nth || 0));
+    if (block && map.flat.startsWith(needle, block.start + (a.start || 0))) return block.start + (a.start || 0);
+  }
+  const hits = [];
+  for (let i = map.flat.indexOf(needle); i >= 0 && hits.length < 200; i = map.flat.indexOf(needle, i + 1)) hits.push(i);
+  if (hits.length < 2) return hits.length ? hits[0] : -1;
+  if (a) {
+    // The place whose surroundings are most like those the highlight was made in.
+    const before = a.before || '', after = a.after || '';
+    const fit = (i) => {
+      let s = 0, t = 0;
+      while (s < before.length && map.flat[i - 1 - s] === before[before.length - 1 - s]) s++;
+      while (t < after.length && map.flat[i + needle.length + t] === after[t]) t++;
+      const block = blocksOf(map).filter((b) => b.start <= i).pop();
+      return s + t + (block?.hash === a.block ? 8 : 0);
+    };
+    let best = hits[0], most = fit(best);
+    for (const i of hits.slice(1)) { const f = fit(i); if (f > most) { most = f; best = i; } }
+    if (most > 0) return best;
+  }
+  // No anchor to go by: the first place at or after the note's heading.
+  let from = 0;
+  try {
+    const head = n.heading && article.querySelector(`[data-slug="${CSS.escape(n.heading)}"]`);
+    if (head) from = Math.max(0, map.at.findIndex(([node]) => head.contains(node)));
+  } catch { /* a heading that cannot be looked for: start from the top */ }
+  return hits.find((i) => i >= from) ?? hits[0];
+}
 function highlightAll(article, path) {
   for (const m of article.querySelectorAll('mark[data-note]')) m.replaceWith(...m.childNodes);
   article.normalize();
-  for (const n of notes) if (n.doc === path && n.quote) highlight(article, n.quote, n.id, n.type ? typeOf(n.type).color : '');
+  const mine = notes.filter((n) => n.doc === path && n.quote);
+  let map = mine.length ? textMap(article) : null;
+  const placed = [];
+  for (const n of mine) {
+    const start = placeOf(map, n, article);
+    if (start < 0) { lost.add(n.id); continue; }
+    lost.delete(n.id);
+    placed.push({ n, start, length: n.quote.replace(/\s+/g, '').length });
+  }
+  // From the end of the document backwards: marking splits the text it marks,
+  // and leaves everything before it where the map says it is.
+  placed.sort((x, y) => y.start - x.start);
+  let marked = Infinity;   // where the marks made so far begin
+  for (const { n, start, length } of placed) {
+    if (start + length > marked) map = textMap(article);   // it overlaps one already marked: measure again
+    mark(article, map, start, length, n.id, n.type ? typeOf(n.type).color : '');
+    marked = Math.min(marked, start);
+  }
+  for (const d of notesEl.querySelectorAll('.note')) d.classList.toggle('lost', lost.has(d.dataset.id));
   markActive();
 }
-function highlight(article, quote, id, color) {
-  const doc = article.ownerDocument, framed = doc !== document;
-  // Text inside <script> and <style> is not part of what the reader sees.
-  const visible = { acceptNode: (n) => (/^(SCRIPT|STYLE|NOSCRIPT)$/.test(n.parentNode.nodeName) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT) };
-  const walker = doc.createTreeWalker(article, NodeFilter.SHOW_TEXT, visible);
-  const at = [];
-  let flat = '', node;
-  while ((node = walker.nextNode())) {
-    const s = node.data;
-    for (let i = 0; i < s.length; i++) if (!/\s/.test(s[i])) { flat += s[i]; at.push([node, i]); }
-  }
-  const needle = quote.replace(/\s+/g, '');
-  const start = flat.indexOf(needle);
-  if (start < 0 || !needle) return;
+function mark(article, map, start, length, id, color) {
+  const doc = article.ownerDocument, framed = doc !== document, at = map.at;
   const spans = new Map();
-  for (let i = start; i < start + needle.length; i++) {
+  for (let i = start; i < start + length; i++) {
     const [nd, off] = at[i];
     const s = spans.get(nd);
     if (s) s[1] = off; else spans.set(nd, [off, off]);
   }
   // Whitespace-only text between the first and last piece is part of the span too.
-  const first = at[start][0], last = at[start + needle.length - 1][0];
-  const between = doc.createTreeWalker(article, NodeFilter.SHOW_TEXT, visible);
+  const first = at[start][0], last = at[start + length - 1][0];
+  const between = doc.createTreeWalker(article, NodeFilter.SHOW_TEXT, VISIBLE);
   between.currentNode = first;
   for (let nd = first === last ? null : between.nextNode(); nd && nd !== last; nd = between.nextNode()) {
     if (!spans.has(nd) && nd.data.length && !nd.data.includes('\n\n')) spans.set(nd, [0, nd.data.length - 1]);
   }
-  for (const [nd, [a0, b0]] of spans) {
+  // Last piece first, for the same reason as above.
+  for (const [nd, [a0, b0]] of [...spans].reverse()) {
     // Pieces in the middle are covered whole, so spaces at their edges are not left as gaps.
     const a = nd === first ? a0 : 0, b = nd === last ? b0 : nd.data.length - 1;
     const range = doc.createRange();
     range.setStart(nd, a);
     range.setEnd(nd, b + 1);
-    const mark = doc.createElement('mark');
-    mark.dataset.note = id;
-    if (color) mark.style.background = color;
-    if (framed) { mark.style.background = color || '#fbeeb0'; mark.style.color = '#1d1b16'; mark.style.cursor = 'pointer'; }
-    range.surroundContents(mark);
+    const el = doc.createElement('mark');
+    el.dataset.note = id;
+    if (color) el.style.background = color;
+    if (framed) { el.style.background = color || '#fbeeb0'; el.style.color = '#1d1b16'; el.style.cursor = 'pointer'; }
+    range.surroundContents(el);
   }
 }
 
@@ -2865,6 +3766,7 @@ $('fresh').onclick = () => location.reload();
   refused = store.get('refused:' + config.root) || [];
   outbox = store.get('outbox:' + config.root) || [];
   loadQueue();
+  loadGroups();
   pendingFiles = store.get('pending:' + config.root) || [];
   kept = new Set(((await idb.keys('docs')) || []).filter((k) => k.startsWith(config.root + '|')).map((k) => k.slice(config.root.length + 1)));
   if (kept.size || matchMedia('(display-mode: standalone)').matches) askDurable();
@@ -2873,7 +3775,7 @@ $('fresh').onclick = () => location.reload();
   await loadDocs();
 
   const saved = store.get('layout:' + config.root);
-  if (saved?.panes?.length) state = { ...state, ...saved, opened: saved.opened || [] };
+  if (saved?.panes?.length) state = { ...state, ...saved, opened: [], groupsOpen: [] };   // every folder, subfolder and group starts closed, whatever was open last time
   for (const p of state.panes) {
     p.tabs = p.tabs.filter(docOf);
     if (!p.tabs.includes(p.active)) p.active = p.tabs[0] || null;

@@ -17,6 +17,12 @@
     --sans: "Helvetica Neue", Helvetica, Arial, sans-serif;
     --body: var(--serif);
     --head: var(--sans);
+  }
+  /* The colour tokens. They are set again on any element that carries a theme
+     of its own (the left pane, the right pane), so that a part can differ from
+     the rest of the reader: the values here are the Plain theme. */
+  :root, [data-theme] {
+    color-scheme: light;
     --paper: #fdfcf7;
     --shade: #f4f1e8;
     --ink: #1d1b16;
@@ -32,49 +38,60 @@
     --accent2: var(--accent);              /* a second accent for small marks (progress, what is playing); most themes have just the one */
   }
   /* Themes. Each one only redefines the colour tokens above. */
-  :root[data-theme="selenized"] { /* Selenized Light */
+  #side[data-theme], #right[data-theme] { background: var(--paper); color: var(--ink); }   /* a pane with a theme of its own */
+  [data-theme="selenized"] { /* Selenized Light */
     --paper: #fbf3db; --shade: #ece3cc; --ink: #3a4d53; --muted: #53676d; --rule: #d5cdb6;
     --accent: #0072d4; --mark: #f1dc9a; --reply: #e6ebcb; --field: #fffaea; --quote: #53676d;
     --c-kw: #8762c6; --c-str: #009c8f; --c-com: #909995; --c-num: #c25d1e; --c-fn: #0072d4; --c-type: #ad8900;
   }
-  :root[data-theme="lime"] { /* pale lime, a touch cool; golden-sepia ink and accents */
+  [data-theme="lime"] { /* pale lime, a touch cool; golden-sepia ink and accents */
     --paper: #eff9e9; --shade: #e1f0d9; --ink: #4d3c1f; --muted: #7b6535; --rule: #c6dbbb;
     --accent: #8f6a14; --mark: #f6e58d; --reply: #d6ead0; --field: #f9fdf5; --quote: #5f4c2a;
     --c-kw: #8a3b6b; --c-str: #2e7d4f; --c-com: #66725a; --c-num: #a35a00; --c-fn: #1e5fa8; --c-type: #6b3fa0;
   }
-  :root[data-theme="sky"] { /* pale sky blue, a touch warm; golden-sepia ink and accents */
+  [data-theme="sky"] { /* pale sky blue, a touch warm; golden-sepia ink and accents */
     --paper: #f1f6f9; --shade: #e4edf3; --ink: #4d3c1f; --muted: #7b6535; --rule: #cbd9e3;
     --accent: #8f6a14; --mark: #fbe9a6; --reply: #e2ede4; --field: #fcfdfe; --quote: #5f4c2a;
     --c-kw: #8a3fa0; --c-str: #1f7a5c; --c-com: #5d7082; --c-num: #b25a00; --c-fn: #1668a8; --c-type: #5a4fc0;
   }
-  :root[data-theme="eva"] { /* Eva Dark */
+  [data-theme="eva"] { /* Eva Dark */
     color-scheme: dark;
     --paper: #282c34; --shade: #21252b; --ink: #b7c5d3; --muted: #8391a2; --rule: #3b414d;
     --accent: #cf68e1; --mark: #e4bf7f; --reply: #2c3a3a; --field: #1e2228; --quote: #a3b1c0;
     --c-kw: #cf68e1; --c-str: #98c379; --c-com: #6b7686; --c-num: #ff9070; --c-fn: #6495ee; --c-type: #e4bf7f;
   }
-  :root[data-theme="triple-m"] {
+  [data-theme="triple-m"] {
     color-scheme: dark;
     --press: #fffffc; --press-ink: #1d163e;   /* this theme's page is the press colour, so the two swap */
     --paper: #1d163e; --shade: #271e54; --ink: #fffffc; --muted: #b3abd8; --rule: #3e3372;
     --accent: #8f6a14; --accent2: #ff8fc7; --mark: #ffd166; --reply: #2a2563; --field: #150f31; --quote: #dcd7f2;   /* the same golden sepia as Pale Sky, with pink for the small marks */
     --c-kw: #ff8fc7; --c-str: #9be7c4; --c-com: #8d84b8; --c-num: #ffd166; --c-fn: #8ec5ff; --c-type: #c9a7ff;
   }
-  :root[data-theme="periwinkle"] { /* Periwinkle: pale lavender paper, deep indigo ink; the accent is the ink itself, as in the screen it was taken from */
+  [data-theme="periwinkle"] { /* Periwinkle: pale lavender paper, deep indigo ink; the accent is the ink itself, as in the screen it was taken from */
     --paper: #e8e4f7; --shade: #dcd8ee; --ink: #1c163c; --muted: #49426d; --rule: #cfc9e4;
     --accent: #1c163c; --accent2: #c9a227; --mark: #f3dc8a; --reply: #f0edf8; --field: #f0edf8; --quote: #49426d;
     --c-kw: #6b2fa0; --c-str: #1f6f55; --c-com: #6e6890; --c-num: #8f6a14; --c-fn: #1f4e8c; --c-type: #49426d;
   }
   /* Gold, in small amounts: the line over the active pane and tab, the reading-progress line, the current heading's edge, the playing track. */
-  :root[data-theme="periwinkle"] .pane.active .tabs { box-shadow: inset 0 3px 0 var(--accent2); }
-  :root[data-theme="periwinkle"] .pane.active .tab.active { border-top-color: var(--accent2); }
-  :root[data-theme="periwinkle"] .md blockquote { border-left-color: var(--accent2); }
+  [data-theme="periwinkle"] .pane.active .tabs { box-shadow: inset 0 3px 0 var(--accent2); }
+  [data-theme="periwinkle"] .pane.active .tab.active { border-top-color: var(--accent2); }
+  [data-theme="periwinkle"] .md blockquote { border-left-color: var(--accent2); }
+  [data-theme="mahogany"] { /* Mahogany: deep red-brown paper, kept short of orange, silver ink and accent; cobalt for the small marks and for a press */
+    color-scheme: dark;
+    --paper: #33181b; --shade: #3f2124; --ink: #e6e3e0; --muted: #b9b0ab; --rule: #5f3b3e;
+    --accent: #c8ccd2; --accent2: #5b8def; --mark: #d3d7dc; --reply: #48282c; --field: #261012; --quote: #cfc8c3;   /* cobalt itself (#0047ab) is too dark to see on the paper, so the marks use a lighter one */
+    --press: #0047ab; --press-ink: #f2f3f5;
+    --c-kw: #7ea6ff; --c-str: #a9d29a; --c-com: #a38a80; --c-num: #f2a65a; --c-fn: #a9c8ff; --c-type: #e0b88a;
+  }
+  [data-theme="mahogany"] .pane.active .tabs { box-shadow: inset 0 3px 0 var(--accent2); }
+  [data-theme="mahogany"] .pane.active .tab.active { border-top-color: var(--accent2); }
+  [data-theme="mahogany"] .md blockquote { border-left-color: var(--accent2); }
   /* Sun Sound: the whole reader is one colour at a time, and that colour moves
      through hot pinks and oranges so slowly it is hardly seen to change. It is a
      colour animated over time, not a gradient across the page: every panel,
      dialog and drawer shows the same colour at the same moment. */
   @property --sun { syntax: '<color>'; inherits: true; initial-value: #ff69b4; }
-  :root[data-theme="sun-sound"] {
+  [data-theme="sun-sound"] {
     --paper: var(--sun);
     --shade: rgba(27, 6, 18, .07); --ink: #1b0612; --muted: #4a1030; --rule: rgba(27, 6, 18, .26);
     --accent: #0047ab; --accent2: #fffdf7; --mark: #fffdf4; --reply: rgba(255, 255, 255, .22); --field: rgba(255, 255, 255, .3); --quote: #3a0c22;
@@ -82,7 +99,7 @@
     --c-kw: #5a0050; --c-str: #0b4d2c; --c-com: #5a2a3a; --c-num: #6b2400; --c-fn: #0047ab; --c-type: #3a1a8a;
   }
   @media (prefers-reduced-motion: no-preference) {
-    :root[data-theme="sun-sound"] { animation: sunSound 180s linear infinite; }
+    [data-theme="sun-sound"] { animation: sunSound 180s linear infinite; }
   }
   @keyframes sunSound {
     0%, 100% { --sun: #ff69b4; }   /* hot pink */
@@ -125,7 +142,7 @@
   @media (prefers-reduced-motion: no-preference) { body.focus .md > * { transition: opacity .12s; } }
   a { color: var(--accent); }
   button, textarea { font: inherit; color: inherit; }
-  #theme { font: 13px var(--head); color: inherit; background: var(--paper); border: 1px solid var(--rule); padding: 1px 4px; margin: 0 4px 8px 0; }
+  #theme, #themeSide, #themeRight { font: 13px var(--head); color: inherit; background: var(--paper); border: 1px solid var(--rule); padding: 1px 4px; margin: 0 4px 8px 0; }
   button { background: none; border: 1px solid var(--rule); padding: 1px 8px; cursor: pointer; font: 13px var(--head); }
 
   #app { display: grid; grid-template-columns: 250px minmax(0, 1fr) auto; height: 100vh; height: 100dvh; }
@@ -155,6 +172,7 @@
   #workspace, #hubSel { font: 13px var(--head); color: inherit; background: var(--paper); border: 1px solid var(--rule); padding: 1px 4px; margin: 0 10px 8px 0; }
   #sideTools { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 10px 8px 0; }
   #sideTools button, #sideTools select { margin: 0 !important; }
+  #sideTools select:disabled { opacity: .45; }
   #sideTools button[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
   #side { display: flex; flex-direction: column; min-height: 0; padding: 14px 0 0 14px; font: 14px/1.4 var(--head); border-right: 1px solid var(--rule); }
   #sideHead { display: flex; align-items: center; gap: 2px; margin: 0 8px 8px 0; }
@@ -193,7 +211,23 @@
   .hit span { display: block; overflow-wrap: anywhere; }
   .hit:hover b { color: var(--accent); }
   .found { outline: 3px solid var(--accent); outline-offset: 4px; }
+  #tocLabel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 8px; }
+  /* the file list in sections: the starter material together, then each added folder by itself */
+  #tree .sect { border-top: 1px solid var(--rule); margin-top: 12px; padding-top: 6px; }
+  #tree .sect-h { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); padding: 0 0 4px; }
+  #tree .sect.up { border-top: 0; padding-top: 0; }
+  #tree .sect.up > details > summary { background: var(--shade); border-top: 2px solid var(--accent2); padding: 5px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #tree .sect.up > details > .kids { padding-top: 4px; }
+  /* An open folder is as long as what is in it: the list is the one thing that scrolls. Its own line stays at the top while it is
+     scrolled through (to close it by), and the next folder's line is held at the bottom (.nextPin), to get past it by. */
   #tree summary { cursor: pointer; padding: 2px 0; font-weight: 600; }
+  #tree .sect > details[open] > summary { position: sticky; top: 0; z-index: 1; background: var(--paper); }
+  #tree .sect.up > details[open] > summary { background: var(--shade); }
+  #tree .nextPin { position: sticky; bottom: 0; z-index: 2; display: block; width: 100%; margin-top: 6px; padding: 5px 6px; border: 0; border-top: 2px solid var(--accent2); background: var(--shade); color: var(--ink); font: 600 13px var(--head); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #tree .nextPin[hidden] { display: none; }
+  /* quick open: on a closed folder's line, what was last opened inside it */
+  #tree summary .quick { float: right; max-width: 55%; margin-left: 8px; padding: 0 6px; border: 1px solid var(--rule); background: var(--paper); color: var(--accent); font: 400 12px var(--head); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #tree details[open] > summary .quick { display: none; }
   #tree .kids { padding-left: 14px; }
   .file { display: flex; align-items: baseline; gap: 6px; padding: 2px 4px; cursor: pointer; color: var(--muted); }
   .file span.name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -235,6 +269,13 @@
   /* a document scrolls up and down only; wide tables and code scroll inside themselves */
   .scroller { flex: 1; overflow-y: auto; overflow-x: hidden; overscroll-behavior-x: none; padding: 0 32px; }
   .body iframe { flex: 1; width: 100%; border: 0; background: #fff; }
+  /* a page of a book: faint arrows at its sides, to the page before and after */
+  .bookwrap { flex: 1; min-height: 0; display: flex; position: relative; }
+  .bookwrap .step { position: absolute; top: 50%; transform: translateY(-50%); width: 34px; height: 64px; padding: 0; border: 0; background: none; color: var(--muted); font-size: 34px; line-height: 1; opacity: .3; }
+  .bookwrap .step:hover, .bookwrap .step:focus-visible { opacity: 1; background: color-mix(in srgb, var(--paper) 82%, transparent); }
+  .bookwrap .step.prev { left: 2px; }
+  .bookwrap .step.next { right: 18px; }
+  .bookwrap .step:disabled { display: none; }
   .empty { color: var(--muted); font: 14px var(--head); padding: 24px 32px; }
 
   /* contents dial: shown when the sidebar is not. A bare icon over the page;
@@ -303,6 +344,10 @@
   #mini { flex: none; margin-left: -14px; padding: 6px 10px calc(6px + env(safe-area-inset-bottom)) 14px; border-top: 1px solid var(--rule); background: var(--shade); font-size: 12px; }
   #mini .pl-row { flex-wrap: nowrap; gap: 1px; margin: 0; }
   #mini .pl-row .ic { width: 22px; height: 22px; padding: 4px; border: 0; margin: 0; }
+  /* the queue in the sidebar: three rows deep, the rest by scrolling */
+  #mini .mini-q { position: relative; max-height: 78px; overflow-y: auto; margin-top: 4px; }
+  #mini .track { height: 26px; padding: 0 2px; align-items: center; }
+  #mini .track .q { flex: none; margin-left: auto; }
   #mini .pl-time { margin-left: auto; padding-left: 4px; font-size: 11px; white-space: nowrap; }
   /* a video that carries on in the background: kept in the page, out of sight */
   #park { position: fixed; left: -10px; top: 0; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
@@ -362,8 +407,24 @@
   .viewbar span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
   .viewbar a { color: var(--accent); white-space: nowrap; }
   .stage { flex: 1; min-height: 0; overflow: auto; display: flex; background: var(--shade); overscroll-behavior: contain; }
+  /* stepping through a folder's pictures and videos: an arrow at each side, and a reel of the nearest ones below */
+  .stagewrap { flex: 1; min-height: 0; min-width: 0; display: flex; position: relative; }
+  .stagewrap .step { position: absolute; top: 50%; transform: translateY(-50%); z-index: 1; width: 40px; height: 60px; padding: 0; font-size: 28px; line-height: 1; border: 1px solid var(--rule); background: color-mix(in srgb, var(--paper) 82%, transparent); color: var(--ink); }
+  .stagewrap .step.prev { left: 8px; }
+  .stagewrap .step.next { right: 8px; }
+  .stagewrap .step:disabled { display: none; }
+  .viewbar small { flex: none; color: var(--muted); white-space: nowrap; }
+  .reel { flex: none; display: flex; gap: 6px; padding: 6px 12px calc(6px + env(safe-area-inset-bottom)); border-top: 1px solid var(--rule); overflow-x: auto; }
+  .reel .thumb { flex: none; width: 56px; margin: 0; cursor: pointer; opacity: .75; }
+  .reel .thumb:first-child { margin-left: auto; }   /* in the middle while it fits; from the left edge, all of it in reach, once it has to scroll */
+  .reel .thumb:last-child { margin-right: auto; }
+  .viewbar .lbOnly, .viewbar .immOnly { display: none; }   /* a phone's lightbox only, see below */
+  .reel .thumb:hover, .reel .thumb.cur { opacity: 1; }
+  .reel .thumb.cur { outline: 3px solid var(--accent2); outline-offset: -3px; }
   .stage img, .stage video, .stage audio { display: block; margin: auto; }
-  .stage.fit img, .stage.fit video { max-width: 100%; max-height: 100%; object-fit: contain; }
+  /* fitted, a picture or video fills the stage whatever its own size: a small one is enlarged to the frame, a large one brought down to it */
+  .stage.fit { overflow: hidden; }
+  .stage.fit img, .stage.fit video { flex: 1 1 0; min-width: 0; min-height: 0; width: 100%; height: 100%; object-fit: contain; }
   .stage.fit img { cursor: zoom-in; }
   .stage:not(.fit) img { cursor: zoom-out; max-width: none; }
   .stage video { background: #000; }
@@ -436,9 +497,12 @@
   .listing .item span { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .listing .item small { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; color: var(--muted); }
   .listing .item small + small { flex: none; }
-  .thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
-  .thumb { display: block; padding: 0; border: 1px solid var(--rule); background: var(--shade); aspect-ratio: 1; overflow: hidden; position: relative; }
-  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  /* cards in columns, each the shape of its picture; --card is how wide one is (the size slider) */
+  .thumbs { columns: var(--card, 150px); column-gap: 8px; }
+  .thumb { display: block; padding: 0; margin: 0 0 8px; break-inside: avoid; border: 1px solid var(--rule); background: var(--shade); aspect-ratio: 1; overflow: hidden; position: relative; }
+  .cardSize { display: flex; align-items: center; gap: 6px; margin: 4px 0; font: 12px var(--head); color: var(--muted); }
+  .cardSize input { width: 150px; accent-color: var(--accent); }
+  .thumb img, .thumb video { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
   .thumb b { position: absolute; left: 0; right: 0; bottom: 0; padding: 3px 5px; background: color-mix(in srgb, var(--paper) 88%, transparent); font: 11px var(--head); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; }
   .thumb i { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font: 600 12px var(--head); color: var(--muted); font-style: normal; }
   .frontEditor { max-width: 720px; margin: 0 auto; padding: 16px 0; }
@@ -452,6 +516,56 @@
   #notes .flip { float: right; border: 0; padding: 0; color: var(--accent); font-size: 12px; }
   #notes h4 { margin: 0 0 10px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 400; }
   #notes .empty { padding: 0; }
+  /* references: while "//" has just been typed in the note box, everything that can be referred to carries a link button */
+  body.reffing button.refBtn, body.picking button.pickBtn { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 2px; margin-left: 4px; border: 1px solid var(--accent); border-radius: 3px; color: var(--accent); background: var(--paper); visibility: visible; vertical-align: middle; }
+  .refBtn svg { width: 100%; height: 100%; }
+  body.reffing .thumb button.refBtn, body.picking .thumb button.pickBtn { position: absolute; top: 4px; left: 4px; margin: 0; }
+  body.reffing #toc a button.refBtn, body.picking #toc a button.pickBtn { float: right; }
+  body.picking button.pickBtn { font: 700 13px/1 var(--head); }
+  body.picking button.pickBtn[aria-pressed="true"] { background: var(--accent); color: var(--paper); }
+  /* focus groups: the bar while one is being made, and the groups at the top of the file list */
+  #pickBar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 0 8px 8px 0; font-size: 12px; color: var(--muted); }
+  #pickBar[hidden] { display: none; }
+  #pickBar span { flex: 1 1 100%; }
+  #pickBar input { flex: 1; min-width: 60px; font: 13px var(--head); color: var(--ink); background: var(--field); border: 1px solid var(--rule); padding: 2px 6px; }
+  #groupBtn { font: 700 14px/1 var(--head); }
+  #groupBtn[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+  #tree .sect.group { border-top: 0; margin-top: 2px; padding-top: 0; }
+  #tree .sect.group summary { color: var(--accent); }
+  #tree .sect.group .file button { visibility: visible; font-size: 13px; }
+  #tree .sect.group summary small { color: var(--muted); font-weight: 400; }
+  #tree .group-foot { display: flex; gap: 12px; padding-left: 4px; }
+  /* a file of saved links: one card, a list of its addresses on pointing at it, the media itself on pressing it */
+  .linkcard { position: relative; border: 1px solid var(--rule); background: var(--shade); margin: 6px 0; }
+  .linkcard .head { display: flex; gap: 8px; align-items: baseline; padding: 8px 10px; cursor: pointer; }
+  .linkcard .head b { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .linkcard .head small { flex: none; color: var(--muted); }
+  .linkcard .fly { position: absolute; z-index: 5; left: -1px; right: -1px; top: 100%; max-height: 220px; overflow-y: auto; padding: 4px 10px; background: var(--paper); border: 1px solid var(--rule); box-shadow: 0 6px 16px rgba(0, 0, 0, .18); font-size: 12px; }
+  .linkcard .fly[hidden] { display: none; }
+  .linkcard .fly div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 1px 0; }
+  .linkcard .fly small { display: inline-block; width: 3.6em; color: var(--muted); }
+  .linkcard.super iframe { display: block; width: 100%; height: 70vh; border: 0; border-top: 1px solid var(--rule); background: var(--paper); }
+  .viewer iframe.cards { flex: 1; min-height: 0; width: 100%; border: 0; }
+  .viewer iframe.pdf { flex: 1; min-height: 0; }
+  .viewer iframe.pdf.night { filter: invert(1) hue-rotate(180deg); }
+  .viewbar button[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  .linksAsk { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 16px 24px; font: 14px/1.45 var(--head); }
+  .linksAsk p { margin: 0; max-width: 46em; color: var(--muted); }
+  .linksAsk .fly { flex: 1; min-height: 0; align-self: stretch; overflow-y: auto; border-top: 1px solid var(--rule); padding-top: 6px; font-size: 12px; }
+  .linksAsk .fly div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 1px 0; }
+  .linksAsk .fly small { display: inline-block; width: 3.6em; color: var(--muted); }
+  body.reffing #input { outline: 2px solid var(--accent2); outline-offset: 1px; }
+  @media (pointer: coarse) { body.reffing button.refBtn { width: 30px; height: 30px; padding: 5px; } }
+  /* the latest notes and highlights: a box cut out of the main front page's right-hand corner; the text runs round it */
+  .scroller.has-latest { container-type: inline-size; }
+  .latest { float: right; width: 230px; max-height: 70vh; overflow-y: auto; margin: 16px 0 12px 24px; padding: 8px 10px; border: 1px solid var(--rule); background: var(--shade); font: 13px/1.35 var(--head); }
+  .latest h5 { margin: 0 0 2px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 400; }
+  .latest .empty { margin: 6px 0 0; color: var(--muted); }
+  .tick { border-left: 3px solid var(--rule); padding: 3px 0 3px 8px; margin-top: 8px; cursor: pointer; }
+  .tick .quote { font-family: var(--body); font-style: italic; color: var(--muted); }
+  .tick .meta { margin-top: 2px; font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @container (max-width: 560px) { .latest { float: none; width: auto; max-height: 40vh; margin: 16px 0 0; } }
+  .note.lost .quote::after { content: ' · not found in this document as it is now'; font-style: normal; color: var(--accent); }
   .note { border-top: 1px solid var(--rule); padding: 10px 0; }
   .note .quote { font-family: var(--body); font-style: italic; color: var(--muted); border-left: 3px solid var(--mark); padding-left: 8px; margin-bottom: 6px; cursor: pointer; }
   .note .text { font-family: var(--body); font-size: 15px; white-space: pre-wrap; }
@@ -501,6 +615,8 @@
     #found { font-size: 14px; }
     #mini .pl-row .ic { width: 36px; height: 36px; padding: 8px; }
     #mini { font-size: 13.5px; }
+    #mini .mini-q { max-height: 114px; }
+    #mini .track { height: 38px; }
     #sideTools { gap: 6px; }
     #sideTools button, #sideTools select { padding: 6px 10px; font-size: 14px; }
     #net, #privacy, #hubsBox, #net button, #privacy button, #hubsBox button, #netBrief { font-size: 13.5px; }
@@ -509,6 +625,8 @@
     #gate button.link { padding: 9px 0; }
     .file { padding: 8px 6px; }
     #tree summary { padding: 7px 0; }
+    #tree summary .quick { padding: 3px 8px; font-size: 13px; }
+    #tree .nextPin { padding: 10px 8px; font-size: 14px; }
     #toc a { padding: 7px 0 7px 8px; }
     .scroller { padding: 0 16px; }
     /* a table with more than three columns: each row becomes a card, one line per cell under its heading */
@@ -522,6 +640,22 @@
     .md { padding: 8px 0 60px; }
     .md h1 { font-size: 1.45em; }
     .tab { padding: 9px 8px 8px 12px; }
+
+    /* a picture, a video or a gallery of links is a lightbox: the whole screen, the top bar and the tabs out of the way, the note box below it */
+    body.lightbox #mobileBar, body.lightbox .tabs, body.lightbox .progress, body.lightbox #tocBtn { display: none; }
+    body.lightbox .viewbar { padding-top: calc(6px + env(safe-area-inset-top)); overflow-x: auto; }
+    body.lightbox .viewbar span { min-width: 4em; }
+    body.lightbox .viewbar button, body.lightbox .viewbar a { flex: none; white-space: nowrap; }
+    body.lightbox .viewbar button:not(.ic) { padding: 6px 10px; }
+    body.lightbox .viewbar .lbOnly { display: inline-block; }
+    body.lightbox .viewbar .x { font-size: 20px; line-height: 1; }
+    /* a picture at its real size: the screen is the picture; the bar, the arrows and the reel lie over it */
+    body.lightbox.immersive #composer { display: none; }
+    body.lightbox.immersive .viewer.lb { position: relative; }
+    body.lightbox.immersive .viewbar, body.lightbox.immersive .reel { position: absolute; z-index: 2; left: 0; right: 0; background: color-mix(in srgb, var(--paper) 82%, transparent); }
+    body.lightbox.immersive .viewbar { top: 0; }
+    body.lightbox.immersive .reel { bottom: 0; }
+    body.lightbox.immersive .viewbar .immOnly { display: inline-block; }
 
     /* the input sits in the lower part of the screen and grows while typing */
     #composer { padding: 6px 10px calc(8px + env(safe-area-inset-bottom)); }
@@ -545,7 +679,7 @@
     </div>
     <div id="settings" hidden>
       <div class="label">Text</div>
-      <div id="sideTools"><select id="theme" title="Theme"><option value="plain">Plain</option><option value="selenized">Selenized Light</option><option value="lime">Pale Lime</option><option value="sky">Pale Sky</option><option value="eva">Eva Dark</option><option value="triple-m">Triple-M</option><option value="sun-sound">Sun Sound</option><option value="periwinkle">Periwinkle</option></select><button id="fontToggle"></button><button id="focusToggle" title="Fade everything except the paragraph you are reading">reading focus</button><button id="roomyToggle" title="More space between lines and words">roomy text</button><button id="smaller" aria-label="Smaller text" title="Smaller text">A−</button><button id="bigger" aria-label="Larger text" title="Larger text">A+</button></div>
+      <div id="sideTools"><select id="theme" title="Theme"><option value="plain">Plain</option><option value="selenized">Selenized Light</option><option value="lime">Pale Lime</option><option value="sky">Pale Sky</option><option value="eva">Eva Dark</option><option value="triple-m">Triple-M</option><option value="sun-sound">Sun Sound</option><option value="periwinkle">Periwinkle</option><option value="mahogany">Mahogany</option></select><button id="themeOne" title="One theme for the whole reader. Release it to give the left and right panes themes of their own.">one theme</button><select id="themeSide" title="Theme of the left pane (files and outline)"></select><select id="themeRight" title="Theme of the right pane (the side document and notes)"></select><button id="fontToggle"></button><button id="focusToggle" title="Fade everything except the paragraph you are reading">reading focus</button><button id="roomyToggle" title="More space between lines and words">roomy text</button><button id="smaller" aria-label="Smaller text" title="Smaller text">A−</button><button id="bigger" aria-label="Larger text" title="Larger text">A+</button></div>
       <div class="label">Connection</div>
       <div id="net" role="status" aria-live="polite"></div>
       <div class="label">This device</div>
@@ -562,7 +696,7 @@
     <input id="find" type="search" placeholder="Find a file, or words in files and notes" aria-label="Find a file, or words in files and notes" autocomplete="off" spellcheck="false">
     <div id="found" hidden role="status"></div>
     <div id="tree"></div>
-    <div class="label">Outline</div>
+    <div class="label" id="tocLabel">Outline</div>
     <div id="toc"></div>
     <div id="mini" hidden></div>
   </nav>
@@ -574,7 +708,7 @@
       <div class="inner">
         <button type="button" id="grip" aria-label="Make the note box taller or shorter" title="Drag up to make the note box taller, or press to switch between small and tall"></button>
         <div id="context"></div>
-        <textarea id="input" placeholder="Write a note or a question…  (Enter to save, Shift+Enter for a new line)"></textarea>
+        <textarea id="input" placeholder="Write a note or a question…  (Enter to save, Shift+Enter for a new line; // to link to a file, heading or note)"></textarea>
       </div>
     </form>
   </div>

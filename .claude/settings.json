@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node --check *)",
+      "Bash(tasklist)",
+      "Bash(tasklist *)",
+      "Bash(cygpath *)",
+      "Bash(npm run test:own)",
+      "Bash(npm run test:own:win)",
+      "Bash(node start.mjs test-own)",
+      "Bash(node start.mjs --win test-own)"
+    ]
+  }
+}

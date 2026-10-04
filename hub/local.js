@@ -7,7 +7,7 @@ import { vault } from './vault.js';
 export { vault };
 
 // How the reader looks is not private, and is needed before unlocking.
-const PLAIN = new Set(['theme', 'font', 'view', 'hlType']);
+const PLAIN = new Set(['theme', 'themeSide', 'themeRight', 'font', 'view', 'hlType']);
 const VAULT_META = 'hub:vault';
 const te = new TextEncoder(), td = new TextDecoder();
 

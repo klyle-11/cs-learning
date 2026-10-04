@@ -17,9 +17,10 @@ A self-directed CS learning environment. The user works in small steps, irregula
 
 ## Working on the hub's code
 
-- The server must keep building on macOS, Linux (Raspberry Pi) and Windows. Anything system-specific goes in `server-cpp/src/platform.hpp`, with both halves written; `WINDOWS.md` says what has been tried where. The Windows half has not been compiled yet: say so when touching it.
+- The server must keep building on macOS, Linux (Raspberry Pi) and Windows. Anything system-specific goes in `server-cpp/src/platform.hpp`, with both halves written; `WINDOWS.md` says what has been tried where. The Windows half builds and passes the tests (MSYS2 UCRT64): after touching it, build and test on Windows or say that it was not.
 - Start scripts are in `hub/package.json`; each has a `:win` twin for Windows. Add both when adding one.
 - Build: `cd server-cpp && make`. Test: `make test` (compares answers with `test/expected.txt`; after an intended change, read the differences, then `UPDATE=1 ./test/contract.sh`).
+- The user's hub is usually running, and on Windows a running `hubd.exe` cannot be replaced: `make` then fails at the link, and `make test` would test the old program. Claude builds and tests its own copy instead, `server-cpp/build/hubd-own`: `npm run test:own:win` (`make test-own`; to record, `UPDATE=1` in front). Never stop the user's hub to build; tell them the server needs a restart to pick the change up.
 - A server change needs the server restarted. A page change (`hub/`) shows one reload late: the reader opens from the copy it kept and then offers "a newer version is ready".
 - Try things on a scratch copy, never on `data/`: `PORT=4396 HUB_STATE=<dir> ./start.sh data-test --workspaces <dir>`. Put scratch state under `server-cpp/build/` (ignored by git).
 - The real state folder is `~/.config/hub` (certificates, paired devices). Do not make, replace or delete certificates there without being asked: every device that trusts the hub has to follow by hand.
@@ -36,6 +37,8 @@ Each entry in `notes/notes.json`:
   "quote": "text span the note is pinned to, may be empty", "type": "highlight type id from hub.json, may be empty",
   "text": "what the user wrote, empty for a bare highlight", "ts": "ISO time", "status": "open" }
 ```
+
+A highlight made in the reader may also carry `"anchor": { "block", "nth", "start", "before", "after" }`: where in the document its `quote` is (see `server-cpp/src/anchor.hpp`). Leave it as it is; a note written here (a terminal question) has none.
 
 `status` is `highlight` for a highlight with no note (nothing to answer — but its type name, e.g. "Unclear" or "Question", says how the user read that passage and is useful context), `open` for a note awaiting a reply, `answered` once replied to. Type names and colours are in `hub.json` under `highlights`.
 

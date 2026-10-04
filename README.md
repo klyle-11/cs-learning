@@ -6,7 +6,7 @@ A reader for a folder of documents (markdown, HTML, source code, pictures, video
 hub/          the page (index.html and its scripts)
 server-cpp/   the server, in C++ (API.md is the contract between it and the page)
 start.sh      builds what is missing and starts the server on data/ (it calls hub/start.mjs, which does the same on Windows)
-WINDOWS.md    building and running on Windows and on a Raspberry Pi: prepared, not yet tried there
+WINDOWS.md    building and running on Windows and on a Raspberry Pi: tried on Windows, not yet on a Pi
 sample/       starter content, tracked in git: example documents to develop against
 data/         the live workspace: your notes, highlights, uploads and edits. Not in git
 TODO.md       the plan

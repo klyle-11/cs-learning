@@ -5,9 +5,8 @@
 //
 //   POSIX   macOS, Linux, and ESP-IDF on the board. This half is what the
 //           tests run against.
-//   Windows built with MinGW-w64 from MSYS2 (see ../../WINDOWS.md). WRITTEN
-//           BUT NOT YET COMPILED OR RUN: it was prepared on a Mac. Expect to
-//           fix small things on the first build.
+//   Windows built with MinGW-w64 from MSYS2 (see ../../WINDOWS.md). Compiled
+//           and run there; the same tests pass.
 #pragma once
 
 #ifdef _WIN32
@@ -43,6 +42,7 @@
 #endif
 
 #include <cerrno>
+#include <climits>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -326,6 +326,21 @@ inline bool odd_on_windows(const std::string &part) {
   static const char *reserved[] = {"CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"};
   for (const char *r : reserved) if (stem == r) return true;
   return false;
+}
+// A path longer than the system will open. Windows stops at 259 characters
+// for the whole path (counted in UTF-16 units); elsewhere the limit is on
+// each part, 255 bytes, and on the whole, PATH_MAX.
+inline bool path_too_long(const std::string &path) {
+#ifdef _WIN32
+  size_t units = 0;
+  for (unsigned char c : path) if ((c & 0xC0) != 0x80) units += c >= 0xF0 ? 2 : 1;
+  return units >= MAX_PATH;
+#else
+  if (path.size() >= PATH_MAX) return true;
+  size_t part = 0;
+  for (char c : path) { part = c == '/' ? 0 : part + 1; if (part > 255) return true; }
+  return false;
+#endif
 }
 
 } // namespace sys

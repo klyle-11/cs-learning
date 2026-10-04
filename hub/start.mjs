@@ -2,7 +2,7 @@
 // Written in Node so the same commands work on macOS, Linux and Windows.
 //
 //   node start.mjs [folder] [--network] [--insecure] [--https-local] [--pair-local] [--scratch] [hubd options]
-//   node start.mjs cert | new-authority | build | test
+//   node start.mjs cert | new-authority | build | test | test-own
 //
 // The first run makes data/ as a copy of sample/, fetches the page's libraries
 // and builds the server. Settings, all optional (environment variables):
@@ -43,6 +43,8 @@ function build() {
 const what = args[0];
 if (what === 'build') { build(); process.exit(0); }
 if (what === 'test') { build(); process.exit(run('bash', ['test/contract.sh'], { cwd: server })); }
+// The same tests on a copy of the server built apart (server-cpp/build/hubd-own), so the hub can stay running meanwhile.
+if (what === 'test-own') process.exit(run('make', ['-s', '-C', server, 'test-own']));
 if (what === 'cert' || what === 'new-authority') { build(); process.exit(run(exe, [what === 'cert' ? '--make-cert' : '--new-authority', ...args.slice(1)])); }
 
 // Options of this script; anything else is handed to the server as it is.

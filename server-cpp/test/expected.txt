@@ -62,6 +62,16 @@ cross-origin-resource-policy: same-origin
 referrer-policy: no-referrer
 x-content-type-options: nosniff
 body: <html><head><title> A Page </title></head><body><h1>Hi</h1></body></html>
+## page allowed its scripts
+200
+accept-ranges: bytes
+content-length: 66
+content-security-policy: sandbox allow-scripts allow-downloads allow-popups allow-modals allow-forms; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src https: data: blob:; media-src https: data: blob:; connect-src https:; frame-src https:; font-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'
+content-type: text/html; charset=utf-8
+cross-origin-resource-policy: same-origin
+referrer-policy: no-referrer
+x-content-type-options: nosniff
+body: <html><body><script>document.title = "ran"</script></body></html>
 ## svg file headers
 200
 accept-ranges: bytes
@@ -86,9 +96,9 @@ Body one.
 ## oversized json
 413 {"error": "body too large"}
 ## config
-200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#fbeeb0", "id": "<id>", "name": "Important"}, {"color": "#cfe8c6", "id": "<id>", "name": "Definition"}, {"color": "#cfe0f5", "id": "<id>", "name": "Question"}, {"color": "#f6d0d6", "id": "<id>", "name": "Unclear"}], "ignore": ["CLAUDE.md"], "root": "<root>", "side": ["references.md"], "title": "Fixture Title"}
+200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#fbeeb0", "id": "<id>", "name": "Important"}, {"color": "#cfe8c6", "id": "<id>", "name": "Definition"}, {"color": "#cfe0f5", "id": "<id>", "name": "Question"}, {"color": "#f6d0d6", "id": "<id>", "name": "Unclear"}], "ignore": ["CLAUDE.md"], "root": "<root>", "scripts": ["b/app.html", "page.html"], "side": ["references.md"], "title": "Fixture Title"}
 ## docs
-200 [{"front": false, "group": "a", "path": "a/1-doc.md", "side": false, "title": "First"}, {"front": false, "group": "a", "path": "a/2-doc.md", "side": false, "title": "2-doc"}, {"front": false, "group": "a", "path": "a/10-doc.md", "side": false, "title": "Tenth"}, {"front": false, "group": "b", "path": "b/clip.mp4", "side": false, "title": "clip.mp4"}, {"front": false, "group": "b", "path": "b/drawing.svg", "side": false, "title": "drawing.svg"}, {"front": false, "group": "b", "path": "b/page.html", "side": false, "title": "A Page"}, {"front": false, "group": "b", "path": "b/pic.png", "side": false, "title": "pic.png"}, {"front": false, "group": "", "path": "code.c", "side": false, "title": "code.c"}, {"front": true, "group": "", "path": "FRONTPAGE.md", "side": false, "title": "Fixture Title"}, {"front": false, "group": "", "path": "references.md", "side": true, "title": "Refs"}]
+200 [{"changed": "<changed>", "front": false, "group": "a", "path": "a/1-doc.md", "side": false, "title": "First"}, {"changed": "<changed>", "front": false, "group": "a", "path": "a/2-doc.md", "side": false, "title": "2-doc"}, {"changed": "<changed>", "front": false, "group": "a", "path": "a/10-doc.md", "side": false, "title": "Tenth"}, {"changed": "<changed>", "front": false, "group": "a", "path": "a/blocks.md", "side": false, "title": "Same  Words"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/app.html", "side": false, "title": "app.html"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/blocks.html", "side": false, "title": "T"}, {"front": false, "group": "b/book.epub", "path": "b/book.epub/OEBPS/text/ch1.xhtml", "side": false, "title": "The First & Best"}, {"front": false, "group": "b/book.epub", "path": "b/book.epub/OEBPS/text/ch2.xhtml", "side": false, "title": "ch2"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/clip.mp4", "side": false, "title": "clip.mp4"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/drawing.svg", "side": false, "title": "drawing.svg"}, {"changed": "<changed>", "front": false, "group": "b", "links": true, "path": "b/items.json", "side": false, "title": "items.json"}, {"changed": "<changed>", "front": false, "group": "b", "links": true, "path": "b/marks.html", "side": false, "title": "Bookmarks"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/page.html", "side": false, "title": "A Page"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/pic.png", "side": false, "title": "pic.png"}, {"changed": "<changed>", "front": false, "group": "b", "links": true, "path": "b/saved.json", "side": false, "title": "saved.json"}, {"changed": "<changed>", "front": false, "group": "", "path": "code.c", "side": false, "title": "code.c"}, {"changed": "<changed>", "front": true, "group": "", "path": "FRONTPAGE.md", "side": false, "title": "Fixture Title"}, {"changed": "<changed>", "front": false, "group": "", "path": "references.md", "side": true, "title": "Refs"}]
 ## doc
 200 # First
 
@@ -217,6 +227,613 @@ body: # First
 200 {"doc": "a/1-doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "", "status": "open", "text": "bad id and time", "ts": "<ts>", "type": ""}
 ## note bad
 400 {"error": "doc and text or quote required"}
+## highlight with anchor
+200 {"anchor": {"after": ".", "before": "Body", "block": "00ff00ff00ff00ff", "nth": 1, "start": 4}, "doc": "a/1-doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "one", "status": "highlight", "text": "", "ts": "<ts>", "type": ""}
+## anchor not hex
+200 {"doc": "a/1-doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "one", "status": "highlight", "text": "", "ts": "<ts>", "type": ""}
+## anchor replaced
+200 {"anchor": {"after": "", "before": "", "block": "abc", "nth": 0, "start": 0}, "doc": "a/1-doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "Body", "status": "highlight", "text": "", "ts": "<ts>", "type": ""}
+## quote without anchor
+200 {"doc": "a/1-doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "Body one", "status": "highlight", "text": "", "ts": "<ts>", "type": ""}
+## anchored note gone
+200 {"ok": true}
+## anchored note 2 gone
+200 {"ok": true}
+## blocks of markdown
+200 {"blocks": [{"hash": "41649cbdc94a899c", "len": 9, "nth": 0}, {"hash": "62bdc245150fdf6a", "len": 28, "nth": 0}, {"hash": "fec3316c9ad911ce", "len": 7, "nth": 0}, {"hash": "fec3316c9ad911ce", "len": 7, "nth": 1}, {"hash": "faa3398f4335d559", "len": 5, "nth": 0}, {"hash": "08ba8707b55f07d2", "len": 2, "nth": 0}, {"hash": "08ba8607b55f061f", "len": 2, "nth": 0}, {"hash": "08a27f07b54a6859", "len": 2, "nth": 0}, {"hash": "08a27c07b54a6340", "len": 2, "nth": 0}]}
+## blocks of a page
+200 {"blocks": [{"hash": "41649cbdc94a899c", "len": 9, "nth": 0}, {"hash": "62bdc245150fdf6a", "len": 28, "nth": 0}, {"hash": "fec3316c9ad911ce", "len": 7, "nth": 0}, {"hash": "fec3316c9ad911ce", "len": 7, "nth": 1}, {"hash": "faa3398f4335d559", "len": 5, "nth": 0}, {"hash": "08ba8707b55f07d2", "len": 2, "nth": 0}, {"hash": "08ba8607b55f061f", "len": 2, "nth": 0}, {"hash": "08a27f07b54a6859", "len": 2, "nth": 0}, {"hash": "08a27c07b54a6340", "len": 2, "nth": 0}]}
+## blocks of code
+200 {"blocks": [{"hash": "549dd8229c73dec9", "len": 18, "nth": 0}]}
+## blocks, no such doc
+404 {"error": "no such doc"}
+## blocks, not a doc
+404 {"error": "no such doc"}
+## blocks, traversal
+404 {"error": "no such doc"}
+## links in a file
+200 {"items": [{"media": [], "page": "https://img.example/a%20b.JPG?x=1&y=2", "preview": "", "thumb": "https://img.example/a%20b.JPG?x=1&y=2", "title": ""}, {"media": [], "page": "https://site.example/post/1", "preview": "", "thumb": "", "title": ""}, {"media": [{"kind": "video", "url": "https://v.example/clip.mp4"}], "page": "", "preview": "", "thumb": "", "title": ""}, {"media": [], "page": "https://pbs.example/media/abc?format=png", "preview": "", "thumb": "https://pbs.example/media/abc?format=png", "title": ""}, {"media": [], "page": "https://x.example/a", "preview": "", "thumb": "", "title": ""}], "more": false}
+## links as a gallery
+200
+content-length: 22828
+content-security-policy: sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox; default-src 'none'; script-src 'nonce-N'; img-src https: data:; media-src https:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'
+content-type: text/html; charset=utf-8
+cross-origin-resource-policy: same-origin
+referrer-policy: no-referrer
+x-content-type-options: nosniff
+body: <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="no-referrer"><title>saved.json</title><style>:root{--paper:#fdfcf7;--shade:#f4f1e8;--ink:#1d1b16;--muted:#6f6a5f;--rule:#ddd8ca;--accent:#8c2f1b;--card:150px}
+*{box-sizing:border-box}
+body{margin:0;padding:10px 16px 40px;background:var(--paper);color:var(--ink);font:14px/1.4 "Helvetica Neue",Helvetica,Arial,sans-serif}
+body.listed{padding-right:252px}
+a{color:var(--accent)}
+button{font:inherit;color:inherit;background:none;border:1px solid var(--rule);padding:1px 8px;cursor:pointer}
+button:disabled{opacity:.35;cursor:default}
+button[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+h5{margin:14px 0 6px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:400}
+.tools{position:sticky;top:0;z-index:1;display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;margin:-10px -16px 0;padding:8px 16px;border-bottom:1px solid var(--rule);background:var(--paper);font-size:12px;color:var(--muted)}
+.tools label{display:flex;align-items:center;gap:6px}
+.tools input{width:150px;accent-color:var(--accent)}
+.tools select,.tools input[type=search]{font:inherit;color:var(--ink);background:var(--paper);border:1px solid var(--rule);padding:1px 4px}
+tr[hidden]{display:none}
+.pager{display:flex;align-items:center;gap:6px}
+.pager.foot{justify-content:center;margin-top:12px;font-size:12px;color:var(--muted)}
+.thumbs{columns:var(--card,150px);column-gap:8px}
+.card{margin:0 0 8px;break-inside:avoid}
+.card[hidden]{display:none}
+.card.flash .thumb{outline:3px solid var(--accent);outline-offset:-3px}
+.thumb{display:block;border:1px solid var(--rule);background:var(--shade);aspect-ratio:1;overflow:hidden;position:relative}
+.more{display:flex;flex-wrap:wrap;gap:3px;max-height:5.2em;overflow-y:auto;padding-top:3px;font-size:10px;line-height:1.5}
+.more button,.more a{max-width:100%;padding:0 5px;border:1px solid var(--rule);color:var(--muted);text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.more .on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.thumb a{display:block;height:100%;text-decoration:none}
+.thumb a:focus-visible{outline:3px solid var(--accent);outline-offset:-3px}
+.thumb img,.thumb video{width:100%;height:100%;object-fit:cover;display:block}
+.play,.shut{position:absolute;padding:0;border-radius:50%;background:color-mix(in srgb,var(--paper) 82%,transparent);color:var(--ink)}
+.play{top:50%;left:50%;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;width:min(40px,44%);aspect-ratio:1}
+.play svg{display:block;width:46%;height:auto}
+.shut{top:4px;right:4px;width:24px;height:24px;font-size:16px;line-height:1}
+.thumb .live{position:absolute;inset:0;object-fit:contain;background:#000}
+.thumb.playing a,.thumb.playing .play{display:none}
+.thumb b{position:absolute;left:0;right:0;bottom:0;padding:3px 5px;background:color-mix(in srgb,var(--paper) 88%,transparent);font-size:11px;font-weight:400;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.thumb i{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font:600 12px/1 inherit;color:var(--muted);font-style:normal}
+.thumb u{position:absolute;top:4px;left:4px;padding:1px 5px;background:color-mix(in srgb,var(--paper) 88%,transparent);color:var(--ink);font-size:10px;text-decoration:none}
+table{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}
+td,th{border:1px solid var(--rule);padding:5px 8px;text-align:left;vertical-align:top;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+th{background:var(--shade);font-weight:600}th:nth-child(1){width:38%}th:nth-child(2){width:22%}
+tr:target td{background:var(--shade)}
+.list{display:none;position:fixed;top:0;right:0;bottom:0;width:236px;z-index:1;overflow-y:auto;padding:8px 8px 24px;border-left:1px solid var(--rule);background:color-mix(in srgb,var(--paper) 70%,transparent);font-size:11px}
+body.listed .list{display:block}
+.list:hover{background:color-mix(in srgb,var(--paper) 94%,transparent)}
+.list h5{margin:8px 0 2px}
+.list a{display:block;padding:1px 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink);text-decoration:none;opacity:.5}
+.list a.here,.list a:hover{opacity:1}.list a:hover{background:var(--shade)}
+.list small{display:inline-block;width:3.4em;color:var(--muted)}
+.view{display:none;position:fixed;inset:0;z-index:2;flex-direction:column;background:var(--paper)}.view:target{display:flex}
+.bar{flex:none;display:flex;gap:10px;align-items:center;padding:6px 12px;border-bottom:1px solid var(--rule);font-size:13px}
+.bar span{flex:1 1 30%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
+.bar small{flex:none;color:var(--muted)}.bar a{flex:none;white-space:nowrap}
+.bar a.url{flex:0 1 45%;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.addrs{flex:none;max-height:7.6em;overflow-y:auto;padding:4px 12px;border-bottom:1px solid var(--rule);font-size:12px;line-height:1.5}
+.addrs div{display:flex;gap:8px}.addrs small{flex:none;width:7.5em;color:var(--muted)}.addrs a{min-width:0;overflow-wrap:anywhere}
+.addrs .cur a{font-weight:600}.addrs .cur small::before{content:'\25B8 '}
+.wrap{flex:1;min-height:0;display:flex;position:relative}
+.stage{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;overflow:auto;background:var(--shade)}
+.stage img,.stage video{display:block;flex:1 1 0;width:100%;min-height:0;object-fit:contain}
+.stage img{cursor:zoom-in}.stage.full{display:block}.stage.full img{width:auto;margin:auto;cursor:zoom-out}
+.stage video{background:#000}.stage audio{flex:none;width:min(90%,480px)}
+.step{position:absolute;top:50%;transform:translateY(-50%);z-index:1;width:40px;height:60px;display:flex;align-items:center;justify-content:center;font-size:28px;line-height:1;text-decoration:none;border:1px solid var(--rule);background:color-mix(in srgb,var(--paper) 82%,transparent);color:var(--ink)}
+.step.prev{left:8px}.step.next{right:8px}
+.reel{flex:none;display:flex;gap:6px;justify-content:center;padding:6px 12px;border-top:1px solid var(--rule);overflow-x:auto}
+.reel .thumb{flex:none;width:56px;margin:0;opacity:.75}.reel .thumb:hover,.reel .thumb.cur{opacity:1}.reel .thumb.cur{outline:3px solid var(--accent);outline-offset:-3px}
+</style></head><body><div class="tools"><label>size <input id="size" type="range" min="70" max="420" value="150" aria-label="Size of the cards"></label><span class="pager"><button class="prev" aria-label="The page before">‹</button><span class="pageno"></span><button class="next" aria-label="The next page">›</button></span><select id="kind" aria-label="Show only one kind"><option value="">everything</option><option value="image">pictures</option><option value="video">video</option><option value="webm">webm</option><option value="sound">sound</option></select><input id="find" type="search" placeholder="filter by name or address" aria-label="Show only what has these words in its name or in one of its addresses"><span id="count"></span><button id="listBtn" title="Show or hide the list of everything in this file">list</button><button id="sortBtn" aria-pressed="false" title="Put the cards in order of their names. Press again for the order in the file.">sort</button><button id="shuffleBtn" title="Put the cards in a random order">shuffle</button><button id="revBtn" aria-pressed="false" title="Turn the order round: the last in the file first">reverse</button></div><h5>Pictures, video and sound · 3</h5><div class="thumbs" id="grid"><div class="card" id="g0" data-has=""><div class="thumb"><a href="#v0" title="a%20b.JPG"><img loading="lazy" referrerpolicy="no-referrer" alt="" src="https://img.example/a%20b.JPG?x=1&amp;y=2"><b>a%20b.JPG</b></a></div></div><div class="card" id="g1" data-has=""><div class="thumb"><a href="#v1" title="clip.mp4"><video muted playsinline preload="metadata" data-src="https://v.example/clip.mp4#t=0.1"></video><u>video</u><b>clip.mp4</b></a></div></div><div class="card" id="g2" data-has=""><div class="thumb"><a href="#v2" title="abc"><img loading="lazy" referrerpolicy="no-referrer" alt="" src="https://pbs.example/media/abc?format=png"><b>abc</b></a></div></div></div><div class="pager foot"><button class="prev">‹ before</button><span class="pageno"></span><button class="next">next ›</button></div><h5>Pages · 2</h5><table><thead><tr><th>Name</th><th>Site</th><th>Address</th></tr></thead><tbody><tr id="p0"><td title="1">1</td><td>site.example</td><td><a href="https://site.example/post/1" target="_blank" rel="noopener noreferrer" title="https://site.example/post/1">site.example/post/1</a></td></tr><tr id="p1"><td title="a">a</td><td>x.example</td><td><a href="https://x.example/a" target="_blank" rel="noopener noreferrer" title="https://x.example/a">x.example/a</a></td></tr></tbody></table><aside class="list" id="list" aria-label="Everything in this file"><h5>5 in this file</h5><a href="#g0" data-i="0"><small>image</small>a%20b.JPG</a><a href="#g1" data-i="1"><small>video</small>clip.mp4</a><a href="#g2" data-i="2"><small>image</small>abc</a><h5>Pages</h5><a href="#p0"><small>site.example</small> 1</a><a href="#p1"><small>x.example</small> a</a></aside><section class="view" id="v0"><div class="bar"><span>a%20b.JPG</span><small>1 of 3</small><a class="url" href="https://img.example/a%20b.JPG?x=1&amp;y=2" target="_blank" rel="noopener noreferrer" title="Open in a new tab: https://img.example/a%20b.JPG?x=1&amp;y=2">https://img.example/a%20b.JPG?x=1&amp;y=2</a><a class="close" href="#g0">close</a></div><div class="wrap"><div class="stage"><img loading="lazy" referrerpolicy="no-referrer" alt="" title="Press for full size" src="https://img.example/a%20b.JPG?x=1&amp;y=2"></div><a class="step next" href="#v1" title="Next">›</a></div><div class="reel"></div></section><section class="view" id="v1"><div class="bar"><span>clip.mp4</span><small>2 of 3</small><a class="url" href="https://v.example/clip.mp4" target="_blank" rel="noopener noreferrer" title="Open in a new tab: https://v.example/clip.mp4">https://v.example/clip.mp4</a><a class="close" href="#g1">close</a></div><div class="wrap"><div class="stage"><video controls playsinline preload="metadata" data-src="https://v.example/clip.mp4#t=0.1"></video></div><a class="step prev" href="#v0" title="Previous">‹</a><a class="step next" href="#v2" title="Next">›</a></div><div class="reel"></div></section><section class="view" id="v2"><div class="bar"><span>abc</span><small>3 of 3</small><a class="url" href="https://pbs.example/media/abc?format=png" target="_blank" rel="noopener noreferrer" title="Open in a new tab: https://pbs.example/media/abc?format=png">https://pbs.example/media/abc?format=png</a><a class="close" href="#g2">close</a></div><div class="wrap"><div class="stage"><img loading="lazy" referrerpolicy="no-referrer" alt="" title="Press for full size" src="https://pbs.example/media/abc?format=png"></div><a class="step prev" href="#v1" title="Previous">‹</a></div><div class="reel"></div></section><script nonce="N">
+const PER = 60, grid = document.getElementById('grid'), tiles = grid ? [...grid.children] : [];
+// `tiles` stays in the file's order (a card's number is its place there).
+// `order` is the order the grid is in now (sorted, shuffled, or as in the
+// file); `shown` is what the filters let through of that, and makes the pages.
+let order = tiles.slice(), shown = order, pages = Math.max(1, Math.ceil(tiles.length / PER));
+const boxOf = (t) => t.querySelector('.thumb');   // the part of a card that shows the media
+const list = document.getElementById('list'), size = document.getElementById('size');
+let page = 0;
+const load = (v) => { if (v && v.dataset.src && !v.src) v.src = v.dataset.src; };
+const seen = new IntersectionObserver((all) => {
+  for (const e of all) {
+    const v = e.target;
+    if (e.isIntersecting) { load(v); if ('peek' in v.dataset) v.play().catch(() => {}); } else v.pause();
+  }
+}, { rootMargin: '200px' });
+const shape = (m) => { const w = m.naturalWidth || m.videoWidth, h = m.naturalHeight || m.videoHeight; if (w && h) m.closest('.thumb').style.aspectRatio = String(Math.min(2.5, Math.max(0.4, w / h))); };
+for (const m of grid ? grid.querySelectorAll('img, video') : []) {
+  m.addEventListener('load', () => shape(m));
+  m.addEventListener('loadedmetadata', () => shape(m));
+  if (m.complete) shape(m);
+  if (m.tagName === 'VIDEO') seen.observe(m);
+}
+// Playing a video in its card. What to play is what the card's viewer would
+// play, so the viewer's own players are asked: the address, whether it loops,
+// and the sound when that is at an address of its own. The player is laid over
+// the card's picture; there is one at a time, since each holds a connection open.
+const stageOf = (t) => document.getElementById('v' + t.id.slice(1)).querySelector('.stage');
+let live = null;
+function shut() {
+  const t = live;
+  if (!t) return;
+  live = null;
+  for (const m of t.querySelectorAll('.live')) { if (m.pause) { m.pause(); m.removeAttribute('src'); m.load(); } m.remove(); }
+  t.querySelector('.shut').remove();
+  boxOf(t).classList.remove('playing');
+  for (const c of t.querySelectorAll('.more .on')) c.classList.remove('on');
+}
+// With `one` (a button from the list under the card: one of the item's
+// addresses) it is that address the card shows, a picture or something to
+// play; without, the card's own video, with its sound.
+function playHere(t, one) {
+  shut();
+  live = t;
+  const box = boxOf(t), from = one ? null : stageOf(t).querySelector('video'), sound = one ? null : stageOf(t).querySelector('audio');
+  const v = document.createElement(one && one.dataset.kind === 'image' ? 'img' : 'video'), x = document.createElement('button');
+  v.className = 'live';
+  if (v.tagName === 'IMG') { v.referrerPolicy = 'no-referrer'; v.alt = ''; }
+  else { v.controls = v.playsInline = true; v.loop = from ? from.loop : /\.webm([?#]|$)/i.test(one.dataset.url); }
+  v.src = one ? one.dataset.url : from.dataset.src || from.src;
+  if (one) one.classList.add('on');
+  x.className = 'shut';
+  x.textContent = '×';
+  x.title = 'Stop, and show the picture again';
+  x.setAttribute('aria-label', x.title);
+  box.classList.add('playing');
+  box.append(v, x);
+  if (v.tagName === 'IMG') return;
+  v.play().catch(() => {});
+  if (sound) {
+    // A second player, unseen, follows the picture: it stops and starts with it and is put right when it drifts.
+    const a = document.createElement('audio');
+    a.className = 'live';
+    a.src = sound.src;
+    const step = () => { if (!a.seeking && Math.abs(a.currentTime - v.currentTime) > 0.3) a.currentTime = v.currentTime; };
+    v.addEventListener('playing', () => { step(); a.play().catch(() => {}); });
+    for (const ev of ['pause', 'waiting']) v.addEventListener(ev, () => a.pause());
+    for (const ev of ['seeked', 'timeupdate']) v.addEventListener(ev, step);
+    v.addEventListener('volumechange', () => { a.volume = v.volume; a.muted = v.muted; });
+    v.addEventListener('ratechange', () => { a.playbackRate = v.playbackRate; });
+    box.append(a);
+    a.play().catch(() => {});   // asked for during the press itself: some browsers start sound only then
+  }
+  v.focus({ preventScroll: true });
+}
+for (const t of tiles) {
+  if (!stageOf(t).querySelector('video') || boxOf(t).querySelector('video[data-peek]')) continue;
+  const b = document.createElement('button');
+  b.className = 'play';
+  b.title = 'Play here';
+  b.setAttribute('aria-label', 'Play here: ' + t.querySelector('a').title);
+  b.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4v16l13-8z"/></svg>';
+  boxOf(t).append(b);
+}
+function show(p) {
+  page = Math.min(pages - 1, Math.max(0, p));
+  for (const t of tiles) t.hidden = true;
+  shown.slice(page * PER, (page + 1) * PER).forEach((t) => { t.hidden = false; });
+  if (live && live.hidden) shut();
+  for (const n of document.querySelectorAll('.pageno')) n.textContent = 'page ' + (page + 1) + ' of ' + pages;
+  for (const b of document.querySelectorAll('.prev')) b.disabled = page === 0;
+  for (const b of document.querySelectorAll('.next')) b.disabled = page === pages - 1;
+  for (const a of list.querySelectorAll('a[data-i]')) a.classList.toggle('here', !tiles[a.dataset.i].hidden);
+  for (const p of document.querySelectorAll('.pager')) p.hidden = pages < 2;
+  list.querySelector('a.here')?.scrollIntoView({ block: 'nearest' });
+}
+// The filters: a kind (pictures, video, webm, sound), one of the entries an item of
+// a JSON file can have (thumbnail, video, picture, sound, page, linked page, source
+// page: the list offers those this file has) and words that must all be in the name or the addresses. They choose which cards the pages
+// are made of; the table of pages under the grid is narrowed by the words too.
+// A card's kind is its badge ("video", "webm" for a .webm clip, "sound"), or a picture if it has none;
+// the entries it has are written on the card by the server ("data-has").
+const kind = document.getElementById('kind'), saved = document.getElementById('saved'), find = document.getElementById('find'), count = document.getElementById('count');
+const nameOf = (t) => t.querySelector('a').title.toLowerCase(), kindOf = (t) => t.querySelector('u')?.textContent || 'image';
+const savedOk = (t) => !saved || !saved.value || t.dataset.has.split('|').includes(saved.value);
+// What the words are looked for in: a card's name and every address it has (what its picture and its viewer
+// show, and each address listed under it), so a card is found by a site or a file name in any one of them.
+const hays = new Map();
+function hayOf(t) {
+  if (!hays.has(t)) {
+    const view = document.getElementById('v' + t.id.slice(1));
+    const urls = [...t.querySelectorAll('[data-url], [data-src], img[src], .more a'), ...view.querySelectorAll('.bar a.url, .addrs a, .stage [src], .stage [data-src]')].map((x) => x.dataset.url || x.dataset.src || x.getAttribute('src') || x.getAttribute('href') || '');
+    hays.set(t, (nameOf(t) + ' ' + [...new Set(urls)].join(' ')).toLowerCase());
+  }
+  return hays.get(t);
+}
+function sift() {
+  const words = find.value.toLowerCase().split(/\s+/).filter(Boolean), has = (text) => words.every((w) => text.includes(w));
+  shown = order.filter((t) => (!kind.value || kindOf(t) === kind.value) && savedOk(t) && has(hayOf(t)));
+  pages = Math.max(1, Math.ceil(shown.length / PER));
+  for (const r of document.querySelectorAll('tbody tr')) r.hidden = !has(r.textContent.toLowerCase());
+  count.textContent = shown.length === tiles.length ? '' : shown.length + ' of ' + tiles.length;
+  show(0);
+}
+if (kind) { kind.addEventListener('change', sift); if (saved) saved.addEventListener('change', sift); find.addEventListener('input', sift); }
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('button'), img = e.target.closest('.stage img');
+  if (img) img.parentNode.classList.toggle('full');
+  if (!b) return;
+  if (b.classList.contains('prev') || b.classList.contains('next')) { show(page + (b.classList.contains('next') ? 1 : -1)); scrollTo(0, 0); }
+  if (b.id === 'listBtn') document.body.classList.toggle('listed');
+  // The order is turned round by the server, so the page has to be asked for again. This page may not ask (to the
+  // server it is a stranger); it tells the reader, which remembers the choice and loads the page anew.
+  if (b.id === 'revBtn') parent.postMessage({ cardsReversed: b.getAttribute('aria-pressed') !== 'true' }, '*');
+  if (b.classList.contains('play')) playHere(b.closest('.card'));
+  if (b.classList.contains('shut')) { const t = b.closest('.card'); shut(); t.querySelector('.play')?.focus(); }
+  if (b.dataset.url) { if (b.classList.contains('on')) shut(); else playHere(b.closest('.card'), b); }
+  // Sorting and shuffling move the cards themselves, then the filters and pages are made again.
+  if (b.id === 'sortBtn' || b.id === 'shuffleBtn') {
+    const sort = document.getElementById('sortBtn'), on = b === sort && sort.getAttribute('aria-pressed') !== 'true';
+    sort.setAttribute('aria-pressed', on);
+    order = tiles.slice();
+    if (on) order.sort((x, y) => nameOf(x).localeCompare(nameOf(y), undefined, { numeric: true }));
+    if (b.id === 'shuffleBtn') for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
+    grid.append(...order);
+    sift();
+  }
+});
+if (size) {
+  const set = () => document.body.style.setProperty('--card', size.value + 'px');
+  size.addEventListener('input', () => { set(); parent.postMessage({ cardSize: Number(size.value) }, '*'); });
+  set();
+}
+if (innerWidth >= 760 && list.children.length > 1) document.body.classList.add('listed');
+function arrive() {
+  for (const m of document.querySelectorAll('.view video, .view audio')) if (!m.closest('.view:target')) m.pause();
+  const card =/^#g(\d+)$/.exec(location.hash), view = document.querySelector('.view:target');
+  if (card && tiles[card[1]]) {
+    const t = tiles[card[1]];
+    if (!shown.includes(tiles[card[1]])) { kind.value = find.value = ''; if (saved) saved.value = ''; sift(); }   // filtered out: the filters are let go, so it can be shown
+    show(Math.floor(shown.indexOf(tiles[card[1]]) / PER));
+    t.scrollIntoView({ block: 'center' });
+    t.classList.add('flash');
+    setTimeout(() => t.classList.remove('flash'), 1200);
+  }
+  if (!view) return;
+  shut();
+  const i = Number(view.id.slice(1)), reel = view.querySelector('.reel');
+  if (!reel.children.length) {
+    for (let k = Math.max(0, i - 3); k <= Math.min(tiles.length - 1, i + 3); k++) {
+      const c = boxOf(tiles[k]).cloneNode(true);
+      c.style.aspectRatio = '';
+      c.className = k === i ? 'thumb cur' : 'thumb';
+      for (const x of c.querySelectorAll('b, u, button')) x.remove();
+      reel.append(c);
+    }
+  }
+  for (const r of reel.querySelectorAll('video')) { load(r); if ('peek' in r.dataset) r.play().catch(() => {}); }
+  const v = view.querySelector('.stage video');
+  load(v);
+  if (v && 'auto' in v.dataset) v.play().catch(() => {});
+  view.querySelector('.stage').classList.remove('full');
+}
+addEventListener('hashchange', arrive);
+show(0);
+arrive();
+addEventListener('keydown', (e) => {
+  const v = document.querySelector('.view:target');
+  if (!v || e.target.matches('video, audio')) return;
+  const to = v.querySelector(e.key === 'ArrowLeft' ? '.step.prev' : e.key === 'ArrowRight' ? '.step.next' : e.key === 'Escape' ? '.close' : 'x-none');
+  if (to) { e.preventDefault(); to.click(); }
+});
+</script></body></html>
+## saved items as a gallery
+200
+content-length: 31298
+content-security-policy: sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox; default-src 'none'; script-src 'nonce-N'; img-src https: data:; media-src https:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'
+content-type: text/html; charset=utf-8
+cross-origin-resource-policy: same-origin
+referrer-policy: no-referrer
+x-content-type-options: nosniff
+body: <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="no-referrer"><title>items.json</title><style>:root{--paper:#101010;--shade:#f4f1e8;--ink:#eeeeee;--muted:#6f6a5f;--rule:#ddd8ca;--accent:#8c2f1b;--card:420px}
+*{box-sizing:border-box}
+body{margin:0;padding:10px 16px 40px;background:var(--paper);color:var(--ink);font:14px/1.4 "Helvetica Neue",Helvetica,Arial,sans-serif}
+body.listed{padding-right:252px}
+a{color:var(--accent)}
+button{font:inherit;color:inherit;background:none;border:1px solid var(--rule);padding:1px 8px;cursor:pointer}
+button:disabled{opacity:.35;cursor:default}
+button[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+h5{margin:14px 0 6px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:400}
+.tools{position:sticky;top:0;z-index:1;display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;margin:-10px -16px 0;padding:8px 16px;border-bottom:1px solid var(--rule);background:var(--paper);font-size:12px;color:var(--muted)}
+.tools label{display:flex;align-items:center;gap:6px}
+.tools input{width:150px;accent-color:var(--accent)}
+.tools select,.tools input[type=search]{font:inherit;color:var(--ink);background:var(--paper);border:1px solid var(--rule);padding:1px 4px}
+tr[hidden]{display:none}
+.pager{display:flex;align-items:center;gap:6px}
+.pager.foot{justify-content:center;margin-top:12px;font-size:12px;color:var(--muted)}
+.thumbs{columns:var(--card,150px);column-gap:8px}
+.card{margin:0 0 8px;break-inside:avoid}
+.card[hidden]{display:none}
+.card.flash .thumb{outline:3px solid var(--accent);outline-offset:-3px}
+.thumb{display:block;border:1px solid var(--rule);background:var(--shade);aspect-ratio:1;overflow:hidden;position:relative}
+.more{display:flex;flex-wrap:wrap;gap:3px;max-height:5.2em;overflow-y:auto;padding-top:3px;font-size:10px;line-height:1.5}
+.more button,.more a{max-width:100%;padding:0 5px;border:1px solid var(--rule);color:var(--muted);text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.more .on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.thumb a{display:block;height:100%;text-decoration:none}
+.thumb a:focus-visible{outline:3px solid var(--accent);outline-offset:-3px}
+.thumb img,.thumb video{width:100%;height:100%;object-fit:cover;display:block}
+.play,.shut{position:absolute;padding:0;border-radius:50%;background:color-mix(in srgb,var(--paper) 82%,transparent);color:var(--ink)}
+.play{top:50%;left:50%;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;width:min(40px,44%);aspect-ratio:1}
+.play svg{display:block;width:46%;height:auto}
+.shut{top:4px;right:4px;width:24px;height:24px;font-size:16px;line-height:1}
+.thumb .live{position:absolute;inset:0;object-fit:contain;background:#000}
+.thumb.playing a,.thumb.playing .play{display:none}
+.thumb b{position:absolute;left:0;right:0;bottom:0;padding:3px 5px;background:color-mix(in srgb,var(--paper) 88%,transparent);font-size:11px;font-weight:400;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.thumb i{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font:600 12px/1 inherit;color:var(--muted);font-style:normal}
+.thumb u{position:absolute;top:4px;left:4px;padding:1px 5px;background:color-mix(in srgb,var(--paper) 88%,transparent);color:var(--ink);font-size:10px;text-decoration:none}
+table{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}
+td,th{border:1px solid var(--rule);padding:5px 8px;text-align:left;vertical-align:top;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+th{background:var(--shade);font-weight:600}th:nth-child(1){width:38%}th:nth-child(2){width:22%}
+tr:target td{background:var(--shade)}
+.list{display:none;position:fixed;top:0;right:0;bottom:0;width:236px;z-index:1;overflow-y:auto;padding:8px 8px 24px;border-left:1px solid var(--rule);background:color-mix(in srgb,var(--paper) 70%,transparent);font-size:11px}
+body.listed .list{display:block}
+.list:hover{background:color-mix(in srgb,var(--paper) 94%,transparent)}
+.list h5{margin:8px 0 2px}
+.list a{display:block;padding:1px 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink);text-decoration:none;opacity:.5}
+.list a.here,.list a:hover{opacity:1}.list a:hover{background:var(--shade)}
+.list small{display:inline-block;width:3.4em;color:var(--muted)}
+.view{display:none;position:fixed;inset:0;z-index:2;flex-direction:column;background:var(--paper)}.view:target{display:flex}
+.bar{flex:none;display:flex;gap:10px;align-items:center;padding:6px 12px;border-bottom:1px solid var(--rule);font-size:13px}
+.bar span{flex:1 1 30%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
+.bar small{flex:none;color:var(--muted)}.bar a{flex:none;white-space:nowrap}
+.bar a.url{flex:0 1 45%;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.addrs{flex:none;max-height:7.6em;overflow-y:auto;padding:4px 12px;border-bottom:1px solid var(--rule);font-size:12px;line-height:1.5}
+.addrs div{display:flex;gap:8px}.addrs small{flex:none;width:7.5em;color:var(--muted)}.addrs a{min-width:0;overflow-wrap:anywhere}
+.addrs .cur a{font-weight:600}.addrs .cur small::before{content:'\25B8 '}
+.wrap{flex:1;min-height:0;display:flex;position:relative}
+.stage{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;overflow:auto;background:var(--shade)}
+.stage img,.stage video{display:block;flex:1 1 0;width:100%;min-height:0;object-fit:contain}
+.stage img{cursor:zoom-in}.stage.full{display:block}.stage.full img{width:auto;margin:auto;cursor:zoom-out}
+.stage video{background:#000}.stage audio{flex:none;width:min(90%,480px)}
+.step{position:absolute;top:50%;transform:translateY(-50%);z-index:1;width:40px;height:60px;display:flex;align-items:center;justify-content:center;font-size:28px;line-height:1;text-decoration:none;border:1px solid var(--rule);background:color-mix(in srgb,var(--paper) 82%,transparent);color:var(--ink)}
+.step.prev{left:8px}.step.next{right:8px}
+.reel{flex:none;display:flex;gap:6px;justify-content:center;padding:6px 12px;border-top:1px solid var(--rule);overflow-x:auto}
+.reel .thumb{flex:none;width:56px;margin:0;opacity:.75}.reel .thumb:hover,.reel .thumb.cur{opacity:1}.reel .thumb.cur{outline:3px solid var(--accent);outline-offset:-3px}
+</style></head><body><div class="tools"><label>size <input id="size" type="range" min="70" max="420" value="420" aria-label="Size of the cards"></label><span class="pager"><button class="prev" aria-label="The page before">‹</button><span class="pageno"></span><button class="next" aria-label="The next page">›</button></span><select id="kind" aria-label="Show only one kind"><option value="">everything</option><option value="image">pictures</option><option value="video">video</option><option value="webm">webm</option><option value="sound">sound</option></select><select id="saved" aria-label="Show only the items that have this entry"><option value="">any entry</option><option value="thumbnail">thumbnail</option><option value="video">video (full)</option><option value="webm">webm</option><option value="sound">sound</option><option value="linked page">linked page</option><option value="source page">source page</option></select><input id="find" type="search" placeholder="filter by name or address" aria-label="Show only what has these words in its name or in one of its addresses"><span id="count"></span><button id="listBtn" title="Show or hide the list of everything in this file">list</button><button id="sortBtn" aria-pressed="false" title="Put the cards in order of their names. Press again for the order in the file.">sort</button><button id="shuffleBtn" title="Put the cards in a random order">shuffle</button><button id="revBtn" aria-pressed="false" title="Turn the order round: the last in the file first">reverse</button></div><h5>Pictures, video and sound · 7</h5><div class="thumbs" id="grid"><div class="card" id="g0" data-has="thumbnail|video|sound|linked page|source page"><div class="thumb"><a href="#v0" title="A &lt;Saved&gt; Video"><img loading="lazy" referrerpolicy="no-referrer" alt="" src="https://i.example/thumb.jpg?x=1"><u>video</u><b>A &lt;Saved&gt; Video</b></a></div><div class="more"><button data-kind="image" data-url="https://i.example/thumb.jpg?x=1" title="Show this in the card: https://i.example/thumb.jpg?x=1">thumbnail · thumb.jpg</button><button data-kind="video" data-url="https://cdn.example/videoplayback?itag=401&amp;mime=video%2Fmp4" title="Show this in the card: https://cdn.example/videoplayback?itag=401&amp;mime=video%2Fmp4">video · videoplayback</button><button data-kind="audio" data-url="https://cdn.example/videoplayback?itag=251&amp;mime=audio%2Fwebm" title="Show this in the card: https://cdn.example/videoplayback?itag=251&amp;mime=audio%2Fwebm">sound · videoplayback</button><a href="https://site.example/watch?v=1&amp;t=2" target="_blank" rel="noopener noreferrer" title="https://site.example/watch?v=1&amp;t=2">linked page · site.example</a><a href="https://site.example/search" target="_blank" rel="noopener noreferrer" title="https://site.example/search">source page · site.example</a></div></div><div class="card" id="g1" data-has="thumbnail"><div class="thumb"><a href="#v1" title="pic.png"><img loading="lazy" referrerpolicy="no-referrer" alt="" src="https://i.example/pic.png"><b>pic.png</b></a></div></div><div class="card" id="g2" data-has="webm"><div class="thumb"><a href="#v2" title="loop.webm"><video muted playsinline preload="metadata" loop data-peek data-src="https://c.example/loop.webm#t=0.1"></video><u>webm</u><b>loop.webm</b></a></div></div><div class="card" id="g3" data-has="thumbnail|video|linked page"><div class="thumb"><a href="#v3" title="Clip as thumbnail"><video muted loop playsinline preload="metadata" data-peek data-src="https://t.example/small.webm"></video><u>video</u><b>Clip as thumbnail</b></a></div><div class="more"><button data-kind="video" data-url="https://t.example/small.webm" title="Show this in the card: https://t.example/small.webm">thumbnail · small.webm</button><button data-kind="video" data-url="https://d.example/full.mp4" title="Show this in the card: https://d.example/full.mp4">video · full.mp4</button><a href="https://site.example/item" target="_blank" rel="noopener noreferrer" title="https://site.example/item">linked page · site.example</a></div></div><div class="card" id="g4" data-has="thumbnail"><div class="thumb"><a href="#v4" title="only.webm"><video muted playsinline preload="metadata" loop data-peek data-src="https://t.example/only.webm#t=0.1"></video><u>webm</u><b>only.webm</b></a></div></div><div class="card" id="g5" data-has="thumbnail|video|linked page|source page"><div class="thumb"><a href="#v5" title="New names"><img loading="lazy" referrerpolicy="no-referrer" alt="" src="https://t.example/new.jpg"><u>video</u><b>New names</b></a></div><div class="more"><button data-kind="image" data-url="https://t.example/new.jpg" title="Show this in the card: https://t.example/new.jpg">thumbnail · new.jpg</button><button data-kind="video" data-url="https://d.example/new.mp4" title="Show this in the card: https://d.example/new.mp4">video · new.mp4</button><a href="https://site.example/leads" target="_blank" rel="noopener noreferrer" title="https://site.example/leads">linked page · site.example</a><a href="https://site.example/found" target="_blank" rel="noopener noreferrer" title="https://site.example/found">source page · site.example</a></div></div><div class="card" id="g6" data-has="thumbnail|video"><div class="thumb"><a href="#v6" title="one.mp4"><img loading="lazy" referrerpolicy="no-referrer" alt="" src="https://t.example/case.jpg"><u>video</u><b>one.mp4</b></a></div><div class="more"><button data-kind="image" data-url="https://t.example/case.jpg" title="Show this in the card: https://t.example/case.jpg">thumbnail · case.jpg</button><button data-kind="video" data-url="https://d.example/one.mp4" title="Show this in the card: https://d.example/one.mp4">video · one.mp4</button></div></div></div><div class="pager foot"><button class="prev">‹ before</button><span class="pageno"></span><button class="next">next ›</button></div><aside class="list" id="list" aria-label="Everything in this file"><h5>7 in this file</h5><a href="#g0" data-i="0"><small>video</small>A &lt;Saved&gt; Video</a><a href="#g1" data-i="1"><small>image</small>pic.png</a><a href="#g2" data-i="2"><small>webm</small>loop.webm</a><a href="#g3" data-i="3"><small>video</small>Clip as thumbnail</a><a href="#g4" data-i="4"><small>webm</small>only.webm</a><a href="#g5" data-i="5"><small>video</small>New names</a><a href="#g6" data-i="6"><small>video</small>one.mp4</a></aside><section class="view" id="v0"><div class="bar"><span>A &lt;Saved&gt; Video</span><small>1 of 7</small><a class="url" href="https://cdn.example/videoplayback?itag=401&amp;mime=video%2Fmp4" target="_blank" rel="noopener noreferrer" title="Open in a new tab: https://cdn.example/videoplayback?itag=401&amp;mime=video%2Fmp4">https://cdn.example/videoplayback?itag=401&amp;mime=video%2Fmp4</a><a class="close" href="#g0">close</a></div><div class="addrs"><div><small>thumbnail</small><a href="https://i.example/thumb.jpg?x=1" target="_blank" rel="noopener noreferrer">https://i.example/thumb.jpg?x=1</a></div><div class="cur"><small>video</small><a href="https://cdn.example/videoplayback?itag=401&amp;mime=video%2Fmp4" target="_blank" rel="noopener noreferrer">https://cdn.example/videoplayback?itag=401&amp;mime=video%2Fmp4</a></div><div><small>sound</small><a href="https://cdn.example/videoplayback?itag=251&amp;mime=audio%2Fwebm" target="_blank" rel="noopener noreferrer">https://cdn.example/videoplayback?itag=251&amp;mime=audio%2Fwebm</a></div><div><small>linked page</small><a href="https://site.example/watch?v=1&amp;t=2" target="_blank" rel="noopener noreferrer">https://site.example/watch?v=1&amp;t=2</a></div><div><small>source page</small><a href="https://site.example/search" target="_blank" rel="noopener noreferrer">https://site.example/search</a></div></div><div class="wrap"><div class="stage"><video controls playsinline preload="none" poster="https://i.example/thumb.jpg?x=1" src="https://cdn.example/videoplayback?itag=401&amp;mime=video%2Fmp4"></video><audio controls preload="none" src="https://cdn.example/videoplayback?itag=251&amp;mime=audio%2Fwebm"></audio></div><a class="step next" href="#v1" title="Next">›</a></div><div class="reel"></div></section><section class="view" id="v1"><div class="bar"><span>pic.png</span><small>2 of 7</small><a class="url" href="https://i.example/pic.png" target="_blank" rel="noopener noreferrer" title="Open in a new tab: https://i.example/pic.png">https://i.example/pic.png</a><a class="close" href="#g1">close</a></div><div class="wrap"><div class="stage"><img loading="lazy" referrerpolicy="no-referrer" alt="" title="Press for full size" src="https://i.example/pic.png"></div><a class="step prev" href="#v0" title="Previous">‹</a><a class="step next" href="#v2" title="Next">›</a></div><div class="reel"></div></section><section class="view" id="v2"><div class="bar"><span>loop.webm</span><small>3 of 7</small><a class="url" href="https://c.example/loop.webm" target="_blank" rel="noopener noreferrer" title="Open in a new tab: https://c.example/loop.webm">https://c.example/loop.webm</a><a class="close" href="#g2">close</a></div><div class="wrap"><div class="stage"><video controls playsinline loop data-auto preload="metadata" data-src="https://c.example/loop.webm#t=0.1"></video></div><a class="step prev" href="#v1" title="Previous">‹</a><a class="step next" href="#v3" title="Next">›</a></div><div class="reel"></div></section><section class="view" id="v3"><div class="bar"><span>Clip as thumbnail</span><small>4 of 7</small><a class="url" href="https://d.example/full.mp4" target="_blank" rel="noopener noreferrer" title="Open in a new tab: https://d.example/full.mp4">https://d.example/full.mp4</a><a class="close" href="#g3">close</a></div><div class="addrs"><div><small>thumbnail</small><a href="https://t.example/small.webm" target="_blank" rel="noopener noreferrer">https://t.example/small.webm</a></div><div class="cur"><small>video</small><a href="https://d.example/full.mp4" target="_blank" rel="noopener noreferrer">https://d.example/full.mp4</a></div><div><small>linked page</small><a href="https://site.example/item" target="_blank" rel="noopener noreferrer">https://site.example/item</a></div></div><div class="wrap"><div class="stage"><video controls playsinline preload="metadata" data-src="https://d.example/full.mp4#t=0.1"></video></div><a class="step prev" href="#v2" title="Previous">‹</a><a class="step next" href="#v4" title="Next">›</a></div><div class="reel"></div></section><section class="view" id="v4"><div class="bar"><span>only.webm</span><small>5 of 7</small><a class="url" href="https://t.example/only.webm" target="_blank" rel="noopener noreferrer" title="Open in a new tab: https://t.example/only.webm">https://t.example/only.webm</a><a class="close" href="#g4">close</a></div><div class="wrap"><div class="stage"><video controls playsinline loop data-auto preload="metadata" data-src="https://t.example/only.webm#t=0.1"></video></div><a class="step prev" href="#v3" title="Previous">‹</a><a class="step next" href="#v5" title="Next">›</a></div><div class="reel"></div></section><section class="view" id="v5"><div class="bar"><span>New names</span><small>6 of 7</small><a class="url" href="https://d.example/new.mp4" target="_blank" rel="noopener noreferrer" title="Open in a new tab: https://d.example/new.mp4">https://d.example/new.mp4</a><a class="close" href="#g5">close</a></div><div class="addrs"><div><small>thumbnail</small><a href="https://t.example/new.jpg" target="_blank" rel="noopener noreferrer">https://t.example/new.jpg</a></div><div class="cur"><small>video</small><a href="https://d.example/new.mp4" target="_blank" rel="noopener noreferrer">https://d.example/new.mp4</a></div><div><small>linked page</small><a href="https://site.example/leads" target="_blank" rel="noopener noreferrer">https://site.example/leads</a></div><div><small>source page</small><a href="https://site.example/found" target="_blank" rel="noopener noreferrer">https://site.example/found</a></div></div><div class="wrap"><div class="stage"><video controls playsinline preload="none" poster="https://t.example/new.jpg" src="https://d.example/new.mp4"></video></div><a class="step prev" href="#v4" title="Previous">‹</a><a class="step next" href="#v6" title="Next">›</a></div><div class="reel"></div></section><section class="view" id="v6"><div class="bar"><span>one.mp4</span><small>7 of 7</small><a class="url" href="https://d.example/one.mp4" target="_blank" rel="noopener noreferrer" title="Open in a new tab: https://d.example/one.mp4">https://d.example/one.mp4</a><a class="close" href="#g6">close</a></div><div class="addrs"><div><small>thumbnail</small><a href="https://t.example/case.jpg" target="_blank" rel="noopener noreferrer">https://t.example/case.jpg</a></div><div class="cur"><small>video</small><a href="https://d.example/one.mp4" target="_blank" rel="noopener noreferrer">https://d.example/one.mp4</a></div></div><div class="wrap"><div class="stage"><video controls playsinline preload="none" poster="https://t.example/case.jpg" src="https://d.example/one.mp4"></video></div><a class="step prev" href="#v5" title="Previous">‹</a></div><div class="reel"></div></section><script nonce="N">
+const PER = 60, grid = document.getElementById('grid'), tiles = grid ? [...grid.children] : [];
+// `tiles` stays in the file's order (a card's number is its place there).
+// `order` is the order the grid is in now (sorted, shuffled, or as in the
+// file); `shown` is what the filters let through of that, and makes the pages.
+let order = tiles.slice(), shown = order, pages = Math.max(1, Math.ceil(tiles.length / PER));
+const boxOf = (t) => t.querySelector('.thumb');   // the part of a card that shows the media
+const list = document.getElementById('list'), size = document.getElementById('size');
+let page = 0;
+const load = (v) => { if (v && v.dataset.src && !v.src) v.src = v.dataset.src; };
+const seen = new IntersectionObserver((all) => {
+  for (const e of all) {
+    const v = e.target;
+    if (e.isIntersecting) { load(v); if ('peek' in v.dataset) v.play().catch(() => {}); } else v.pause();
+  }
+}, { rootMargin: '200px' });
+const shape = (m) => { const w = m.naturalWidth || m.videoWidth, h = m.naturalHeight || m.videoHeight; if (w && h) m.closest('.thumb').style.aspectRatio = String(Math.min(2.5, Math.max(0.4, w / h))); };
+for (const m of grid ? grid.querySelectorAll('img, video') : []) {
+  m.addEventListener('load', () => shape(m));
+  m.addEventListener('loadedmetadata', () => shape(m));
+  if (m.complete) shape(m);
+  if (m.tagName === 'VIDEO') seen.observe(m);
+}
+// Playing a video in its card. What to play is what the card's viewer would
+// play, so the viewer's own players are asked: the address, whether it loops,
+// and the sound when that is at an address of its own. The player is laid over
+// the card's picture; there is one at a time, since each holds a connection open.
+const stageOf = (t) => document.getElementById('v' + t.id.slice(1)).querySelector('.stage');
+let live = null;
+function shut() {
+  const t = live;
+  if (!t) return;
+  live = null;
+  for (const m of t.querySelectorAll('.live')) { if (m.pause) { m.pause(); m.removeAttribute('src'); m.load(); } m.remove(); }
+  t.querySelector('.shut').remove();
+  boxOf(t).classList.remove('playing');
+  for (const c of t.querySelectorAll('.more .on')) c.classList.remove('on');
+}
+// With `one` (a button from the list under the card: one of the item's
+// addresses) it is that address the card shows, a picture or something to
+// play; without, the card's own video, with its sound.
+function playHere(t, one) {
+  shut();
+  live = t;
+  const box = boxOf(t), from = one ? null : stageOf(t).querySelector('video'), sound = one ? null : stageOf(t).querySelector('audio');
+  const v = document.createElement(one && one.dataset.kind === 'image' ? 'img' : 'video'), x = document.createElement('button');
+  v.className = 'live';
+  if (v.tagName === 'IMG') { v.referrerPolicy = 'no-referrer'; v.alt = ''; }
+  else { v.controls = v.playsInline = true; v.loop = from ? from.loop : /\.webm([?#]|$)/i.test(one.dataset.url); }
+  v.src = one ? one.dataset.url : from.dataset.src || from.src;
+  if (one) one.classList.add('on');
+  x.className = 'shut';
+  x.textContent = '×';
+  x.title = 'Stop, and show the picture again';
+  x.setAttribute('aria-label', x.title);
+  box.classList.add('playing');
+  box.append(v, x);
+  if (v.tagName === 'IMG') return;
+  v.play().catch(() => {});
+  if (sound) {
+    // A second player, unseen, follows the picture: it stops and starts with it and is put right when it drifts.
+    const a = document.createElement('audio');
+    a.className = 'live';
+    a.src = sound.src;
+    const step = () => { if (!a.seeking && Math.abs(a.currentTime - v.currentTime) > 0.3) a.currentTime = v.currentTime; };
+    v.addEventListener('playing', () => { step(); a.play().catch(() => {}); });
+    for (const ev of ['pause', 'waiting']) v.addEventListener(ev, () => a.pause());
+    for (const ev of ['seeked', 'timeupdate']) v.addEventListener(ev, step);
+    v.addEventListener('volumechange', () => { a.volume = v.volume; a.muted = v.muted; });
+    v.addEventListener('ratechange', () => { a.playbackRate = v.playbackRate; });
+    box.append(a);
+    a.play().catch(() => {});   // asked for during the press itself: some browsers start sound only then
+  }
+  v.focus({ preventScroll: true });
+}
+for (const t of tiles) {
+  if (!stageOf(t).querySelector('video') || boxOf(t).querySelector('video[data-peek]')) continue;
+  const b = document.createElement('button');
+  b.className = 'play';
+  b.title = 'Play here';
+  b.setAttribute('aria-label', 'Play here: ' + t.querySelector('a').title);
+  b.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4v16l13-8z"/></svg>';
+  boxOf(t).append(b);
+}
+function show(p) {
+  page = Math.min(pages - 1, Math.max(0, p));
+  for (const t of tiles) t.hidden = true;
+  shown.slice(page * PER, (page + 1) * PER).forEach((t) => { t.hidden = false; });
+  if (live && live.hidden) shut();
+  for (const n of document.querySelectorAll('.pageno')) n.textContent = 'page ' + (page + 1) + ' of ' + pages;
+  for (const b of document.querySelectorAll('.prev')) b.disabled = page === 0;
+  for (const b of document.querySelectorAll('.next')) b.disabled = page === pages - 1;
+  for (const a of list.querySelectorAll('a[data-i]')) a.classList.toggle('here', !tiles[a.dataset.i].hidden);
+  for (const p of document.querySelectorAll('.pager')) p.hidden = pages < 2;
+  list.querySelector('a.here')?.scrollIntoView({ block: 'nearest' });
+}
+// The filters: a kind (pictures, video, webm, sound), one of the entries an item of
+// a JSON file can have (thumbnail, video, picture, sound, page, linked page, source
+// page: the list offers those this file has) and words that must all be in the name or the addresses. They choose which cards the pages
+// are made of; the table of pages under the grid is narrowed by the words too.
+// A card's kind is its badge ("video", "webm" for a .webm clip, "sound"), or a picture if it has none;
+// the entries it has are written on the card by the server ("data-has").
+const kind = document.getElementById('kind'), saved = document.getElementById('saved'), find = document.getElementById('find'), count = document.getElementById('count');
+const nameOf = (t) => t.querySelector('a').title.toLowerCase(), kindOf = (t) => t.querySelector('u')?.textContent || 'image';
+const savedOk = (t) => !saved || !saved.value || t.dataset.has.split('|').includes(saved.value);
+// What the words are looked for in: a card's name and every address it has (what its picture and its viewer
+// show, and each address listed under it), so a card is found by a site or a file name in any one of them.
+const hays = new Map();
+function hayOf(t) {
+  if (!hays.has(t)) {
+    const view = document.getElementById('v' + t.id.slice(1));
+    const urls = [...t.querySelectorAll('[data-url], [data-src], img[src], .more a'), ...view.querySelectorAll('.bar a.url, .addrs a, .stage [src], .stage [data-src]')].map((x) => x.dataset.url || x.dataset.src || x.getAttribute('src') || x.getAttribute('href') || '');
+    hays.set(t, (nameOf(t) + ' ' + [...new Set(urls)].join(' ')).toLowerCase());
+  }
+  return hays.get(t);
+}
+function sift() {
+  const words = find.value.toLowerCase().split(/\s+/).filter(Boolean), has = (text) => words.every((w) => text.includes(w));
+  shown = order.filter((t) => (!kind.value || kindOf(t) === kind.value) && savedOk(t) && has(hayOf(t)));
+  pages = Math.max(1, Math.ceil(shown.length / PER));
+  for (const r of document.querySelectorAll('tbody tr')) r.hidden = !has(r.textContent.toLowerCase());
+  count.textContent = shown.length === tiles.length ? '' : shown.length + ' of ' + tiles.length;
+  show(0);
+}
+if (kind) { kind.addEventListener('change', sift); if (saved) saved.addEventListener('change', sift); find.addEventListener('input', sift); }
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('button'), img = e.target.closest('.stage img');
+  if (img) img.parentNode.classList.toggle('full');
+  if (!b) return;
+  if (b.classList.contains('prev') || b.classList.contains('next')) { show(page + (b.classList.contains('next') ? 1 : -1)); scrollTo(0, 0); }
+  if (b.id === 'listBtn') document.body.classList.toggle('listed');
+  // The order is turned round by the server, so the page has to be asked for again. This page may not ask (to the
+  // server it is a stranger); it tells the reader, which remembers the choice and loads the page anew.
+  if (b.id === 'revBtn') parent.postMessage({ cardsReversed: b.getAttribute('aria-pressed') !== 'true' }, '*');
+  if (b.classList.contains('play')) playHere(b.closest('.card'));
+  if (b.classList.contains('shut')) { const t = b.closest('.card'); shut(); t.querySelector('.play')?.focus(); }
+  if (b.dataset.url) { if (b.classList.contains('on')) shut(); else playHere(b.closest('.card'), b); }
+  // Sorting and shuffling move the cards themselves, then the filters and pages are made again.
+  if (b.id === 'sortBtn' || b.id === 'shuffleBtn') {
+    const sort = document.getElementById('sortBtn'), on = b === sort && sort.getAttribute('aria-pressed') !== 'true';
+    sort.setAttribute('aria-pressed', on);
+    order = tiles.slice();
+    if (on) order.sort((x, y) => nameOf(x).localeCompare(nameOf(y), undefined, { numeric: true }));
+    if (b.id === 'shuffleBtn') for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
+    grid.append(...order);
+    sift();
+  }
+});
+if (size) {
+  const set = () => document.body.style.setProperty('--card', size.value + 'px');
+  size.addEventListener('input', () => { set(); parent.postMessage({ cardSize: Number(size.value) }, '*'); });
+  set();
+}
+if (innerWidth >= 760 && list.children.length > 1) document.body.classList.add('listed');
+function arrive() {
+  for (const m of document.querySelectorAll('.view video, .view audio')) if (!m.closest('.view:target')) m.pause();
+  const card =/^#g(\d+)$/.exec(location.hash), view = document.querySelector('.view:target');
+  if (card && tiles[card[1]]) {
+    const t = tiles[card[1]];
+    if (!shown.includes(tiles[card[1]])) { kind.value = find.value = ''; if (saved) saved.value = ''; sift(); }   // filtered out: the filters are let go, so it can be shown
+    show(Math.floor(shown.indexOf(tiles[card[1]]) / PER));
+    t.scrollIntoView({ block: 'center' });
+    t.classList.add('flash');
+    setTimeout(() => t.classList.remove('flash'), 1200);
+  }
+  if (!view) return;
+  shut();
+  const i = Number(view.id.slice(1)), reel = view.querySelector('.reel');
+  if (!reel.children.length) {
+    for (let k = Math.max(0, i - 3); k <= Math.min(tiles.length - 1, i + 3); k++) {
+      const c = boxOf(tiles[k]).cloneNode(true);
+      c.style.aspectRatio = '';
+      c.className = k === i ? 'thumb cur' : 'thumb';
+      for (const x of c.querySelectorAll('b, u, button')) x.remove();
+      reel.append(c);
+    }
+  }
+  for (const r of reel.querySelectorAll('video')) { load(r); if ('peek' in r.dataset) r.play().catch(() => {}); }
+  const v = view.querySelector('.stage video');
+  load(v);
+  if (v && 'auto' in v.dataset) v.play().catch(() => {});
+  view.querySelector('.stage').classList.remove('full');
+}
+addEventListener('hashchange', arrive);
+show(0);
+arrive();
+addEventListener('keydown', (e) => {
+  const v = document.querySelector('.view:target');
+  if (!v || e.target.matches('video, audio')) return;
+  const to = v.querySelector(e.key === 'ArrowLeft' ? '.step.prev' : e.key === 'ArrowRight' ? '.step.next' : e.key === 'Escape' ? '.close' : 'x-none');
+  if (to) { e.preventDefault(); to.click(); }
+});
+</script></body></html>
+## saved items in a file
+200 {"items": [{"media": [{"kind": "video", "url": "https://cdn.example/videoplayback?itag=401&mime=video%2Fmp4"}, {"kind": "audio", "url": "https://cdn.example/videoplayback?itag=251&mime=audio%2Fwebm"}], "page": "https://site.example/watch?v=1&t=2", "preview": "", "thumb": "https://i.example/thumb.jpg?x=1", "title": "A <Saved> Video"}, {"media": [], "page": "", "preview": "", "thumb": "https://i.example/pic.png", "title": ""}, {"media": [{"kind": "video", "url": "https://c.example/loop.webm"}], "page": "", "preview": "", "thumb": "", "title": ""}, {"media": [{"kind": "video", "url": "https://d.example/full.mp4"}], "page": "https://site.example/item", "preview": "https://t.example/small.webm", "thumb": "", "title": "Clip as thumbnail"}, {"media": [{"kind": "video", "url": "https://t.example/only.webm"}], "page": "", "preview": "", "thumb": "", "title": ""}, {"media": [{"kind": "video", "url": "https://d.example/new.mp4"}], "page": "https://site.example/leads", "preview": "", "thumb": "https://t.example/new.jpg", "title": "New names"}, {"media": [{"kind": "video", "url": "https://d.example/one.mp4"}], "page": "", "preview": "", "thumb": "https://t.example/case.jpg", "title": ""}], "more": false}
+## bookmarks
+200 {"items": [{"media": [{"kind": "video", "url": "https://v.example/a.mp4"}], "page": "", "preview": "", "thumb": "", "title": "A clip & more"}, {"media": [], "page": "https://site.example/page", "preview": "", "thumb": "", "title": "A page"}], "more": false}
+## links, none in it
+200 {"items": [], "more": false}
+## links, not that kind
+404 {"error": "no such file"}
+## links, no such file
+404 {"error": "no such file"}
+## cards, hidden
+404 {"error": "no such file"}
+## book page
+200 <?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><head><title>One</title></head><body><h1>Same Words</h1><p>A <em>first</em> paragraph, with a <a href="ch2.xhtml">link</a> &amp; more.</p><p>item one</p><p>item one</p><p><img src="../img/dot.png" alt=""/></p></body></html>
+
+## book page, raw
+200
+content-length: 306
+content-security-policy: sandbox allow-same-origin; default-src 'none'; img-src 'self' data: blob:; media-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'
+content-type: application/xhtml+xml
+cross-origin-resource-policy: same-origin
+referrer-policy: no-referrer
+x-content-type-options: nosniff
+body: <?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><head><title>One</title></head><body><h1>Same Words</h1><p>A <em>first</em> paragraph, with a <a href="ch2.xhtml">link</a> &amp; more.</p><p>item one</p><p>item one</p><p><img src="../img/dot.png" alt=""/></p></body></html>
+## book page, not packed
+200 <?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Two</title></head><body><h1>Second</h1><p>Not packed.</p></body></html>
+
+## book picture
+200
+content-length: 23
+content-security-policy: sandbox allow-same-origin; default-src 'none'; img-src 'self' data: blob:; media-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'
+content-type: image/png
+cross-origin-resource-policy: same-origin
+referrer-policy: no-referrer
+x-content-type-options: nosniff
+body: not really a png either
+## book page blocks
+200 {"blocks": [{"hash": "41649cbdc94a899c", "len": 9, "nth": 0}, {"hash": "62bdc245150fdf6a", "len": 28, "nth": 0}, {"hash": "fec3316c9ad911ce", "len": 7, "nth": 0}, {"hash": "fec3316c9ad911ce", "len": 7, "nth": 1}]}
+## book, no such page
+404 {"error": "no such file"}
+## book, not a page
+404 {"error": "no such doc"}
+## book, no such file
+404 {"error": "no such file"}
+## book, hidden name
+404 {"error": "not found"}
+## not a book
+404 {"error": "no such file"}
 ## highlight gets text
 200 {"doc": "a/1-doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "Body", "status": "open", "text": "now annotated \u00fcn\u00efcode", "ts": "<ts>", "type": "important"}
 ## note retype
@@ -230,23 +847,23 @@ body: # First
 ## note put missing
 404 {"error": "no such note"}
 ## rename title
-200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#fbeeb0", "id": "<id>", "name": "Important"}, {"color": "#cfe8c6", "id": "<id>", "name": "Definition"}, {"color": "#cfe0f5", "id": "<id>", "name": "Question"}, {"color": "#f6d0d6", "id": "<id>", "name": "Unclear"}], "ignore": ["CLAUDE.md"], "root": "<root>", "side": ["references.md"], "title": "Renamed Title"}
+200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#fbeeb0", "id": "<id>", "name": "Important"}, {"color": "#cfe8c6", "id": "<id>", "name": "Definition"}, {"color": "#cfe0f5", "id": "<id>", "name": "Question"}, {"color": "#f6d0d6", "id": "<id>", "name": "Unclear"}], "ignore": ["CLAUDE.md"], "root": "<root>", "scripts": ["b/app.html", "page.html"], "side": ["references.md"], "title": "Renamed Title"}
 ## front after rename
 200 # Renamed Title
 
 Description.
 
 ## set highlights
-200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "root": "<root>", "side": ["references.md"], "title": "Renamed Title"}
+200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "root": "<root>", "scripts": ["b/app.html", "page.html"], "side": ["references.md"], "title": "Renamed Title"}
 ## edit front
-200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "root": "<root>", "side": ["references.md"], "title": "Edited"}
+200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "root": "<root>", "scripts": ["b/app.html", "page.html"], "side": ["references.md"], "title": "Edited"}
 ## front after edit
 200 # Edited
 
 New text.
 
 ## folder front page
-200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "root": "<root>", "side": ["references.md"], "title": "Edited"}
+200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "root": "<root>", "scripts": ["b/app.html", "page.html"], "side": ["references.md"], "title": "Edited"}
 ## folder front content
 200 # Folder A
 
@@ -259,13 +876,13 @@ About this folder.
 ## edit front bad
 400 {"error": "markdown required"}
 ## set locks
-200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "locks": {"a": {}, "b": {}, "gone": {"hash": "aGFzaA==", "salt": "c2FsdA=="}, "gone/deep": {}}, "root": "<root>", "side": ["references.md"], "title": "Edited"}
+200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "locks": {"a": {}, "b": {}, "gone": {"hash": "aGFzaA==", "salt": "c2FsdA=="}, "gone/deep": {}}, "root": "<root>", "scripts": ["b/app.html", "page.html"], "side": ["references.md"], "title": "Edited"}
 ## remove folder
 200 {"removed": "gone"}
 ## locks after removal
-200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "locks": {"a": {}, "b": {}}, "root": "<root>", "side": ["references.md"], "title": "Edited"}
+200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "locks": {"a": {}, "b": {}}, "root": "<root>", "scripts": ["b/app.html", "page.html"], "side": ["references.md"], "title": "Edited"}
 ## removed folder docs
-200 [{"front": false, "group": "a", "path": "a/1-doc.md", "side": false, "title": "First"}, {"front": false, "group": "a", "path": "a/2-doc.md", "side": false, "title": "2-doc"}, {"front": false, "group": "a", "path": "a/10-doc.md", "side": false, "title": "Tenth"}, {"front": false, "group": "a", "path": "a/FRONTPAGE.md", "side": false, "title": "Folder A"}, {"front": false, "group": "b", "path": "b/clip.mp4", "side": false, "title": "clip.mp4"}, {"front": false, "group": "b", "path": "b/drawing.svg", "side": false, "title": "drawing.svg"}, {"front": false, "group": "b", "path": "b/page.html", "side": false, "title": "A Page"}, {"front": false, "group": "b", "path": "b/pic.png", "side": false, "title": "pic.png"}, {"front": false, "group": "", "path": "code.c", "side": false, "title": "code.c"}, {"front": true, "group": "", "path": "FRONTPAGE.md", "side": false, "title": "Edited"}, {"front": false, "group": "", "path": "references.md", "side": true, "title": "Refs"}]
+200 [{"changed": "<changed>", "front": false, "group": "a", "path": "a/1-doc.md", "side": false, "title": "First"}, {"changed": "<changed>", "front": false, "group": "a", "path": "a/2-doc.md", "side": false, "title": "2-doc"}, {"changed": "<changed>", "front": false, "group": "a", "path": "a/10-doc.md", "side": false, "title": "Tenth"}, {"changed": "<changed>", "front": false, "group": "a", "path": "a/blocks.md", "side": false, "title": "Same  Words"}, {"changed": "<changed>", "front": false, "group": "a", "path": "a/FRONTPAGE.md", "side": false, "title": "Folder A"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/app.html", "side": false, "title": "app.html"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/blocks.html", "side": false, "title": "T"}, {"front": false, "group": "b/book.epub", "path": "b/book.epub/OEBPS/text/ch1.xhtml", "side": false, "title": "The First & Best"}, {"front": false, "group": "b/book.epub", "path": "b/book.epub/OEBPS/text/ch2.xhtml", "side": false, "title": "ch2"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/clip.mp4", "side": false, "title": "clip.mp4"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/drawing.svg", "side": false, "title": "drawing.svg"}, {"changed": "<changed>", "front": false, "group": "b", "links": true, "path": "b/items.json", "side": false, "title": "items.json"}, {"changed": "<changed>", "front": false, "group": "b", "links": true, "path": "b/marks.html", "side": false, "title": "Bookmarks"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/page.html", "side": false, "title": "A Page"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/pic.png", "side": false, "title": "pic.png"}, {"changed": "<changed>", "front": false, "group": "b", "links": true, "path": "b/saved.json", "side": false, "title": "saved.json"}, {"changed": "<changed>", "front": false, "group": "", "path": "code.c", "side": false, "title": "code.c"}, {"changed": "<changed>", "front": true, "group": "", "path": "FRONTPAGE.md", "side": false, "title": "Edited"}, {"changed": "<changed>", "front": false, "group": "", "path": "references.md", "side": true, "title": "Refs"}]
 ## remove folder again
 400 {"error": "no such folder"}
 ## remove folder escape
@@ -392,7 +1009,7 @@ Cache-Control: no-store
 ## config in own
 200 {"front": null, "highlights": [{"color": "#fbeeb0", "id": "<id>", "name": "Important"}, {"color": "#cfe8c6", "id": "<id>", "name": "Definition"}, {"color": "#cfe0f5", "id": "<id>", "name": "Question"}, {"color": "#f6d0d6", "id": "<id>", "name": "Unclear"}], "ignore": ["CLAUDE.md"], "root": "<workspaces>/My Space", "side": [], "title": "My Space"}
 ## docs in own
-200 [{"front": false, "group": "", "path": "doc.md", "side": false, "title": "In Own"}]
+200 [{"changed": "<changed>", "front": false, "group": "", "path": "doc.md", "side": false, "title": "In Own"}]
 ## note in own
 200 {"doc": "doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "", "status": "open", "text": "in the other workspace", "ts": "<ts>", "type": ""}
 ## notes in own
@@ -402,7 +1019,7 @@ Cache-Control: no-store
 ## notes at home
 200 
 ## config at home
-200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "locks": {"a": {}, "b": {}}, "root": "<root>", "side": ["references.md"], "title": "Edited"}
+200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "locks": {"a": {}, "b": {}}, "root": "<root>", "scripts": ["b/app.html", "page.html"], "side": ["references.md"], "title": "Edited"}
 ## unpair
 200 {"ok": true}
 ## after unpairing

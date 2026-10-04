@@ -22,7 +22,10 @@
 #include <vector>
 
 #include "../vendor/cJSON.h"
+#include "anchor.hpp"
+#include "epub.hpp"
 #include "http.hpp"
+#include "links.hpp"
 
 using std::string;
 using Strings = std::vector<string>;
@@ -174,20 +177,26 @@ static string join(const Strings &parts) {
 }
 
 static const Strings CODE_EXT = {".c", ".h", ".cpp", ".hpp", ".cc", ".py", ".js", ".ts", ".rs", ".go", ".java", ".sh"};
-static bool is_html(const string &name) { return ends_with(name, ".html") || ends_with(name, ".htm"); }
+static bool is_html(const string &name) { return ends_with(name, ".html") || ends_with(name, ".htm") || ends_with(name, ".xhtml"); }
 static bool readable(const string &name) {
   return ends_with(name, ".md") || is_html(name) || name == "Makefile" ||
          std::find(CODE_EXT.begin(), CODE_EXT.end(), ext_of(name)) != CODE_EXT.end();
 }
-// Pictures, video and sound are listed too; the reader shows them in a viewer.
+// Pictures, video, sound and PDFs are listed too; the reader shows them in a viewer.
 static bool is_media(const string &name) {
-  static const Strings media = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".mp4", ".m4v", ".mov", ".webm", ".ogv", ".mp3", ".m4a", ".wav", ".ogg"};
+  static const Strings media = {".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".mp4", ".m4v", ".mov", ".webm", ".ogv", ".mp3", ".m4a", ".wav", ".ogg"};
   return std::find(media.begin(), media.end(), lower(ext_of(name))) != media.end();
+}
+// Text and JSON files are listed only when they hold web addresses: a file of saved links, shown as media cards.
+static bool is_link_file(const string &name) {
+  static const Strings kinds = {".txt", ".json", ".jsonl", ".ndjson", ".csv"};
+  return std::find(kinds.begin(), kinds.end(), lower(ext_of(name))) != kinds.end();
 }
 static const size_t MAX_RANGE = 4u << 20; // most bytes sent in answer to one partial request
 static const char *mime_of(const string &name) {
   static const std::pair<const char *, const char *> types[] = {
       {".html", "text/html"}, {".htm", "text/html"}, {".css", "text/css"}, {".js", "text/javascript"},
+      {".xhtml", "application/xhtml+xml"}, {".otf", "font/otf"}, {".ttf", "font/ttf"}, {".woff", "font/woff"},
       {".mjs", "text/javascript"}, {".json", "application/json"}, {".svg", "image/svg+xml"}, {".png", "image/png"},
       {".jpg", "image/jpeg"}, {".jpeg", "image/jpeg"}, {".gif", "image/gif"}, {".webp", "image/webp"},
       {".pdf", "application/pdf"}, {".woff2", "font/woff2"}, {".mp4", "video/mp4"}, {".m4v", "video/mp4"},
@@ -374,6 +383,58 @@ static string title_of(const string &abs) {
   return name.substr(0, name.size() - 3);
 }
 
+// ---- books -------------------------------------------------------------------
+// An EPUB is listed as a folder of its pages, in reading order:
+// "shelf/book.epub/OEBPS/ch1.xhtml". Such a path names a file inside the zip
+// and is answered from there, so a page of a book is read, highlighted and
+// annotated like any other page, and its pictures and styles are found beside it.
+
+// The most of one file that is held in memory at once: an entry of a book, a document being mapped.
+static size_t most_in_memory() { return profile.piece * 256; }
+// Whether a path goes into a book; if so, the book's file and the path inside it.
+static bool in_book(const Strings &parts, string &book, string &inner) {
+  for (size_t i = 0; i + 1 < parts.size(); i++) {
+    if (lower(ext_of(parts[i])) != ".epub") continue;
+    const auto cut = parts.begin() + static_cast<std::ptrdiff_t>(i) + 1;
+    book = ROOT + "/" + join(Strings(parts.begin(), cut));
+    if (!is_file(book)) return false;
+    inner = join(Strings(cut, parts.end()));
+    return true;
+  }
+  return false;
+}
+// One file of a book. 0, or the status to answer with.
+static int book_item(const string &book, const string &inner, string &out) {
+  std::vector<zip::Entry> entries;
+  if (!zip::list(book, entries)) return 404;
+  const zip::Entry *e = zip::find(entries, inner);
+  return e ? zip::read(book, *e, out, most_in_memory()) : 404;
+}
+static http::Response book_error(int status) { return http::error(status, status == 413 ? "too large to read from the book" : status == 500 ? "the book is damaged, or packed in a way not handled" : "no such file"); }
+// The pages of a book, as documents.
+static void list_book(const string &abs, const string &rel, bool side, cJSON *out) {
+  std::vector<zip::Entry> entries;
+  epub::Book book;
+  if (!zip::list(abs, entries) || !epub::open(abs, entries, book, most_in_memory())) return;
+  for (const epub::Chapter &c : book.chapters) {
+    Strings parts;
+    const string path = rel + "/" + c.path;
+    if (!is_html(c.path) || !clean_parts(path, parts, true) || join(parts) != path) continue;   // not a page, or not a path the reader could ask for
+    cJSON *doc = cJSON_CreateObject();
+    cJSON_AddStringToObject(doc, "path", path.c_str());
+    cJSON_AddStringToObject(doc, "group", rel.c_str());
+    cJSON_AddStringToObject(doc, "title", c.title.c_str());
+    cJSON_AddBoolToObject(doc, "side", side);
+    cJSON_AddBoolToObject(doc, "front", false);
+    cJSON_AddItemToArray(out, doc);
+  }
+}
+
+// When a file was last changed, in seconds: the reader puts the folders that were added to most recently first.
+static double changed_at(const string &abs) {
+  struct stat st;
+  return ::stat(abs.c_str(), &st) == 0 ? static_cast<double>(st.st_mtime) : 0;
+}
 static void walk(const string &dir, const string &rel, const Strings &ignore, const Strings &side, cJSON *out) {
   DIR *d = ::opendir(dir.c_str());
   if (!d) return;
@@ -394,6 +455,25 @@ static void walk(const string &dir, const string &rel, const Strings &ignore, co
       cJSON_AddStringToObject(doc, "title", title_of(abs).c_str());
       cJSON_AddBoolToObject(doc, "side", matches(r, side));
       cJSON_AddBoolToObject(doc, "front", r == FRONT);
+      cJSON_AddNumberToObject(doc, "changed", changed_at(abs));
+      // A browser's export of bookmarks is a page of links: shown as cards, like a file of saved links.
+      string start;
+      if (is_html(name) && read_start(abs, start, 512) && start.find("NETSCAPE-Bookmark-file") != string::npos) cJSON_AddBoolToObject(doc, "links", true);
+      cJSON_AddItemToArray(out, doc);
+    } else if (lower(ext_of(name)) == ".epub") {
+      list_book(abs, r, matches(r, side), out);
+    } else if (is_link_file(name)) {
+      // Judged by its beginning, so a long file is not read through for the list.
+      string start;
+      if (!read_start(abs, start, 64 * 1024) || (start.find("https://") == string::npos && start.find("https:\\/\\/") == string::npos)) continue;
+      cJSON *doc = cJSON_CreateObject();
+      cJSON_AddStringToObject(doc, "path", r.c_str());
+      cJSON_AddStringToObject(doc, "group", rel.c_str());
+      cJSON_AddStringToObject(doc, "title", name.c_str());
+      cJSON_AddBoolToObject(doc, "side", matches(r, side));
+      cJSON_AddBoolToObject(doc, "front", false);
+      cJSON_AddBoolToObject(doc, "links", true);
+      cJSON_AddNumberToObject(doc, "changed", changed_at(abs));
       cJSON_AddItemToArray(out, doc);
     }
   }
@@ -835,6 +915,25 @@ static const char *CSP_PAGE =
 static const char *CSP_RAW =
     "Content-Security-Policy: sandbox allow-same-origin; default-src 'none'; img-src 'self' data: blob:; media-src 'self' data: blob:; "
     "style-src 'self' 'unsafe-inline'; font-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'\r\n";
+// A page named under "scripts" in hub.json is a small program of the user's
+// own, and may run: its own inline scripts, files picked or dropped into it,
+// pictures and media from the web. It runs as a stranger, though: the sandbox
+// leaves out allow-same-origin, so the page has an origin of its own, with no
+// cookie of the reader's, no storage, and no way to ask this server for
+// anything (a request from it is one from another site, and is refused).
+static const char *CSP_APP =
+    "Content-Security-Policy: sandbox allow-scripts allow-downloads allow-popups allow-modals allow-forms; default-src 'none'; "
+    "script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src https: data: blob:; media-src https: data: blob:; connect-src https:; "
+    "frame-src https:; font-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'\r\n";
+// The page of cards made from a file of links: pictures and media from the
+// web and nothing else. No script, and no share in the reader's origin. A
+// link in it opens in a tab of its own, as an ordinary page.
+// The one script in it is the server's own, and the only one allowed: the
+// policy names its nonce, made afresh for each answer.
+static string csp_cards(const string &nonce) {
+  return "Content-Security-Policy: sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox; default-src 'none'; script-src 'nonce-" + nonce + "'; "
+         "img-src https: data:; media-src https:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'\r\n";
+}
 static const char *CSP_DATA = "Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'\r\n";
 static const char *COMMON_HEADERS = "X-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nCross-Origin-Resource-Policy: same-origin\r\nX-DNS-Prefetch-Control: off\r\n";
 
@@ -895,6 +994,23 @@ static void open_workspace(const Workspace &w) {
   ROOT = w.root;
   { std::lock_guard<std::mutex> g(usage_lock); usage_known = false; }
   if (!WORKSPACES.empty()) { make_dirs(WORKSPACES); write_file(WORKSPACES + "/.current", w.home ? "" : w.name); }
+}
+
+// A highlight's anchor as it will be stored: the known fields only, each
+// within bounds. nullptr if there is nothing usable in it.
+static cJSON *clean_anchor(const cJSON *in) {
+  if (!cJSON_IsObject(in)) return nullptr;
+  const string block = str_of(in, "block");
+  if (block.empty() || block.size() > 32 || !std::all_of(block.begin(), block.end(), [](unsigned char c) { return std::isxdigit(c); })) return nullptr;
+  auto number = [&](const char *key) { const cJSON *v = cJSON_GetObjectItemCaseSensitive(in, key); return cJSON_IsNumber(v) && v->valuedouble >= 0 && v->valuedouble < 1e9 ? static_cast<double>(static_cast<long>(v->valuedouble)) : 0.0; };
+  auto words = [&](const char *key) { const string s = str_of(in, key); return s.size() <= 200 ? s : string(); };   // the words on either side: a few dozen characters
+  cJSON *a = cJSON_CreateObject();
+  cJSON_AddStringToObject(a, "block", block.c_str());
+  cJSON_AddNumberToObject(a, "nth", number("nth"));
+  cJSON_AddNumberToObject(a, "start", number("start"));
+  cJSON_AddStringToObject(a, "before", words("before").c_str());
+  cJSON_AddStringToObject(a, "after", words("after").c_str());
+  return a;
 }
 
 // A file that is there but cannot be read as what it should be. Writing would
@@ -1130,6 +1246,15 @@ static http::Response answer(http::Request &req) {
     Strings parts;
     if (!clean_parts(p.substr(5), parts, true)) return http::error(404, "not found");   // hidden files are not served, as they are not listed
     string abs = ROOT + "/" + join(parts);
+    // A file inside a book: sent whole, from the zip.
+    string book, inner;
+    if (in_book(parts, book, inner)) {
+      http::Response r;
+      if (int bad = book_item(book, inner, r.body)) return book_error(bad);
+      r.type = mime_of(parts.back());
+      r.extra = CSP_RAW;
+      return r;
+    }
     struct stat st;
     if (::stat(abs.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) return http::error(404, "no such file");
     const unsigned long long size = static_cast<unsigned long long>(st.st_size);
@@ -1137,7 +1262,14 @@ static http::Response answer(http::Request &req) {
     r.type = mime_of(parts.back());
     r.extra = "Accept-Ranges: bytes\r\n";
     // A browser's PDF viewer does not start inside a sandbox; a PDF cannot touch the reader anyway.
-    if (r.type != "application/pdf") r.extra += CSP_RAW;
+    // A page listed by its exact path under "scripts" in hub.json may run its own scripts, apart from the reader.
+    bool app = false;
+    if (is_html(parts.back())) {
+      Json cfg(read_config());
+      const Strings apps = list_of(cfg.p, "scripts");
+      app = std::find(apps.begin(), apps.end(), join(parts)) != apps.end();
+    }
+    if (r.type != "application/pdf") r.extra += app ? CSP_APP : CSP_RAW;
     // "Range: bytes=a-b", "bytes=a-" or "bytes=-n" (the last n): send that part
     // only. This is what lets a browser play and seek video, and read a large
     // PDF a piece at a time.
@@ -1343,10 +1475,110 @@ static http::Response answer(http::Request &req) {
     return json_response(out.p);
   }
 
+  // The web addresses in a text or JSON file: as a list, and as a page of media cards.
+  if ((p == "/api/links" && m == "GET") || (starts_with(p, "/cards/") && m == "GET")) {
+    const bool page = p != "/api/links";
+    Strings parts;
+    auto it = req.query.find("path");
+    if (!clean_parts(page ? p.substr(7) : it == req.query.end() ? "" : it->second, parts, true) || !(is_link_file(parts.back()) || is_html(parts.back()))) return http::error(404, "no such file");
+    const string abs = ROOT + "/" + join(parts);
+    struct stat st;
+    if (::stat(abs.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) return http::error(404, "no such file");
+    if (static_cast<unsigned long long>(st.st_size) > most_in_memory()) return http::error(413, "too large to read through");
+    string text;
+    if (!read_file(abs, text)) return http::error(404, "no such file");
+    bool more = false;
+    // Everything in the file is shown. Only the microcontroller, with its few hundred KB, stops at 2000.
+    const size_t most = string(profile.name) == "esp32" ? 2000 : static_cast<size_t>(-1);
+    const std::vector<links::Item> list = links::find(parts.back(), text, most, more);
+    if (page) {
+      // The reader says which colours its pane has, so the gallery matches: six hex digits each, or the plain theme's.
+      links::Look look;
+      auto colour = [&](const char *name, string &into) {
+        const auto q = req.query.find(name);
+        if (q != req.query.end() && q->second.size() == 6 && std::all_of(q->second.begin(), q->second.end(), [](unsigned char ch) { return std::isxdigit(ch); })) into = q->second;
+      };
+      colour("paper", look.paper);
+      colour("shade", look.shade);
+      colour("ink", look.ink);
+      colour("muted", look.muted);
+      colour("rule", look.rule);
+      colour("accent", look.accent);
+      const auto wide = req.query.find("size");
+      if (wide != req.query.end() && !wide->second.empty() && wide->second.size() <= 3 && std::all_of(wide->second.begin(), wide->second.end(), [](unsigned char ch) { return std::isdigit(ch); }))
+        look.card = std::min(420, std::max(70, std::stoi(wide->second)));
+      const auto rev = req.query.find("rev");
+      look.reversed = rev != req.query.end() && rev->second == "1";
+      const string nonce = secure::random_hex(16);
+      http::Response r;
+      r.type = "text/html";
+      r.body = links::cards(parts.back(), list, more, nonce, look);
+      r.extra = csp_cards(nonce);
+      return r;
+    }
+    Json out(cJSON_CreateObject());
+    cJSON *all = cJSON_AddArrayToObject(out.p, "items");
+    for (const links::Item &item : list) {
+      cJSON *one = cJSON_CreateObject();
+      cJSON_AddStringToObject(one, "title", item.title.c_str());
+      cJSON_AddStringToObject(one, "thumb", item.thumb.c_str());
+      cJSON_AddStringToObject(one, "preview", item.preview.c_str());
+      cJSON_AddStringToObject(one, "page", item.page.c_str());
+      cJSON *media = cJSON_AddArrayToObject(one, "media");
+      for (const links::Link &l : item.media) {
+        cJSON *entry = cJSON_CreateObject();
+        cJSON_AddStringToObject(entry, "url", l.url.c_str());
+        cJSON_AddStringToObject(entry, "kind", l.kind);
+        cJSON_AddItemToArray(media, entry);
+      }
+      cJSON_AddItemToArray(all, one);
+    }
+    cJSON_AddBoolToObject(out.p, "more", more);
+    return json_response(out.p);
+  }
+
+  // The blocks of a document, each known by a hash of its words: what a
+  // highlight is anchored to (see anchor.hpp).
+  if (p == "/api/blocks" && m == "GET") {
+    Strings parts;
+    auto it = req.query.find("path");
+    if (it == req.query.end() || !clean_parts(it->second, parts, true) || !readable(parts.back())) return http::error(404, "no such doc");
+    const string abs = ROOT + "/" + join(parts);
+    string text, book, inner;
+    if (in_book(parts, book, inner)) {
+      if (int bad = book_item(book, inner, text)) return book_error(bad);
+    } else {
+      struct stat st;
+      if (::stat(abs.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) return http::error(404, "no such doc");
+      if (static_cast<unsigned long long>(st.st_size) > most_in_memory()) return http::error(413, "too large to map");   // the whole file is held in memory
+      if (!read_file(abs, text)) return http::error(404, "no such doc");
+    }
+    const string &name = parts.back();
+    // Anything that is neither markdown nor a page is shown as one block of code.
+    const std::vector<string> texts = ends_with(name, ".md") ? anchor::markdown_blocks(text) : is_html(name) ? anchor::html_blocks(text) : std::vector<string>{text};
+    Json out(cJSON_CreateObject());
+    cJSON *list = cJSON_AddArrayToObject(out.p, "blocks");
+    for (const anchor::Block &b : anchor::blocks(texts)) {
+      cJSON *one = cJSON_CreateObject();
+      cJSON_AddStringToObject(one, "hash", b.hash.c_str());
+      cJSON_AddNumberToObject(one, "nth", b.nth);
+      cJSON_AddNumberToObject(one, "len", static_cast<double>(b.len));
+      cJSON_AddItemToArray(list, one);
+    }
+    return json_response(out.p);
+  }
+
   if (p == "/api/doc") {
     Strings parts;
     auto it = req.query.find("path");
     if (it == req.query.end() || !clean_parts(it->second, parts, true) || !readable(parts.back())) return http::error(404, "no such doc");
+    string book, inner;
+    if (in_book(parts, book, inner)) {
+      http::Response page;
+      page.type = "text/plain";
+      if (int bad = book_item(book, inner, page.body)) return book_error(bad);
+      return page;
+    }
     http::Response r = file_response(ROOT + "/" + join(parts), "text/plain");
     return r.status == 200 ? r : http::error(404, "no such doc");
   }
@@ -1402,6 +1634,7 @@ static http::Response answer(http::Request &req) {
     cJSON_AddStringToObject(note, "headingText", str_of(body.p, "headingText").c_str());
     cJSON_AddStringToObject(note, "quote", quote.c_str());
     cJSON_AddStringToObject(note, "type", str_of(body.p, "type").c_str());
+    if (cJSON *a = clean_anchor(cJSON_GetObjectItemCaseSensitive(body.p, "anchor"))) cJSON_AddItemToObject(note, "anchor", a);
     cJSON_AddStringToObject(note, "text", text.c_str());
     cJSON_AddStringToObject(note, "ts", ts_ok ? own_ts.c_str() : now_iso().c_str());
     cJSON_AddStringToObject(note, "status", text.empty() ? "highlight" : "open");
@@ -1431,6 +1664,10 @@ static http::Response answer(http::Request &req) {
     Json body(cJSON_Parse(text.c_str()));
     if (!cJSON_IsObject(body.p)) return http::error(400, "json object required");
     for (const char *key : {"text", "quote", "heading", "headingText", "type"}) if (has_str(body.p, key)) set_str(note, key, str_of(body.p, key));
+    // A new quote comes with its own anchor, or with none: the old one is for the old quote.
+    cJSON *a = clean_anchor(cJSON_GetObjectItemCaseSensitive(body.p, "anchor"));
+    if (a || has_str(body.p, "quote")) cJSON_DeleteItemFromObjectCaseSensitive(note, "anchor");
+    if (a) cJSON_AddItemToObject(note, "anchor", a);
     if (str_of(note, "status") == "highlight" && !str_of(note, "text").empty()) set_str(note, "status", "open");
     if (!write_notes(notes.p)) return http::error(500, "could not save");
     return json_response(note);
@@ -1469,6 +1706,11 @@ static http::Response answer(http::Request &req) {
     if (req.content_length > profile.max_upload) return http::error(413, "body too large");
     string abs = base + "/" + join(parts);
     if (in_page_folder(abs)) return http::error(400, "bad path");   // the page's own files are not changed through the API
+    // A refusal after this point reads the body first: answered while the file
+    // is still being sent, the browser sees a broken connection and no answer.
+    auto refuse = [&](int status, const char *why) { req.discard_body(profile.max_upload); return http::error(status, why); };
+    string tmp = abs + "." + secure::random_hex(4) + ".tmp";
+    if (sys::path_too_long(tmp)) return refuse(400, "the name is too long for this system");
     Json out(cJSON_CreateObject());
     if (is_file(abs) || is_dir(abs)) {
       req.discard_body(profile.max_upload);
@@ -1477,8 +1719,7 @@ static http::Response answer(http::Request &req) {
     }
     if (!room_in(base, req.content_length)) return http::error(507, "storage is full");
     make_dirs(dirname_of(abs));
-    string tmp = abs + "." + secure::random_hex(4) + ".tmp";
-    if (int bad = req.save_body(tmp, profile.max_upload, profile.piece)) return bad == 507 ? http::error(507, "storage is full") : bad == 500 ? http::error(500, "could not save") : body_error(bad);
+    if (int bad = req.save_body(tmp, profile.max_upload, profile.piece)) return bad == 507 ? http::error(507, "storage is full") : bad == 500 ? refuse(500, "could not save") : body_error(bad);
     if (!sys::replace(tmp, abs)) { ::unlink(tmp.c_str()); return http::error(500, "could not save"); }
     if (base == ROOT) used_more(req.content_length);
     touch_tree();

@@ -1,0 +1,4 @@
+# The same bytes on every system. Windows git would otherwise check text out with
+# CR LF, which breaks the shell scripts and the Makefile and changes what the
+# server sends and the tests compare.
+* text=auto eol=lf

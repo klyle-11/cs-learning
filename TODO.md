@@ -29,7 +29,8 @@ Not yet checked on real devices: installing the authority on an iPhone and an An
 ## Windows and Raspberry Pi (prepared 3 October 2026)
 
 - [x] System-specific code gathered in `server-cpp/src/platform.hpp`, with a Windows half; Makefile branch, UTF-8 manifest, path checks for Windows; a Node launcher and `:win` scripts; `WINDOWS.md`
-- [ ] First build on Windows, working through the checklist in `WINDOWS.md` (nothing Windows-specific has been compiled yet)
+- [x] First build on Windows, working through the checklist in `WINDOWS.md`: built unchanged, 144 checks pass; `.gitattributes` and the test script needed fixing
+- [ ] On Windows: a second device over HTTPS, and a full browser session
 - [ ] First build on a Raspberry Pi (needs mbedTLS 3)
 - [ ] Then: a packaged desktop app with its own window (Tauri), starting with Windows
 - [ ] Start with the system (a Windows service; a systemd unit on the Pi)
@@ -126,7 +127,7 @@ Not yet checked on real devices: installing the authority on an iPhone and an An
 ## Next phase: highlight and annotate, Hypothesis-style
 
 **Formats**
-- [ ] EPUB reader (there is already `cs-learning.epub` in the root to develop against)
+- [x] EPUB reader: a book is listed as a folder of its pages in reading order and each page opens like an HTML page, served from inside the zip by the server (`server-cpp/src/zip.hpp`, own inflate; `epub.hpp`). Checked: every entry of two real books comes out byte for byte as a reference unzip gives it. [ ] Look at a book in a browser (pages are sent as XHTML, which the reader's frame code has not been run against). [ ] Next/previous page at the foot of a page. [ ] Search inside books. [ ] A page kept on the device shows without its pictures when the server is away
 - [ ] PDF reader for PDFs with a real text layer (not scans)
 - [ ] Markdown and HTML keep working as now
 
@@ -136,7 +137,7 @@ Not yet checked on real devices: installing the authority on an iPhone and an An
 - [x] Highlight types: each type has its own colour and a name the user can set (e.g. "definition", "question", "don't understand yet")
 - [x] Highlights are saved and persist across sessions — markdown and code files
 - [x] Same for HTML pages (drawn inside the frame)
-- [ ] Same for EPUB and PDF
+- [x] Same for EPUB (a page of a book is an HTML page to the reader, anchors included; not yet tried in a browser). [ ] PDF
 
 **Annotating**
 - [x] The existing bottom text input stays where it is and is also the annotation input
@@ -150,9 +151,29 @@ Not yet checked on real devices: installing the authority on an iPhone and an An
 - [x] Phone layout looked at on a real phone by the user (drawers, top bar)
 - [x] "+" on each file row opens it alongside what is open; note box keeps its height, with a handle to pull or press
 - [ ] Still unchecked on a real phone: touch text selection and the highlight menu were only checked in an emulated browser
+- [x] The picture and video viewer (and a gallery of saved links) is a lightbox on a phone: the whole screen, the top bar and tabs out of the way, the note box below it, "notes" and × in its bar (4 October 2026)
+- [x] A picture at its real size fills the screen on a phone: the bar, the arrows and the reel lie over it, the browser's bars are put away where it can, and it stays so while stepping
+- [ ] None of the lightbox has been looked at in a browser or on a phone (only the script's syntax was checked). To look at: the bar's width with all its buttons, the reel over the picture, full screen on Android, an iPhone (which has no full screen for a page), turning the phone on its side (wider than 760px, the lightbox rules stop applying)
+
+**File list (4 October 2026)**
+- [x] Every folder, subfolder and group starts closed each time the reader is opened
+- [x] Quick open: a closed folder's line names what was last opened inside it, and opens it
+- [x] An open folder no longer scrolls inside itself; its own line stays at the top, and the next top-level folder's line is held at the bottom edge as a handle to jump past it
+- [x] Added folders are listed with the one most recently added to first, under `inbox/` (the server sends each file's `changed` time). [ ] The pages of a book carry no time, so a book at the top level sorts last
+- [ ] The held line is for top-level folders only: a long open subfolder has no such handle
+- [ ] None of this has been looked at in a browser
+
+**Saved links (4 October 2026)**
+- [x] A filter by the entries a JSON file's items have (thumbnail, video, webm, picture, sound, page, linked page, source page); `.webm` is a kind apart from video; the words filter looks in every address of a card, not only its name; an address with a media type anywhere in it (`….mp4/?rnd=1`) is direct media
+- [x] The gallery viewer's bar has the exact address of what it shows, and every address of that item listed under the bar
+- [x] No play button over a thumbnail clip that is already playing; an `.mp4` saved as a thumbnail is the video itself
+- [x] Only an address that is a media file by its type becomes a card; a web page saved as a thumbnail or as direct media is listed as a page
+- [ ] Media addresses with no file type in them (some sites' thumbnails) now count as pages: decide per site if any should be let through
+- [ ] `.m3u8` streams are pages (only Safari plays them by itself)
+- [ ] None of it looked at in a browser
 
 **Front page**
-- [ ] Recent list: latest highlights and annotations, each showing its document and section, linking to the spot
+- [x] Recent list: latest highlights and annotations, each showing its document, linking to the spot (a box in the main front page's corner; not yet looked at in a browser)
 
 **Open questions**
 - How to anchor a highlight in EPUB and PDF so it survives re-opening (today's notes anchor by quoted text plus heading, which only suits markdown)
@@ -178,6 +199,7 @@ Done:
 - [x] Desktop server `hubd` (C++17, POSIX sockets, cJSON): pages, files, document list, settings, front page, notes and highlights, folder upload into the workspace, live reload by polling
 - [x] `test/contract.sh`: 144 requests, answers compared with `test/expected.txt`, recorded when both servers answered identically
 - [x] `make check` build with memory-error detection; clean on the contract test and on malformed requests
+- [x] `make test-own` (`npm run test:own`, `test:own:win`): the tests on a copy of the server built apart, `build/hubd-own`, so the hub can stay running (Windows will not replace a running `hubd.exe`). [ ] `npm test` still tests the old program without saying so when the build fails at the link. [ ] Three answers (a note with `ü` and `ï` in it) differ when the tests are started from Git Bash and not from PowerShell
 - [x] Device profiles (desktop / small / esp32) picked at start-up, with caching of the page, scripts and document list
 - [x] Write-up: `docs/08-server-migration/node-to-cpp-server.md`
 
@@ -202,7 +224,8 @@ Still to do:
 
 Parse EPUB and PDF into a stable structure of pages / sections / paragraphs with C or C++, so that highlights can be laid back over a document whenever it is uploaded again, and carried across different versions or files of the same document. Looks ahead to several people working on the same group of documents.
 
-- [ ] Decide what a highlight's address is: paragraph identity (a hash of its normalised text) plus an offset and the quoted text, so it survives re-pagination and small edits
+- [x] Decide what a highlight's address is: the block (a hash of its letters and digits, and which of the blocks with that hash), the offset in it, the quoted text and the characters on either side. Done for markdown, source files and HTML: `server-cpp/src/anchor.hpp`, `GET /api/blocks`, and "anchors" in `hub/app.js`. The server's block map from markdown source and the page's from the rendered document agree on every block of the 35 sample documents. [ ] Try it in a browser: make two highlights on the same words in one document and reload
+- [ ] Give the highlights made before anchors an anchor (they are placed at the first occurrence under their heading until then)
 - [ ] Matching between versions: exact paragraph hash first, then nearest-text match for paragraphs that changed; report highlights that could not be placed instead of dropping them
 - [ ] Document identity: recognise "the same document" across files (title/author metadata, or overlap of paragraph hashes)
 - [ ] Where it runs: compiled to WebAssembly it could run in the browser, which keeps the ESP32 as a plain file server; on the board itself only small documents would be realistic
