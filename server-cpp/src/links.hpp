@@ -285,6 +285,7 @@ struct Look {
   std::string paper = "fdfcf7", shade = "f4f1e8", ink = "1d1b16", muted = "6f6a5f", rule = "ddd8ca", accent = "8c2f1b";
   int card = 150;
   bool reversed = false;   // last first: the grid, the table of pages and the list all turned round
+  size_t item = static_cast<size_t>(-1);   // the item, by its place in the file, the page opens at (one the reader's find came upon); none if past the end
 };
 // What to call a thing with no title: the end of its address, or its site.
 inline std::string name_of(const std::string &url) {
@@ -339,7 +340,7 @@ tr[hidden]{display:none}
 table{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}
 td,th{border:1px solid var(--rule);padding:5px 8px;text-align:left;vertical-align:top;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 th{background:var(--shade);font-weight:600}th:nth-child(1){width:38%}th:nth-child(2){width:22%}
-tr:target td{background:var(--shade)}
+tr:target td{background:var(--shade)}tr:target{outline:3px solid var(--accent);outline-offset:-3px}
 .list{display:none;position:fixed;top:0;right:0;bottom:0;width:236px;z-index:1;overflow-y:auto;padding:8px 8px 24px;border-left:1px solid var(--rule);background:color-mix(in srgb,var(--paper) 70%,transparent);font-size:11px}
 body.listed .list{display:block}
 .list:hover{background:color-mix(in srgb,var(--paper) 94%,transparent)}
@@ -551,6 +552,9 @@ function arrive() {
     t.classList.add('flash');
     setTimeout(() => t.classList.remove('flash'), 1200);
   }
+  // A row of the table of pages is brought to the middle, clear of the bar at the top (the words filter is let go if it hid the row).
+  const row = document.querySelector('tr:target');
+  if (row) { if (row.hidden) { find.value = ''; sift(); } row.scrollIntoView({ block: 'center' }); }
   if (!view) return;
   shut();
   const i = Number(view.id.slice(1)), reel = view.querySelector('.reel');
@@ -571,6 +575,17 @@ function arrive() {
 }
 addEventListener('hashchange', arrive);
 show(0);
+// Sent for from the reader's find, the page opens at one item (the server names it on the body): its card, or
+// its row. The grid shifts while its pictures take their shapes, so the card is brought back to the middle as
+// they do, until the page is touched.
+const sent = document.body.dataset.at;
+if (sent && !location.hash) {
+  location.replace('#' + sent);
+  let held = true;
+  for (const ev of ['wheel', 'pointerdown', 'keydown', 'touchstart']) addEventListener(ev, () => { held = false; }, { once: true, passive: true });
+  const hold = () => { if (held && location.hash === '#' + sent) document.getElementById(sent).scrollIntoView({ block: 'center' }); };
+  for (const m of document.querySelectorAll('#grid img, #grid video')) { m.addEventListener('load', hold); m.addEventListener('loadedmetadata', hold); }
+}
 arrive();
 addEventListener('keydown', (e) => {
   const v = document.querySelector('.view:target');
@@ -619,7 +634,15 @@ inline std::string cards(const std::string &title, const std::vector<Item> &list
       "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
       "<meta name=\"referrer\" content=\"no-referrer\"><title>" + escaped(title) + "</title><style>"
       ":root{--paper:#" + look.paper + ";--shade:#" + look.shade + ";--ink:#" + look.ink + ";--muted:#" + look.muted + ";--rule:#" + look.rule + ";--accent:#" + look.accent + ";--card:" + std::to_string(look.card) + "px}" +
-      CARDS_STYLE + "</style></head><body>";
+      CARDS_STYLE + "</style></head><body";
+  // Where the page opens, when one item is asked for: that item's card, or its row in the table of pages. Only this, made here, goes into the page.
+  std::string arrive;
+  if (look.item < list.size()) {
+    const Item *want = &list[look.item];
+    for (size_t i = 0; i < n && arrive.empty(); i++) if (media[i].item == want) arrive = "g" + std::to_string(i);
+    for (size_t j = 0; j < pages.size() && arrive.empty(); j++) if (pages[j] == want) arrive = "p" + std::to_string(j);
+  }
+  html += arrive.empty() ? std::string(">") : " data-at=\"" + arrive + "\">";
 
   if (n) {
     // The second filter lists the entries the items of this file have (a JSON file's; a list of plain addresses has none, and no such filter).

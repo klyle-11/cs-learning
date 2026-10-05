@@ -65,7 +65,7 @@ if (folder === join(top, 'data') && !existsSync(folder)) {
   console.log('made data/ from sample/');
 }
 // The page's three libraries (markdown, code colouring, the HTML sanitiser) come from npm.
-if (!existsSync(join(here, 'node_modules', 'marked'))) run(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['install'], { cwd: here });
+if (!existsSync(join(here, 'node_modules', 'marked')) || !existsSync(join(here, 'node_modules', 'pdfjs-dist'))) run(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['install'], { cwd: here });
 build();
 
 const argv = [folder, '--www', here, ...rest];

@@ -14,6 +14,7 @@
 // SD card, so these handlers are meant to move to the ESP32 unchanged.
 #include <algorithm>
 #include <chrono>
+#include <cstring>
 #include <ctime>
 #include <fstream>
 #include <mutex>
@@ -435,6 +436,15 @@ static double changed_at(const string &abs) {
   struct stat st;
   return ::stat(abs.c_str(), &st) == 0 ? static_cast<double>(st.st_mtime) : 0;
 }
+// What makes a file one of saved links, judged by its beginning so a long file is not read through for the list:
+// a browser's export of bookmarks, and a text or JSON file with a web address in it.
+static bool is_bookmarks(const string &abs) { string start; return read_start(abs, start, 512) && start.find("NETSCAPE-Bookmark-file") != string::npos; }
+static bool has_addresses(const string &abs) {
+  string start;
+  return read_start(abs, start, 64 * 1024) && (start.find("https://") != string::npos || start.find("https:\\/\\/") != string::npos);
+}
+// How many items of such a file are read: all of them. Only the microcontroller, with its few hundred KB, stops at 2000.
+static size_t most_links() { return string(profile.name) == "esp32" ? 2000 : static_cast<size_t>(-1); }
 static void walk(const string &dir, const string &rel, const Strings &ignore, const Strings &side, cJSON *out) {
   DIR *d = ::opendir(dir.c_str());
   if (!d) return;
@@ -457,15 +467,12 @@ static void walk(const string &dir, const string &rel, const Strings &ignore, co
       cJSON_AddBoolToObject(doc, "front", r == FRONT);
       cJSON_AddNumberToObject(doc, "changed", changed_at(abs));
       // A browser's export of bookmarks is a page of links: shown as cards, like a file of saved links.
-      string start;
-      if (is_html(name) && read_start(abs, start, 512) && start.find("NETSCAPE-Bookmark-file") != string::npos) cJSON_AddBoolToObject(doc, "links", true);
+      if (is_html(name) && is_bookmarks(abs)) cJSON_AddBoolToObject(doc, "links", true);
       cJSON_AddItemToArray(out, doc);
     } else if (lower(ext_of(name)) == ".epub") {
       list_book(abs, r, matches(r, side), out);
     } else if (is_link_file(name)) {
-      // Judged by its beginning, so a long file is not read through for the list.
-      string start;
-      if (!read_start(abs, start, 64 * 1024) || (start.find("https://") == string::npos && start.find("https:\\/\\/") == string::npos)) continue;
+      if (!has_addresses(abs)) continue;
       cJSON *doc = cJSON_CreateObject();
       cJSON_AddStringToObject(doc, "path", r.c_str());
       cJSON_AddStringToObject(doc, "group", rel.c_str());
@@ -942,7 +949,10 @@ static const std::pair<const char *, const char *> ASSETS[] = {
     {"/app.js", "app.js"}, {"/local.js", "local.js"}, {"/vault.js", "vault.js"},
     {"/vendor/marked.js", "node_modules/marked/lib/marked.umd.js"},
     {"/vendor/highlight.js", "node_modules/@highlightjs/cdn-assets/highlight.min.js"},
-    {"/vendor/purify.js", "node_modules/dompurify/dist/purify.min.js"}};
+    {"/vendor/purify.js", "node_modules/dompurify/dist/purify.min.js"},
+    // PDF.js, which draws a PDF's pages where the browser has no viewer for a frame (a phone). Asked for only when such a PDF is opened.
+    {"/vendor/pdf.mjs", "node_modules/pdfjs-dist/legacy/build/pdf.min.mjs"},
+    {"/vendor/pdf.worker.mjs", "node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs"}};
 
 // ---- workspaces ----------------------------------------------------------------------------
 // The folder the server was started on is "home". A folder uploaded "as its
@@ -1029,6 +1039,63 @@ static bool in_page_folder(const string &abs) { return abs == WWW || starts_with
 // ---- search --------------------------------------------------------------------------------
 // Lines that contain the words asked for, in the documents that can be read
 // as text. Upper and lower case count as the same (for plain letters).
+// The part of a line around what was found, not the whole line: a line can be very long.
+// The line is from `a` to `b`; the words are at `at`, `len` long.
+static string around(const string &text, size_t a, size_t b, size_t at, size_t len) {
+  size_t from = at > a + 60 ? at - 60 : a, to = std::min(b, at + len + 100);
+  while (from < to && (static_cast<unsigned char>(text[from]) & 0xC0) == 0x80) from++;   // not in the middle of a character
+  while (to > from && to < b && (static_cast<unsigned char>(text[to]) & 0xC0) == 0x80) to--;
+  return squeeze(text.substr(from, to - from));
+}
+// A file of saved links is searched as it is shown (see links.hpp): by its
+// items, their names and addresses, not by its lines. A hit has `item`, the
+// item's place in the file, where a line's has `line`: the page of cards is
+// asked to open at that item (/cards/<file>?item=).
+static void search_links(const string &abs, const string &name, const string &rel, const string &needle, cJSON *out, int &left) {
+  struct stat st;
+  if (::stat(abs.c_str(), &st) != 0 || !S_ISREG(st.st_mode) || static_cast<unsigned long long>(st.st_size) > most_in_memory()) return;
+  string text;
+  if (!read_file(abs, text)) return;
+  // Most files do not have the words at all, and are not read through for their items: the words are looked for
+  // in the text as it stands first. That is sound only for words a file cannot have written another way (JSON
+  // and HTML may write a quote, an "&" or a letter outside ASCII as an escape; JSON's "\/" is allowed for here).
+  bool plain = true;
+  for (unsigned char c : needle) plain = plain && c != 0 && (std::isalnum(c) || c == ' ' || std::strchr("/.-_:=?%~,", c) != nullptr);
+  if (plain) {
+    string hay;
+    hay.reserve(text.size());
+    for (size_t i = 0; i < text.size(); i++) {
+      if (text[i] == '\\' && i + 1 < text.size() && text[i + 1] == '/') continue;
+      hay += static_cast<char>(std::tolower(static_cast<unsigned char>(text[i])));
+    }
+    if (hay.find(needle) == string::npos) return;
+  }
+  bool more = false;
+  const std::vector<links::Item> list = links::find(name, text, most_links(), more);
+  int in_file = 0;
+  for (size_t k = 0; k < list.size() && in_file < 3 && left > 0; k++) {
+    const links::Item &it = list[k];
+    // Its name first, then each of its addresses.
+    std::vector<const string *> where = {&it.title};
+    for (const links::Part &p : it.all) where.push_back(&p.url);
+    where.push_back(&it.thumb);
+    where.push_back(&it.preview);
+    where.push_back(&it.page);
+    for (const links::Link &l : it.media) where.push_back(&l.url);
+    for (const string *s : where) {
+      const size_t at = lower(*s).find(needle);
+      if (at == string::npos) continue;
+      cJSON *hit = cJSON_CreateObject();
+      cJSON_AddStringToObject(hit, "path", rel.c_str());
+      cJSON_AddNumberToObject(hit, "item", static_cast<double>(k));
+      cJSON_AddStringToObject(hit, "text", ((s == &it.title || it.title.empty() ? "" : it.title + " \xC2\xB7 ") + around(*s, 0, s->size(), at, needle.size())).c_str());
+      cJSON_AddItemToArray(out, hit);
+      in_file++;
+      left--;
+      break;
+    }
+  }
+}
 static void search_tree(const string &dir, const string &rel, const Strings &ignore, const string &needle, cJSON *out, int &left) {
   DIR *d = ::opendir(dir.c_str());
   if (!d) return;
@@ -1045,6 +1112,7 @@ static void search_tree(const string &dir, const string &rel, const Strings &ign
       search_tree(abs, r, ignore, needle, out, left);
       continue;
     }
+    if (is_link_file(name) ? has_addresses(abs) : is_html(name) && is_bookmarks(abs)) { search_links(abs, name, r, needle, out, left); continue; }
     if (!readable(name)) continue;
     string text;
     if (!read_start(abs, text, 2u << 20)) continue;
@@ -1057,14 +1125,10 @@ static void search_tree(const string &dir, const string &rel, const Strings &ign
       size_t a = text.rfind('\n', at), b = text.find('\n', at);
       a = a == string::npos ? 0 : a + 1;
       if (b == string::npos) b = text.size();
-      // Around the match, not the whole line: a line can be very long.
-      size_t from = at > a + 60 ? at - 60 : a, to = std::min(b, at + needle.size() + 100);
-      while (from < to && (static_cast<unsigned char>(text[from]) & 0xC0) == 0x80) from++;   // not in the middle of a character
-      while (to > from && to < b && (static_cast<unsigned char>(text[to]) & 0xC0) == 0x80) to--;
       cJSON *hit = cJSON_CreateObject();
       cJSON_AddStringToObject(hit, "path", r.c_str());
       cJSON_AddNumberToObject(hit, "line", line);
-      cJSON_AddStringToObject(hit, "text", squeeze(text.substr(from, to - from)).c_str());
+      cJSON_AddStringToObject(hit, "text", around(text, a, b, at, needle.size()).c_str());
       cJSON_AddItemToArray(out, hit);
       in_file++;
       left--;
@@ -1137,7 +1201,10 @@ static http::Response answer(http::Request &req) {
       if (p != a.first) continue;
       // Scripts sit beside the page (copied there for the board), or in node_modules.
       string name = a.first + 1;
-      return asset_response(is_file(WWW + "/" + name) ? WWW + "/" + name : WWW + "/" + a.second, "text/javascript");
+      http::Response r = asset_response(is_file(WWW + "/" + name) ? WWW + "/" + name : WWW + "/" + a.second, "text/javascript");
+      // A worker runs under the policy its own file is sent with: the one for data would not let it run at all. It may run itself, and nothing more.
+      if (p == "/vendor/pdf.worker.mjs") r.extra += "Content-Security-Policy: default-src 'none'; script-src 'self'\r\n";
+      return r;
     }
   }
 
@@ -1488,9 +1555,7 @@ static http::Response answer(http::Request &req) {
     string text;
     if (!read_file(abs, text)) return http::error(404, "no such file");
     bool more = false;
-    // Everything in the file is shown. Only the microcontroller, with its few hundred KB, stops at 2000.
-    const size_t most = string(profile.name) == "esp32" ? 2000 : static_cast<size_t>(-1);
-    const std::vector<links::Item> list = links::find(parts.back(), text, most, more);
+    const std::vector<links::Item> list = links::find(parts.back(), text, most_links(), more);
     if (page) {
       // The reader says which colours its pane has, so the gallery matches: six hex digits each, or the plain theme's.
       links::Look look;
@@ -1509,6 +1574,10 @@ static http::Response answer(http::Request &req) {
         look.card = std::min(420, std::max(70, std::stoi(wide->second)));
       const auto rev = req.query.find("rev");
       look.reversed = rev != req.query.end() && rev->second == "1";
+      // From the reader's find: the item to open the page at, counted as /api/search counts it.
+      const auto want = req.query.find("item");
+      if (want != req.query.end() && !want->second.empty() && want->second.size() <= 9 && std::all_of(want->second.begin(), want->second.end(), [](unsigned char ch) { return std::isdigit(ch); }))
+        look.item = static_cast<size_t>(std::stoul(want->second));
       const string nonce = secure::random_hex(16);
       http::Response r;
       r.type = "text/html";

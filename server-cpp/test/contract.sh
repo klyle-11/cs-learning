@@ -170,6 +170,7 @@ run() { # run <port> <root> <log>: the request script
   req "index page"            status-only "$B/"
   req "vendor marked"         status-only "$B/vendor/marked.js"
   req "vendor highlight"      status-only "$B/vendor/highlight.js"
+  echo "## vendor pdf, and its worker"; for f in pdf.mjs pdf.worker.mjs; do curl -s -o /dev/null -D - "$B/vendor/$f" | tr -d '\r' | grep -iE '^(HTTP/|content-type|content-security-policy)' | sed 's/^HTTP\/1.1 \([0-9]*\).*/\1/'; done
   req "unknown route"         body "$B/api/nope"
   req "notes empty"           body "$B/api/notes"
   req "note create"           body -X POST "${J[@]}" -d '{"doc":"a/1-doc.md","text":"why \"this\"?\nline two","quote":"Body one.","type":"question","heading":"first","headingText":"First"}' "$B/api/notes"
@@ -195,6 +196,7 @@ run() { # run <port> <root> <log>: the request script
   # The nonce is new each time: it is left out of what is compared.
   hreq "links as a gallery"            "$B/cards/b/saved.json" | sed -E 's/nonce-[0-9a-f]+/nonce-N/; s/nonce="[0-9a-f]+"/nonce="N"/'
   hreq "saved items as a gallery"      "$B/cards/b/items.json?paper=101010&ink=eeeeee&accent=zzzzzz&rule=abc&size=999" | sed -E 's/nonce-[0-9a-f]+/nonce-N/; s/nonce="[0-9a-f]+"/nonce="N"/'
+  echo "## cards at an item";         for i in 5 7 99 x; do curl -s -m 5 -b "$JAR" "$B/cards/b/items.json?item=$i" | grep -o '<body[^>]*>'; done; curl -s -m 5 -b "$JAR" "$B/cards/b/marks.html?item=1" | grep -o '<body[^>]*>'
   req "saved items in a file" body "$B/api/links?path=b/items.json"
   req "bookmarks"             body "$B/api/links?path=b/marks.html"
   req "links, none in it"     body "$B/api/links?path=b/plain.txt"
@@ -272,6 +274,9 @@ run() { # run <port> <root> <log>: the request script
   req "search, nothing found"   body "$B/api/search?q=zzzznothing"
   req "search, too short"       body "$B/api/search?q=a"
   req "search skips ignored"    body "$B/api/search?q=ignored"
+  req "search, a saved link"    body "$B/api/search?q=D.example/NEW"
+  req "search, a saved name"    body "$B/api/search?q=clip%20as"
+  req "search, a bookmark"      body "$B/api/search?q=site.example/page"
   req "search skips hidden"     body "$B/api/search?q=secret"
   req "raw hidden file"         body "$B/raw/.hidden.md"
   req "doc hidden file"         body "$B/api/doc?path=.hidden.md"

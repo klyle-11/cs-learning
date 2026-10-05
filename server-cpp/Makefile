@@ -63,6 +63,8 @@ card:
 	cp ../hub/node_modules/marked/lib/marked.umd.js "$(CARD)/hub/www/vendor/marked.js"
 	cp ../hub/node_modules/@highlightjs/cdn-assets/highlight.min.js "$(CARD)/hub/www/vendor/highlight.js"
 	cp ../hub/node_modules/dompurify/dist/purify.min.js "$(CARD)/hub/www/vendor/purify.js"
+	cp ../hub/node_modules/pdfjs-dist/legacy/build/pdf.min.mjs "$(CARD)/hub/www/vendor/pdf.mjs"
+	cp ../hub/node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs "$(CARD)/hub/www/vendor/pdf.worker.mjs"
 
 clean:
 	rm -rf build hubd hubd.exe

@@ -54,10 +54,24 @@
     --accent: #8f6a14; --mark: #fbe9a6; --reply: #e2ede4; --field: #fcfdfe; --quote: #5f4c2a;
     --c-kw: #8a3fa0; --c-str: #1f7a5c; --c-com: #5d7082; --c-num: #b25a00; --c-fn: #1668a8; --c-type: #5a4fc0;
   }
-  [data-theme="eva"] { /* Eva Dark */
+  [data-theme="lime-dark"] { /* Pale Lime at night: deep leaf green, with the same golden sepia turned light for ink and accents */
     color-scheme: dark;
-    --paper: #282c34; --shade: #21252b; --ink: #b7c5d3; --muted: #8391a2; --rule: #3b414d;
-    --accent: #cf68e1; --mark: #e4bf7f; --reply: #2c3a3a; --field: #1e2228; --quote: #a3b1c0;
+    --paper: #17290f; --shade: #11210b; --ink: #ecdfc2; --muted: #b9a878; --rule: #2f4a22;
+    --accent: #dcb24e; --mark: #f0d877; --reply: #1f3a1c; --field: #0c1907; --quote: #d6c8a6;
+    --press: #ecdfc2; --press-ink: #17290f;
+    --c-kw: #e79ac6; --c-str: #8fd6a4; --c-com: #8c9a7c; --c-num: #f0a860; --c-fn: #8fbff2; --c-type: #c3a6f0;
+  }
+  [data-theme="sky-dark"] { /* Pale Sky at night: deep sky blue, with the same golden sepia turned light for ink and accents */
+    color-scheme: dark;
+    --paper: #12283a; --shade: #0e2031; --ink: #ecdfc2; --muted: #b9a878; --rule: #274761;
+    --accent: #dcb24e; --mark: #f3dd8c; --reply: #173a44; --field: #0a1926; --quote: #d6c8a6;
+    --press: #ecdfc2; --press-ink: #12283a;
+    --c-kw: #d9a0f0; --c-str: #86d6b8; --c-com: #8296a8; --c-num: #f2a85e; --c-fn: #8cc4f5; --c-type: #b3acf7;
+  }
+  [data-theme="eva"] { /* Eva Night: its colours for text and code, on navy (the theme's own page is a blue-grey that reads as grey) */
+    color-scheme: dark;
+    --paper: #1b2540; --shade: #161e36; --ink: #b7c5d3; --muted: #8391a2; --rule: #344160;
+    --accent: #cf68e1; --mark: #e4bf7f; --reply: #1e3348; --field: #121930; --quote: #a3b1c0;
     --c-kw: #cf68e1; --c-str: #98c379; --c-com: #6b7686; --c-num: #ff9070; --c-fn: #6495ee; --c-type: #e4bf7f;
   }
   [data-theme="triple-m"] {
@@ -201,7 +215,11 @@
   #keptOnly { flex: none; display: block; margin: 0 10px 6px 0; padding: 3px 8px; text-align: left; background: var(--shade); font-size: 12.5px; }
   #keptOnly[hidden] { display: none; }
   /* find: the box above the file list, and the lines it found inside documents and notes */
-  #find { flex: none; margin: 0 10px 6px 0; padding: 4px 8px; border: 1px solid var(--rule); background: var(--field); color: var(--ink); font: 13px var(--head); }
+  #findWrap { flex: none; position: relative; margin: 0 10px 6px 0; }
+  #find { display: block; width: 100%; padding: 4px 28px 4px 8px; border: 1px solid var(--rule); background: var(--field); color: var(--ink); font: 13px var(--head); }
+  #find::-webkit-search-cancel-button { display: none; }   /* the browser's own ×, where it has one: the button below is there in every browser */
+  #findClear { position: absolute; top: 50%; right: 3px; transform: translateY(-50%); width: 22px; height: 22px; padding: 5px; }
+  #findClear[hidden] { display: none; }
   #found { flex: 0 1 auto; max-height: 45%; min-height: 0; overflow-y: auto; margin: 0 10px 8px 0; padding: 4px 8px; border: 1px solid var(--rule); background: var(--shade); font-size: 12.5px; }
   #found[hidden] { display: none; }
   #found .sub { color: var(--muted); padding: 2px 0 4px; }
@@ -229,6 +247,11 @@
   /* quick open: on a closed folder's line, what was last opened inside it */
   #tree summary .quick { float: right; max-width: 55%; margin-left: 8px; padding: 0 6px; border: 1px solid var(--rule); background: var(--paper); color: var(--accent); font: 400 12px var(--head); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #tree details[open] > summary .quick { display: none; }
+  /* a folder that is one line (nothing but pictures, videos and music): a folder's line without the arrow, as it does not open out */
+  #tree .leaf > summary { list-style: none; }
+  #tree .leaf > summary::-webkit-details-marker { display: none; }
+  #tree .leaf > summary.active { color: var(--accent); }
+  #tree .leaf > summary.playing::before { content: '♪ '; color: var(--accent2); }
   #tree .kids { padding-left: 14px; }
   .file { display: flex; align-items: baseline; gap: 6px; padding: 2px 4px; cursor: pointer; color: var(--muted); }
   .file span.name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -337,7 +360,7 @@
   .pl-row .ic.off { opacity: .4; }
   .ic.kept { color: #3f8f4f; }
   .ic:disabled { opacity: .4; cursor: default; }
-  .viewbar .keepB { width: 22px; height: 22px; padding: 2px; }
+  .viewbar .keepB, .track .keepB, #mini .keepB { flex: none; width: 22px; height: 22px; padding: 2px; }
   .thumb .keepB { position: absolute; top: 4px; right: 4px; width: 26px; height: 26px; padding: 5px; border-radius: 50%; background: color-mix(in srgb, var(--paper) 88%, transparent); }
   .qnone { margin: 4px 0; color: var(--muted); font-size: 13px; }
   .qlink { display: block; border: 0; padding: 0; margin: 6px 0; color: var(--accent); text-decoration: underline; }
@@ -494,6 +517,12 @@
   .tile[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 -3px 0 var(--accent); }
   .tile[aria-pressed="true"] svg { color: var(--accent); }
   .tile:disabled { opacity: .45; cursor: default; }
+  /* on a folder's page: small, in a row at the right, the description to their left */
+  .tiles.small { float: right; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; max-width: 62%; margin: 2px 0 8px 16px; font-family: var(--head); }
+  .tiles.small .tile { flex-direction: row; gap: 5px; padding: 3px 7px; font-size: 12px; }
+  .tiles.small .tile svg { width: 15px; height: 15px; }
+  .tiles.small ~ .browse { clear: both; margin-top: .8em; }
+  .listing .item .keepB { flex: none; width: 22px; height: 22px; padding: 2px; }
   .listing { margin-top: 14px; font-size: 14.5px; }
   .listing h5 { margin: 16px 0 4px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 400; }
   .listing .item { display: flex; gap: 8px; align-items: baseline; padding: 4px 2px; border-top: 1px solid var(--rule); cursor: pointer; }
@@ -529,6 +558,17 @@
   /* focus groups: the bar while one is being made, and the groups at the top of the file list */
   #pickBar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 0 8px 8px 0; font-size: 12px; color: var(--muted); }
   #pickBar[hidden] { display: none; }
+  /* the latest searches, over the main front page's title */
+  .searches { margin: 0 0 10px; font-family: var(--head); font-size: 14px; }
+  .searches summary { cursor: pointer; color: var(--muted); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; }
+  .searches .item button { flex: none; border: 0; padding: 0 6px; color: var(--muted); }
+  /* the groups on the main front page */
+  .tags { margin: 18px 0 6px; font-family: var(--head); }
+  .tags .chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0 6px; }
+  .tags .chips button { padding: 3px 10px; font-size: 14px; }
+  .tags .chips button[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  .tags .chips small { color: inherit; opacity: .7; }
+  #tree summary .pickBtn, #tree summary .refBtn { margin-left: 6px; }
   #pickBar span { flex: 1 1 100%; }
   #pickBar input { flex: 1; min-width: 60px; font: 13px var(--head); color: var(--ink); background: var(--field); border: 1px solid var(--rule); padding: 2px 6px; }
   #groupBtn { font: 700 14px/1 var(--head); }
@@ -551,6 +591,13 @@
   .viewer iframe.cards { flex: 1; min-height: 0; width: 100%; border: 0; }
   .viewer iframe.pdf { flex: 1; min-height: 0; }
   .viewer iframe.pdf.night { filter: invert(1) hue-rotate(180deg); }
+  /* a PDF drawn by the reader itself: its pages one under the other */
+  .pdfwrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .pdfpages { flex: 1; min-height: 0; overflow: auto; -webkit-overflow-scrolling: touch; background: var(--shade); padding: 8px 0; }
+  .pdfpage { width: calc(var(--zoom, 1) * 100%); max-width: calc(var(--zoom, 1) * 1100px); margin: 0 auto 8px; background: #fff; }
+  .pdfpage canvas { display: block; width: 100%; height: 100%; }
+  .pdfwrap.night .pdfpage { filter: invert(1) hue-rotate(180deg); }
+  .viewbar .pdfwhere { flex: none; color: var(--muted); }
   .viewbar button[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
   .linksAsk { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 16px 24px; font: 14px/1.45 var(--head); }
   .linksAsk p { margin: 0; max-width: 46em; color: var(--muted); }
@@ -614,7 +661,9 @@
 
     /* icons and settings sized for a thumb */
     #sideHead .ic, .label.row .ic { width: 38px; height: 38px; padding: 8px; }
-    #find { font-size: 16px; padding: 8px 10px; }   /* 16px: smaller makes an iPhone zoom the page on focus */
+    #find { font-size: 16px; padding: 8px 40px 8px 10px; }   /* 16px: smaller makes an iPhone zoom the page on focus */
+    #findClear { width: 34px; height: 34px; padding: 9px; }
+    .viewer .viewbar { overflow-x: auto; }   /* a PDF's bar has more buttons than a phone is wide */
     #found { font-size: 14px; }
     #mini .pl-row .ic { width: 36px; height: 36px; padding: 8px; }
     #mini { font-size: 13.5px; }
@@ -683,7 +732,7 @@
     </div>
     <div id="settings" hidden>
       <div class="label">Text</div>
-      <div id="sideTools"><select id="theme" title="Theme"><option value="plain">Plain</option><option value="selenized">Selenized Light</option><option value="lime">Pale Lime</option><option value="sky">Pale Sky</option><option value="eva">Eva Dark</option><option value="triple-m">Triple-M</option><option value="sun-sound">Sun Sound</option><option value="periwinkle">Periwinkle</option><option value="mahogany">Mahogany</option></select><button id="themeOne" title="One theme for the whole reader. Release it to give the left and right panes themes of their own.">one theme</button><select id="themeSide" title="Theme of the left pane (files and outline)"></select><select id="themeRight" title="Theme of the right pane (the side document and notes)"></select><button id="fontToggle"></button><button id="focusToggle" title="Fade everything except the paragraph you are reading">reading focus</button><button id="roomyToggle" title="More space between lines and words">roomy text</button><button id="smaller" aria-label="Smaller text" title="Smaller text">A−</button><button id="bigger" aria-label="Larger text" title="Larger text">A+</button></div>
+      <div id="sideTools"><select id="theme" title="Theme"><option value="plain">Plain</option><option value="selenized">Selenized Light</option><option value="lime">Pale Lime</option><option value="sky">Pale Sky</option><option value="lime-dark">Lime Night</option><option value="sky-dark">Sky Night</option><option value="eva">Eva Night</option><option value="triple-m">Triple-M</option><option value="sun-sound">Sun Sound</option><option value="periwinkle">Periwinkle</option><option value="mahogany">Mahogany</option></select><button id="themeOne" title="One theme for the whole reader. Release it to give the left and right panes themes of their own.">one theme</button><select id="themeSide" title="Theme of the left pane (files and outline)"></select><select id="themeRight" title="Theme of the right pane (the side document and notes)"></select><button id="fontToggle"></button><button id="focusToggle" title="Fade everything except the paragraph you are reading">reading focus</button><button id="roomyToggle" title="More space between lines and words">roomy text</button><button id="smaller" aria-label="Smaller text" title="Smaller text">A−</button><button id="bigger" aria-label="Larger text" title="Larger text">A+</button></div>
       <div class="label">Connection</div>
       <div id="net" role="status" aria-live="polite"></div>
       <div class="label">This device</div>
@@ -697,7 +746,7 @@
     <div class="label row">Files<button id="addBtn" class="ic" aria-label="Add files" title="Add files from this device. If the server is out of reach they are held here and sent later."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></button><input id="fileInput" type="file" multiple hidden><button id="uploadBtn" class="ic" aria-label="Upload a folder" title="Bring a folder from your computer into the hub"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h6l2 2h10v11H3z"/><path d="M12 17v-6M9.5 13.5L12 11l2.5 2.5"/></svg></button><input id="folderInput" type="file" webkitdirectory multiple hidden></div>
     <button id="fresh" hidden title="The reader itself has changed since this page was kept on this device">A newer version of the reader is ready. Reload</button>
     <button id="keptOnly" hidden title="The lists are showing only what is kept on this device. Press to show everything."></button>
-    <input id="find" type="search" placeholder="Find a file, or words in files and notes" aria-label="Find a file, or words in files and notes" autocomplete="off" spellcheck="false">
+    <div id="findWrap"><input id="find" type="search" placeholder="Find a file, or words in files and notes" aria-label="Find a file, or words in files and notes" autocomplete="off" spellcheck="false"><button id="findClear" class="ic" type="button" hidden aria-label="Clear what is being looked for" title="Clear (Escape)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
     <div id="found" hidden role="status"></div>
     <div id="tree"></div>
     <div class="label" id="tocLabel">Outline</div>
