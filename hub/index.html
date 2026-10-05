@@ -221,7 +221,8 @@
   /* An open folder is as long as what is in it: the list is the one thing that scrolls. Its own line stays at the top while it is
      scrolled through (to close it by), and the next folder's line is held at the bottom (.nextPin), to get past it by. */
   #tree summary { cursor: pointer; padding: 2px 0; font-weight: 600; }
-  #tree .sect > details[open] > summary { position: sticky; top: 0; z-index: 1; background: var(--paper); }
+  /* an open folder's line stays in sight while what is in it scrolls by; one inside another is held under its parent's (stickFolders in app.js sets how far down) */
+  #tree details[open] > summary { position: sticky; top: 0; z-index: 1; background: var(--paper); }
   #tree .sect.up > details[open] > summary { background: var(--shade); }
   #tree .nextPin { position: sticky; bottom: 0; z-index: 2; display: block; width: 100%; margin-top: 6px; padding: 5px 6px; border: 0; border-top: 2px solid var(--accent2); background: var(--shade); color: var(--ink); font: 600 13px var(--head); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #tree .nextPin[hidden] { display: none; }
@@ -241,6 +242,7 @@
   #toc a.l1 { color: var(--ink); font-weight: 600; margin-top: 8px; }
   #toc a.l3 { padding-left: 22px; font-size: 13px; }
   #toc a.active { color: var(--accent); border-left-color: var(--accent2); }
+  #toc a.here { color: var(--accent); }   /* the chapter being read, in a book's outline */
 
   /* workspace: one or two panes, each with tabs along the top */
   #work { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
@@ -406,6 +408,7 @@
   .viewbar { flex: none; display: flex; gap: 10px; align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--rule); font: 13px var(--head); }
   .viewbar span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
   .viewbar a { color: var(--accent); white-space: nowrap; }
+  .viewbar a i { font-style: normal; }
   .stage { flex: 1; min-height: 0; overflow: auto; display: flex; background: var(--shade); overscroll-behavior: contain; }
   /* stepping through a folder's pictures and videos: an arrow at each side, and a reel of the nearest ones below */
   .stagewrap { flex: 1; min-height: 0; min-width: 0; display: flex; position: relative; }
@@ -643,8 +646,9 @@
 
     /* a picture, a video or a gallery of links is a lightbox: the whole screen, the top bar and the tabs out of the way, the note box below it */
     body.lightbox #mobileBar, body.lightbox .tabs, body.lightbox .progress, body.lightbox #tocBtn { display: none; }
-    body.lightbox .viewbar { padding-top: calc(6px + env(safe-area-inset-top)); overflow-x: auto; }
-    body.lightbox .viewbar span { min-width: 4em; }
+    /* every control on the screen, nothing to scroll to: the name gives way first, the link says less, and what still does not fit goes on a second row */
+    body.lightbox .viewbar { padding: calc(6px + env(safe-area-inset-top)) 8px 6px; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+    body.lightbox .viewbar a i { display: none; }
     body.lightbox .viewbar button, body.lightbox .viewbar a { flex: none; white-space: nowrap; }
     body.lightbox .viewbar button:not(.ic) { padding: 6px 10px; }
     body.lightbox .viewbar .lbOnly { display: inline-block; }

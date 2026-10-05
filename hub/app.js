@@ -1185,6 +1185,13 @@ function applyLocks() {
       docs.push({ path: frontOf(f), group: f, title: f.split('/').pop(), side: false, front: false });
   }
   docMap = new Map(docs.map((d) => [d.path, d]));
+  // A folder with pictures or videos of its own has a gallery: a page that is
+  // no file (its path is the folder's, ending in "/"), opened from the folder's
+  // line in the list. It can be looked up and opened; it is not in the list of files.
+  for (const d of docs) {
+    const f = folderOf(d.path);
+    if (f && (isImage(d.path) || isVideo(d.path)) && !isBookPage(d.path) && !docMap.has(f + '/')) docMap.set(f + '/', { path: f + '/', title: f.split('/').pop(), gallery: true, side: false, front: false });
+  }
 }
 // After a lock is opened, closed, set or removed: redraw everything that could show the folder.
 async function locksChanged() {
@@ -1434,7 +1441,18 @@ function renderTree() {
     // A folder's own front page comes first, under that name.
     const fp = prefix ? node.files.find((f) => isFront(f.path)) : null;
     if (fp) parent.append(fileRow(fp, gateOf(fp.path) ? 'Locked: open to unlock' : 'Front page'));
+    // A folder's pictures and videos are one line, its gallery, not a line each
+    // (while finding, each file that matches is still listed).
+    const shots = finding || !prefix ? [] : node.files.filter((f) => isImage(f.path) || isVideo(f.path));
+    if (shots.length) parent.append(galleryRow(prefix, 'Gallery', shots.length));
     for (const [name, sub] of Object.entries(node.dirs)) {
+      if (!finding) {
+        // A book is one line that opens it: its chapters are in the outline.
+        if (/\.epub$/i.test(name)) { if (sub.files.length) parent.append(bookRow(prefix + name, sub.files)); continue; }
+        // A folder of nothing but pictures and videos is one line too: its gallery.
+        const media = sub.files.filter((f) => isImage(f.path) || isVideo(f.path));
+        if (media.length && media.length === sub.files.length && !Object.keys(sub.dirs).length) { parent.append(galleryRow(prefix + name + '/', name, media.length)); continue; }
+      }
       const det = el('details'), sum = el('summary', '', name);
       det.open = !!finding || state.opened.includes(prefix + name);   // folders start closed; while finding, everything that matches shows
       sum.dataset.folder = prefix + name;
@@ -1446,6 +1464,7 @@ function renderTree() {
         state.opened = state.opened.filter((p) => p !== prefix + name && (det.open || !p.startsWith(prefix + name + '/')));
         if (det.open) state.opened.push(prefix + name);
         else for (const inner of det.querySelectorAll('details[open]')) inner.open = false;
+        stickFolders();
         save();
       });
       const kids = el('div', 'kids');
@@ -1453,7 +1472,7 @@ function renderTree() {
       draw(sub, kids, prefix + name + '/');
       parent.append(det);
     }
-    for (const f of node.files) if (f !== fp) parent.append(fileRow(f, /\.epub\//i.test(f.path) ? f.title : undefined));   // a page of a book goes by its name in the contents
+    for (const f of node.files) if (f !== fp && !shots.includes(f)) parent.append(fileRow(f, /\.epub\//i.test(f.path) ? f.title : undefined));   // a page of a book goes by its name in the contents
   };
   // Sections. What hub.json lists under "starter" (the material every copy
   // begins with) is kept together, first. Each other top-level folder, added
@@ -1472,8 +1491,61 @@ function renderTree() {
   for (const [name, sub] of added) draw({ dirs: { [name]: sub }, files: [] }, section(' up'), '');
   if (loose.length) draw({ dirs: {}, files: loose }, section('', starter.size ? 'Other files' : 'Files'), '');
   treeEl.append(nextPin);
+  stickFolders();
   treeEl.scrollTop = y;
   pinNext();
+}
+// Each open folder's line is held at the top of the list while its contents
+// scroll (the style sheet does that). A folder inside another is held just
+// under its parent's line, so the whole way down to where one is stays in sight.
+function stickFolders() {
+  for (const sum of treeEl.querySelectorAll('details[open] > summary')) {   // in the order of the page: a parent before what is in it
+    const up = sum.parentNode.parentNode.closest('details')?.querySelector(':scope > summary');
+    const top = up ? (parseFloat(up.style.top) || 0) + up.offsetHeight : 0;
+    sum.style.top = top + 'px';
+    sum.style.zIndex = String(Math.max(1, 20 - Math.round(top / 10)));   // a line further in slides away beneath the ones above it
+  }
+}
+addEventListener('resize', stickFolders);
+// A folder's gallery as a line in the list (the folder's own line when it holds nothing else).
+function galleryRow(path, label, count) {
+  const row = el('div', 'file');
+  row.tabIndex = 0;
+  row.setAttribute('role', 'button');
+  row.dataset.path = path;
+  row.title = `${count} picture${count === 1 ? '' : 's'} and videos in ${path.slice(0, -1)}`;
+  if (state.panes.some((p) => p.tabs.includes(path))) row.classList.add('open');
+  if (path === activeDoc()) row.classList.add('active');
+  row.append(el('span', 'name', label), el('small', '', count));
+  row.onclick = (e) => openDoc(path, { side: e.metaKey || e.ctrlKey || e.altKey });
+  row.ondblclick = () => openDoc(path, { keep: true });
+  return row;
+}
+// A book as one line: pressing it opens the page last read in it, or its first.
+// The mark at its end keeps a copy of every page on this device, or removes them.
+const inBook = (book, path) => !!path && path.startsWith(book + '/');
+function bookRow(book, pages) {
+  const row = el('div', 'file');
+  row.tabIndex = 0;
+  row.setAttribute('role', 'button');
+  row.dataset.book = book;
+  row.title = book.split('/').pop();
+  if (state.panes.some((p) => p.tabs.some((t) => inBook(book, t)))) row.classList.add('open');
+  if (inBook(book, activeDoc())) row.classList.add('active');
+  row.append(el('span', 'name', book.split('/').pop().replace(/\.epub$/i, '')));
+  const n = notes.filter((x) => inBook(book, x.doc)).length;
+  if (n) row.append(el('small', '', n));
+  const missing = pages.filter((d) => !kept.has(d.path) && !isPending(d.path)), here = !missing.length;
+  const st = el('button', 'st ' + (here ? 'kept' : ''), here ? '●' : '○');
+  st.title = here ? 'Every page is copied to this device, so the book opens without the server. Press to remove the copies.'
+    : `${pages.length - missing.length} of ${pages.length} pages are copied to this device. Press to keep them all.`;
+  st.setAttribute('aria-label', st.title);
+  st.onclick = async (e) => { e.stopPropagation(); if (here) for (const d of pages) await dropCopy(d.path); else await keepAll(row.title, missing); renderTree(); };
+  row.append(st);
+  const target = () => { const last = state.last?.[book]; return inBook(book, last) && pages.some((d) => d.path === last) ? last : pages[0].path; };
+  row.onclick = (e) => openDoc(target(), { side: e.metaKey || e.ctrlKey || e.altKey });
+  row.ondblclick = () => openDoc(target(), { keep: true });
+  return row;
 }
 // Quick open: a closed folder's line carries the document last opened inside
 // it (at any depth), so that can be returned to without opening the folder.
@@ -1762,6 +1834,7 @@ async function drawDoc(pane, hash, keepScroll) {
   if (!path) { v.body.replaceChildren(el('p', 'empty', 'Nothing open. Pick a file on the left.')); return; }
   if (gateOf(path)) { showLock(pane, gateOf(path)); return; }
 
+  if (docOf(path)?.gallery) { showGallery(pane, path); return; }
   if (isAudio(path)) { showPlayer(pane, path); return; }
   if (docOf(path)?.links) { showLinks(pane, path); return; }
   if (isPdf(path)) { showPdf(pane, path); return; }
@@ -2369,7 +2442,8 @@ function showMedia(pane, path) {
   const v = views[pane], url = rawUrl(path);
   const box = el('div', 'viewer lb'), bar = el('div', 'viewbar'), stage = el('div', 'stage fit');
   bar.append(el('span', '', path.split('/').pop()));
-  const open = el('a', '', 'open in new tab');
+  const open = el('a', '', 'open');
+  open.append(el('i', '', ' in new tab'));   // dropped in a phone's lightbox, where the bar has no room for it
   open.href = url;
   open.target = '_blank';
   open.rel = 'noopener';
@@ -2655,12 +2729,26 @@ const KINDS = [
   ['media', 'Pictures and video', (p) => isImage(p) || isVideo(p)],
   ['music', 'Music', (p) => isAudio(p)],
 ];
-function appendBrowse(article, pane, folder) {
+// A folder's gallery (see applyLocks): its name, and what a front page has under
+// its description, opened on the pictures and video.
+function showGallery(pane, path) {
+  const v = views[pane], folder = path.slice(0, -1);
+  const scroller = el('div', 'scroller'), article = el('article', 'md');
+  article.append(el('h1', '', folder.split('/').pop()));
+  scroller.append(article);
+  v.body.replaceChildren(scroller);
+  v.scroller = scroller;
+  appendBrowse(article, pane, folder, 'media');
+  scroller.scrollTop = scrollMem.get(pane + ':' + path) ?? 0;
+}
+// `first`: the tile that is pressed until one has been chosen for this folder.
+function appendBrowse(article, pane, folder, first = null) {
   const inside = docs.filter((d) => !isFront(d.path) && inView(d) && (!folder || d.path.startsWith(folder + '/')));
   const box = el('div', 'browse'), tiles = el('div', 'tiles'), listing = el('div', 'listing');
   const key = 'browse:' + folder;
+  const chosen = () => (state.browse && key in state.browse ? state.browse[key] : first);
   const draw = () => {
-    const open = state.browse?.[key];
+    const open = chosen();
     for (const t of tiles.children) t.setAttribute('aria-pressed', t.dataset.kind === open);
     listing.replaceChildren();
     const kind = KINDS.find((k) => k[0] === open);
@@ -2776,7 +2864,7 @@ function appendBrowse(article, pane, folder) {
     t.disabled = !n;
     t.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true">${ICONS[id]}</svg>`;
     t.append(el('span', '', label), el('small', '', String(n)));
-    t.onclick = () => { state.browse = { ...(state.browse || {}), [key]: state.browse?.[key] === id ? null : id }; save(); draw(); };
+    t.onclick = () => { state.browse = { ...(state.browse || {}), [key]: chosen() === id ? null : id }; save(); draw(); };
     tiles.append(t);
   }
   box.append(tiles, listing);
@@ -2861,8 +2949,9 @@ function renderOutline() {
   $('tocLabel').textContent = 'Outline' + (name ? ' · ' + name : '');
   $('tocLabel').title = name;
   if (!v) return;
-  v.heads.forEach((h, k) => {
-    const a = el('a', 'l' + h.tagName[1], h.textContent);
+  const heading = (h, cls) => {
+    const a = el('a', cls, h.textContent);
+    a.head = h;
     a.href = '#' + (h.dataset?.slug || '');
     a.onclick = (e) => {
       e.preventDefault();
@@ -2871,12 +2960,31 @@ function renderOutline() {
       if (h.dataset?.slug) history.replaceState(null, '', '?doc=' + encodeURIComponent(activeDoc()) + '#' + h.dataset.slug);
     };
     tocEl.append(a);
-  });
+  };
+  // A page of a book: the outline is the book's, every chapter by name, with
+  // this page's own headings under its chapter (one step in; a heading that
+  // only repeats the chapter's name is left out).
+  if (of && isBookPage(of.path)) {
+    const book = of.path.slice(0, of.path.search(/\.epub\//i) + 5);
+    $('tocLabel').textContent = 'Outline · ' + book.split('/').pop().replace(/\.epub$/i, '');
+    for (const d of docs) {
+      if (!inBook(book, d.path) || !inView(d)) continue;
+      const a = el('a', 'l1' + (d === of ? ' here' : ''), d.title);
+      a.href = '?doc=' + encodeURIComponent(d.path);
+      a.onclick = (e) => { e.preventDefault(); drawer(null); openDoc(d.path); };
+      tocEl.append(a);
+      if (d === of) for (const h of v.heads) if (h.textContent.trim() !== d.title.trim()) heading(h, 'l' + Math.min(3, Number(h.tagName[1]) + 1));
+    }
+    markOutline();
+    if (!tocEl.querySelector('.active')) tocEl.querySelector('.here')?.scrollIntoView({ block: 'nearest' });
+    return;
+  }
+  for (const h of v.heads) heading(h, 'l' + h.tagName[1]);
   markOutline();
 }
 function markOutline() {
   const v = views[state.active];
-  [...tocEl.children].forEach((a, k) => a.classList.toggle('active', v.heads[k] === v.cur));
+  for (const a of tocEl.children) a.classList.toggle('active', !!a.head && a.head === v.cur);
   tocEl.querySelector('.active')?.scrollIntoView({ block: 'nearest' });
 }
 
@@ -2926,8 +3034,9 @@ function chrome() {
   lightboxSync();
   for (const sum of treeEl.querySelectorAll('summary[data-folder]')) paintQuick(sum);
   for (const row of treeEl.querySelectorAll('.file')) {
-    row.classList.toggle('active', row.dataset.path === activeDoc());
-    row.classList.toggle('open', state.panes.some((p) => p.tabs.includes(row.dataset.path)));
+    const book = row.dataset.book;   // a book's line stands for every page in it
+    row.classList.toggle('active', book ? inBook(book, activeDoc()) : row.dataset.path === activeDoc());
+    row.classList.toggle('open', state.panes.some((p) => (book ? p.tabs.some((t) => inBook(book, t)) : p.tabs.includes(row.dataset.path))));
   }
   treeEl.querySelector('.file.active')?.scrollIntoView({ block: 'nearest' });
   pendingQuote = '';
