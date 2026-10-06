@@ -1,0 +1,51 @@
+[
+  {
+    "mediaUrl": "https://cdn.tube.example.test/thumbs/9.jpg",
+    "postUrl": "https://tube.example.test/list",
+    "linkUrl": "https://tube.example.test/video/9",
+    "source": "gallery",
+    "isVideo": false,
+    "username": null,
+    "width": 320,
+    "height": 180,
+    "detectedAt": 1759500000000,
+    "title": "Ninth video",
+    "titleFromPage": true,
+    "directUrls": ["https://stream.tube.example.test/9/720.mp4?expires=100"]
+  },
+  {
+    "mediaUrl": "https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg",
+    "postUrl": "https://www.youtube.com/watch?v=abcdefghijk",
+    "linkUrl": "https://www.youtube.com/watch?v=abcdefghijk",
+    "source": "gallery",
+    "isVideo": false,
+    "username": null,
+    "title": "A video with separate sound",
+    "directUrls": ["https://rr1.googlevideo.example.test/videoplayback?mime=video%2Fmp4&expire=100"],
+    "audioUrl": "https://rr1.googlevideo.example.test/videoplayback?mime=audio%2Fmp4&expire=100"
+  },
+  {
+    "mediaUrl": "https://scontent-b.cdninstagram.com/v/t51/444_n.jpg?oe=NEW3",
+    "postUrl": "https://www.instagram.com/p/CCC333/",
+    "source": "instagram",
+    "isVideo": false,
+    "username": "carol",
+    "width": 1080,
+    "height": 1080,
+    "caption": "A caption",
+    "postedAt": "2026-09-26T00:01:08.000Z",
+    "avatarUrl": "https://scontent-b.cdninstagram.com/v/t51/avatar_n.jpg",
+    "likes": 12,
+    "reposts": 0
+  },
+  {
+    "mediaUrl": "https://media.clips.example.test/v/42.mp4",
+    "postUrl": "https://clips.example.test/watch/42",
+    "linkUrl": "https://clips.example.test/watch/42",
+    "source": "gallery",
+    "isVideo": true,
+    "username": null,
+    "title": "Clip forty-two",
+    "thumbnailUrl": "https://media.clips.example.test/v/42.jpg"
+  }
+]

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>Reader</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -133,6 +133,8 @@
   ::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--ink) 30%, transparent); border-radius: 5px; border: 2px solid transparent; background-clip: padding-box; }
   ::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--ink) 50%, transparent); background-clip: padding-box; }
   html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
+  /* On a touch screen the reader as a whole is not zoomed by a pinch or a double tap: its controls would slide out of reach. Scrolling stays; text has A−/A+, a PDF its − and +. */
+  @media (pointer: coarse) { html, body { touch-action: pan-x pan-y; } }
   body { margin: 0; overflow: hidden; background: var(--paper); color: var(--ink); font: var(--fs, 18px)/1.65 var(--body); }
 
   /* Keyboard focus is always obvious. */
@@ -190,7 +192,11 @@
   #sideTools button[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
   #side { display: flex; flex-direction: column; min-height: 0; padding: 14px 0 0 14px; font: 14px/1.4 var(--head); border-right: 1px solid var(--rule); }
   #sideHead { display: flex; align-items: center; gap: 2px; margin: 0 8px 8px 0; }
-  #hubTitle { flex: 1; min-width: 0; font-size: 17px; font-weight: 700; margin: 0 4px 0 -4px; padding: 2px 4px; cursor: text; }
+  /* the reader's name and a house: together, the way back to the front page (the name is changed there, by editing the front page) */
+  #hubHome { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; font-size: 17px; font-weight: 700; margin: 0 4px 0 -4px; padding: 2px 4px; cursor: pointer; }
+  #hubHome span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #hubHome svg { flex: none; width: 17px; height: 17px; color: var(--muted); }
+  #hubHome:hover, #hubHome:hover svg { color: var(--accent); }
   /* icon buttons: the sidebar's own controls, and the player's */
   .ic { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 3px; border: 0; color: var(--muted); }
   .ic svg { display: block; width: 100%; height: 100%; }
@@ -202,7 +208,6 @@
   #netBrief[hidden], #settings:not([hidden]) ~ #netBrief { display: none; }
   .label.row { display: flex; align-items: center; gap: 2px; padding-right: 8px; }
   .label.row .ic:first-of-type { margin-left: auto; }
-  #hubTitle:hover, #hubTitle:focus { outline: 1px dashed var(--rule); }
   #sideTools button { margin: 0 4px 8px 0; }
   .label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); padding: 8px 0 4px; border-top: 1px solid var(--rule); }
   #tree, #toc { flex: 1 1 50%; min-height: 0; overflow-y: auto; padding: 0 8px 12px 0; }
@@ -228,6 +233,8 @@
   .hit small { display: block; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .hit span { display: block; overflow-wrap: anywhere; }
   .hit:hover b { color: var(--accent); }
+  .hit { position: relative; }
+  .hit .pickBtn, .hit .refBtn { position: absolute; top: 4px; right: 0; }   /* tagging what was found, or referring to it in a note */
   .found { outline: 3px solid var(--accent); outline-offset: 4px; }
   #tocLabel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 8px; }
   /* the file list in sections: the starter material together, then each added folder by itself */
@@ -236,6 +243,15 @@
   #tree .sect.up { border-top: 0; padding-top: 0; }
   #tree .sect.up > details > summary { background: var(--shade); border-top: 2px solid var(--accent2); padding: 5px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #tree .sect.up > details > .kids { padding-top: 4px; }
+  /* the added folders under their kinds (mixed, audio, video, galleries, books and documents): a kind is one line that opens out to its folders */
+  #tree .sect.cat { border-top: 0; margin-top: 8px; padding-top: 0; }
+  #tree .sect.cat > details > summary { padding: 4px 0; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #tree .sect.cat > details > summary small { font-weight: 400; }
+  #tree .sect.cat > details > .kids { padding-left: 0; }
+  #tree .sect.cat .sect.up { margin-top: 6px; }
+  /* the sign of its kind, before a folder's name */
+  #tree summary .kind { display: inline-block; width: 14px; height: 14px; margin-right: 5px; vertical-align: -2px; color: var(--muted); }
+  #tree summary .kind svg { display: block; width: 100%; height: 100%; }
   /* An open folder is as long as what is in it: the list is the one thing that scrolls. Its own line stays at the top while it is
      scrolled through (to close it by), and the next folder's line is held at the bottom (.nextPin), to get past it by. */
   #tree summary { cursor: pointer; padding: 2px 0; font-weight: 600; }
@@ -283,6 +299,7 @@
   .tab.active { background: var(--paper); color: var(--ink); }
   .pane.active .tab.active { border-top-color: var(--accent); }
   .tab button, .tabs > button { border: 0; padding: 0 4px; color: var(--muted); }
+  .tab .keepB { width: 18px; height: 18px; padding: 1px; margin-right: -4px; }
   .tabs > button + button { margin-left: 0 !important; }
   .tabs > button[aria-pressed="true"] { color: var(--accent); }
   .tabs > button { margin-left: auto; padding: 0 10px; white-space: nowrap; flex: none; position: sticky; right: 0; background: var(--shade); }
@@ -301,6 +318,9 @@
   .bookwrap .step.prev { left: 2px; }
   .bookwrap .step.next { right: 18px; }
   .bookwrap .step:disabled { display: none; }
+  /* at the end of a book's page: what scrolling on leads to */
+  .bookwrap .turnHint { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); max-width: 80%; padding: 4px 12px; border: 1px solid var(--rule); border-radius: 14px; background: color-mix(in srgb, var(--paper) 92%, transparent); color: var(--muted); font: 12px var(--head); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bookwrap .turnHint[hidden] { display: none; }
   .empty { color: var(--muted); font: 14px var(--head); padding: 24px 32px; }
 
   /* contents dial: shown when the sidebar is not. A bare icon over the page;
@@ -327,6 +347,9 @@
   #net .sub { color: var(--muted); }
   #net button { border: 0; padding: 0; color: var(--accent); font-size: 12.5px; text-decoration: underline; }
   #net .say { color: #c0392b; }
+  /* what is only partly on this device: a line that opens to the list */
+  #net .partly summary { cursor: pointer; }
+  #net .partly > div { padding-left: 14px; }
   .file .st { visibility: visible !important; display: inline-block !important; border: 0; padding: 0 2px; font-size: 11px; color: var(--muted); }
   .file .st.kept { color: #3f8f4f; }
   .file .st.wait { color: #b9770e; font-weight: 700; }
@@ -449,13 +472,29 @@
   .reel .thumb.cur { outline: 3px solid var(--accent2); outline-offset: -3px; }
   .stage img, .stage video, .stage audio { display: block; margin: auto; }
   /* fitted, a picture or video fills the stage whatever its own size: a small one is enlarged to the frame, a large one brought down to it */
-  .stage.fit { overflow: hidden; }
-  .stage.fit img, .stage.fit video { flex: 1 1 0; min-width: 0; min-height: 0; width: 100%; height: 100%; object-fit: contain; }
+  .stage.fit { overflow: hidden; position: relative; }
+  /* laid over the whole stage, not sized as a part of it: a phone's browser gave a small video its own size otherwise */
+  .stage.fit img, .stage.fit video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  /* pinched larger (see the pinch in app.js): the size is set on the picture or video itself, and the stage scrolls */
+  .stage.pinched { overflow: auto; }
+  .stage.pinched img, .stage.pinched video { position: static; flex: none; object-fit: contain; max-width: none; max-height: none; }
   .stage.fit img { cursor: zoom-in; }
   .stage:not(.fit) img { cursor: zoom-out; max-width: none; }
   .stage video { background: #000; }
   .stage audio { width: min(90%, 480px); }
   .md img { cursor: zoom-in; }
+  /* the one thing a folder holds, on the folder's page: a card at the side of the title, pressed to open it */
+  .md .onecard { float: right; width: min(40%, 240px); margin: 1.6em 0 12px 18px; border: 1px solid var(--rule); background: var(--shade); cursor: pointer; font: 13px/1.35 var(--head); }
+  .md .onecard:hover, .md .onecard:focus-visible { border-color: var(--accent); }
+  .md .onecard .pic { display: flex; align-items: center; justify-content: center; background: var(--paper); }
+  .md .onecard .pic.sign { min-height: 130px; color: var(--muted); }
+  .md .onecard .pic.sign svg { width: 56px; height: 56px; }
+  .md .onecard .pic img, .md .onecard .pic video, .md .onecard .pic canvas { display: block; width: 100%; height: auto; cursor: pointer; }
+  .md .onecard .what { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; }
+  .md .onecard .what small { color: var(--muted); overflow-wrap: anywhere; }
+  .md .onecard .what button { align-self: flex-start; margin-top: 2px; }
+  /* a folder's cover, on its page: at the side of the title */
+  .md img.cover { float: right; width: min(34%, 220px); height: auto; margin: 1.6em 0 10px 18px; cursor: default; border: 1px solid var(--rule); }
 
   /* a rendered document */
   .md { max-width: 40em; margin: 0 auto; padding: 16px 0 120px; }
@@ -495,6 +534,7 @@
   .type span:hover, .type span:focus { outline: 1px dashed var(--rule); }
   .type.cur span { font-weight: 600; }
   #types > button { margin-top: 6px; border: 0; padding: 0; color: var(--accent); font-size: 12px; }
+  .md h1 .editPen, .md p .editPen { display: inline-flex; vertical-align: middle; width: 26px; height: 26px; padding: 4px; margin-left: 8px; }
   .editFront { float: right; margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
   /* a locked folder: the password form, in place of the document */
   .lockbox { width: min(100%, 420px); margin: 8vh auto; padding: 20px 22px; border: 1px solid var(--rule); font: 15px/1.5 var(--head); }
@@ -534,7 +574,11 @@
   .thumb { display: block; padding: 0; margin: 0 0 8px; break-inside: avoid; border: 1px solid var(--rule); background: var(--shade); aspect-ratio: 1; overflow: hidden; position: relative; }
   .cardSize { display: flex; align-items: center; gap: 6px; margin: 4px 0; font: 12px var(--head); color: var(--muted); }
   .cardSize input { width: 150px; accent-color: var(--accent); }
-  .thumb img, .thumb video { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+  .thumb img, .thumb video, .thumb canvas { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+  /* a book on a shelf: upright, its cover whole */
+  .thumb.book { aspect-ratio: 2 / 3; cursor: pointer; background: var(--paper); }
+  .thumb.book img, .thumb.book canvas { object-fit: contain; object-position: top; }
+  .thumb.book i svg { width: 34%; height: auto; }
   .thumb b { position: absolute; left: 0; right: 0; bottom: 0; padding: 3px 5px; background: color-mix(in srgb, var(--paper) 88%, transparent); font: 11px var(--head); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; }
   .thumb i { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font: 600 12px var(--head); color: var(--muted); font-style: normal; }
   .frontEditor { max-width: 720px; margin: 0 auto; padding: 16px 0; }
@@ -563,7 +607,7 @@
   .searches summary { cursor: pointer; color: var(--muted); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; }
   .searches .item button { flex: none; border: 0; padding: 0 6px; color: var(--muted); }
   /* the groups on the main front page */
-  .tags { margin: 18px 0 6px; font-family: var(--head); }
+  .tags.searches { margin: 0 0 10px; }
   .tags .chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0 6px; }
   .tags .chips button { padding: 3px 10px; font-size: 14px; }
   .tags .chips button[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
@@ -701,7 +745,7 @@
     body.lightbox .viewbar button, body.lightbox .viewbar a { flex: none; white-space: nowrap; }
     body.lightbox .viewbar button:not(.ic) { padding: 6px 10px; }
     body.lightbox .viewbar .lbOnly { display: inline-block; }
-    body.lightbox .viewbar .x { font-size: 20px; line-height: 1; }
+    body.lightbox .viewbar .x { order: -1; margin-right: auto; font-size: 20px; line-height: 1; }   /* the way out, first: at the left end of the bar, the rest at the right */
     /* a picture at its real size: the screen is the picture; the bar, the arrows and the reel lie over it */
     body.lightbox.immersive #composer { display: none; }
     body.lightbox.immersive .viewer.lb { position: relative; }
@@ -725,14 +769,14 @@
   <button id="sideEdge" aria-label="Show sidebar" title="Sidebar (hover to peek, click to keep open)">›</button>
   <nav id="side" aria-label="Files and outline">
     <div id="sideHead">
-      <h1 id="hubTitle" contenteditable="plaintext-only" spellcheck="false" title="Click to rename"></h1>
+      <h1 id="hubHome" role="button" tabindex="0" title="Go to the front page"><span id="hubTitle"></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8M5 10v10h5v-6h4v6h5V10"/></svg></h1>
       <button id="notesToggle" class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16"/><path d="M15 4v16"/></svg></button>
       <button id="sideToggle" class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16"/><path d="M9 4v16"/></svg></button>
       <button id="settingsBtn" class="ic" aria-expanded="false" aria-controls="settings" aria-label="Settings" title="Settings: text, connection, this device"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
     </div>
     <div id="settings" hidden>
       <div class="label">Text</div>
-      <div id="sideTools"><select id="theme" title="Theme"><option value="plain">Plain</option><option value="selenized">Selenized Light</option><option value="lime">Pale Lime</option><option value="sky">Pale Sky</option><option value="lime-dark">Lime Night</option><option value="sky-dark">Sky Night</option><option value="eva">Eva Night</option><option value="triple-m">Triple-M</option><option value="sun-sound">Sun Sound</option><option value="periwinkle">Periwinkle</option><option value="mahogany">Mahogany</option></select><button id="themeOne" title="One theme for the whole reader. Release it to give the left and right panes themes of their own.">one theme</button><select id="themeSide" title="Theme of the left pane (files and outline)"></select><select id="themeRight" title="Theme of the right pane (the side document and notes)"></select><button id="fontToggle"></button><button id="focusToggle" title="Fade everything except the paragraph you are reading">reading focus</button><button id="roomyToggle" title="More space between lines and words">roomy text</button><button id="smaller" aria-label="Smaller text" title="Smaller text">A−</button><button id="bigger" aria-label="Larger text" title="Larger text">A+</button></div>
+      <div id="sideTools"><select id="theme" title="Theme"><option value="plain">Plain</option><option value="selenized">Selenized Light</option><option value="lime">Pale Lime</option><option value="sky">Pale Sky</option><option value="lime-dark">Lime Night</option><option value="sky-dark">Sky Night</option><option value="eva">Eva Night</option><option value="triple-m">Triple-M</option><option value="sun-sound">Sun Sound</option><option value="periwinkle">Periwinkle</option><option value="mahogany">Mahogany</option></select><button id="themeOne" title="One theme for the whole reader. Release it to give the left and right panes themes of their own.">one theme</button><select id="themeSide" title="Theme of the left pane (files and outline)"></select><select id="themeRight" title="Theme of the right pane (the side document and notes)"></select><button id="fontToggle"></button><button id="focusToggle" title="Fade everything except the paragraph you are reading">reading focus</button><button id="turnToggle" title="In a book, scrolling on at the end of a page turns to the next, and scrolling back at the top to the one before">scroll through books</button><button id="roomyToggle" title="More space between lines and words">roomy text</button><button id="smaller" aria-label="Smaller text" title="Smaller text">A−</button><button id="bigger" aria-label="Larger text" title="Larger text">A+</button></div>
       <div class="label">Connection</div>
       <div id="net" role="status" aria-live="polite"></div>
       <div class="label">This device</div>
@@ -743,7 +787,7 @@
     <button id="netBrief" hidden title="Open the settings for the details"></button>
     <select id="hubSel" title="Which hub to look at" hidden></select>
     <select id="workspace" title="Workspace" hidden></select>
-    <div class="label row">Files<button id="addBtn" class="ic" aria-label="Add files" title="Add files from this device. If the server is out of reach they are held here and sent later."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></button><input id="fileInput" type="file" multiple hidden><button id="uploadBtn" class="ic" aria-label="Upload a folder" title="Bring a folder from your computer into the hub"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h6l2 2h10v11H3z"/><path d="M12 17v-6M9.5 13.5L12 11l2.5 2.5"/></svg></button><input id="folderInput" type="file" webkitdirectory multiple hidden></div>
+    <div class="label row">Files<button id="addBtn" class="ic" aria-label="Add files" title="Add files from this device. If the server is out of reach they are held here and sent later."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></button><input id="fileInput" type="file" multiple hidden><button id="uploadBtn" class="ic" aria-label="Upload a folder" title="Bring a folder from your computer into the hub. For several at once, drop them here on the sidebar, or press “add another folder…” after choosing the first."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h6l2 2h10v11H3z"/><path d="M12 17v-6M9.5 13.5L12 11l2.5 2.5"/></svg></button><input id="folderInput" type="file" webkitdirectory multiple hidden></div>
     <button id="fresh" hidden title="The reader itself has changed since this page was kept on this device">A newer version of the reader is ready. Reload</button>
     <button id="keptOnly" hidden title="The lists are showing only what is kept on this device. Press to show everything."></button>
     <div id="findWrap"><input id="find" type="search" placeholder="Find a file, or words in files and notes" aria-label="Find a file, or words in files and notes" autocomplete="off" spellcheck="false"><button id="findClear" class="ic" type="button" hidden aria-label="Clear what is being looked for" title="Clear (Escape)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>

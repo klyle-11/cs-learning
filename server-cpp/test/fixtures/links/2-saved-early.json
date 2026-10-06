@@ -1,0 +1,39 @@
+[
+  {
+    "mediaUrl": "https://scontent-b.cdninstagram.com/v/t51/111_n.jpg?oe=NEW2",
+    "postUrl": "https://www.instagram.com/p/AAA111/",
+    "height": 1350,
+    "isVideo": false,
+    "source": "instagram",
+    "username": "alice",
+    "width": 1080,
+    "detectedAt": 1758500000000
+  },
+  {
+    "mediaUrl": "https://cdn.photos.example.test/albums/7/original.jpg?token=T1",
+    "postUrl": "https://photos.example.test/gallery/7",
+    "height": 600,
+    "isVideo": false,
+    "source": "gallery",
+    "username": null,
+    "width": 800
+  },
+  {
+    "mediaUrl": "https://media.clips.example.test/v/42.mp4",
+    "postUrl": "https://clips.example.test/watch/42",
+    "isVideo": true,
+    "source": "gallery",
+    "username": null,
+    "detectedAt": 1758500000001,
+    "thumbnailUrl": "https://media.clips.example.test/v/42.jpg"
+  },
+  {
+    "mediaUrl": "https://img.social.example.test/media/abc.jpg?name=orig",
+    "postUrl": "https://social.example.test/bob/status/1",
+    "height": 900,
+    "isVideo": false,
+    "source": "gallery",
+    "username": "bob",
+    "width": 1200
+  }
+]

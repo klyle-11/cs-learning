@@ -11,9 +11,12 @@
 const CACHE = 'hub-shell-v1';
 const SHELL = ['/', '/app.js', '/local.js', '/vault.js', '/vendor/marked.js', '/vendor/highlight.js', '/vendor/purify.js',
   '/manifest.webmanifest', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png'];
+// What a PDF is drawn with: kept as well, so a PDF kept on the device opens without the server. The reader installs
+// without them if they cannot be had (a server from before it had them); they are then kept the first time one is drawn.
+const LATER = ['/vendor/pdf.mjs', '/vendor/pdf.worker.mjs'];
 const WAIT = 8000;   // how long the check behind a served file may take
 
-self.addEventListener('install', (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())));
+self.addEventListener('install', (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL).then(() => Promise.all(LATER.map((u) => c.add(u).catch(() => {}))))).then(() => self.skipWaiting())));
 self.addEventListener('activate', (e) => e.waitUntil((async () => {
   for (const k of await caches.keys()) if (k !== CACHE) await caches.delete(k);
   await self.clients.claim();
@@ -21,7 +24,7 @@ self.addEventListener('activate', (e) => e.waitUntil((async () => {
 
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
-  if (e.request.method !== 'GET' || url.origin !== location.origin || !SHELL.includes(url.pathname)) return;
+  if (e.request.method !== 'GET' || url.origin !== location.origin || !(SHELL.includes(url.pathname) || LATER.includes(url.pathname))) return;
   e.respondWith((async () => {
     const cache = await caches.open(CACHE), held = await cache.match(url.pathname);
     if (!held) return refresh(cache, url.pathname, null);   // nothing kept yet: wait for the server
