@@ -90,12 +90,12 @@
   [data-theme="periwinkle"] .pane.active .tabs { box-shadow: inset 0 3px 0 var(--accent2); }
   [data-theme="periwinkle"] .pane.active .tab.active { border-top-color: var(--accent2); }
   [data-theme="periwinkle"] .md blockquote { border-left-color: var(--accent2); }
-  [data-theme="mahogany"] { /* Mahogany: deep red-brown paper, kept short of orange, silver ink and accent; cobalt for the small marks and for a press */
+  [data-theme="mahogany"] { /* Mahogany: a cold, deep brown, the leather of an old briefcase, down to almost black in the fields; silver ink and accent; cobalt for the small marks and for a press */
     color-scheme: dark;
-    --paper: #33181b; --shade: #3f2124; --ink: #e6e3e0; --muted: #b9b0ab; --rule: #5f3b3e;
-    --accent: #c8ccd2; --accent2: #5b8def; --mark: #d3d7dc; --reply: #48282c; --field: #261012; --quote: #cfc8c3;   /* cobalt itself (#0047ab) is too dark to see on the paper, so the marks use a lighter one */
+    --paper: #281c17; --shade: #32251f; --ink: #e6e3e0; --muted: #b0a69f; --rule: #524039;
+    --accent: #c8ccd2; --accent2: #5b8def; --mark: #d3d7dc; --reply: #3a2b24; --field: #18110e; --quote: #cfc8c3;   /* cobalt itself (#0047ab) is too dark to see on the paper, so the marks use a lighter one */
     --press: #0047ab; --press-ink: #f2f3f5;
-    --c-kw: #7ea6ff; --c-str: #a9d29a; --c-com: #a38a80; --c-num: #f2a65a; --c-fn: #a9c8ff; --c-type: #e0b88a;
+    --c-kw: #7ea6ff; --c-str: #a9d29a; --c-com: #94857c; --c-num: #f2a65a; --c-fn: #a9c8ff; --c-type: #e0b88a;
   }
   [data-theme="mahogany"] .pane.active .tabs { box-shadow: inset 0 3px 0 var(--accent2); }
   [data-theme="mahogany"] .pane.active .tab.active { border-top-color: var(--accent2); }
@@ -197,6 +197,9 @@
   #hubHome span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #hubHome svg { flex: none; width: 17px; height: 17px; color: var(--muted); }
   #hubHome:hover, #hubHome:hover svg { color: var(--accent); }
+  #hubHome .st { flex: none; border: 0; padding: 0 2px; font-size: 11px; font-weight: 400; color: var(--muted); }   /* the front page's keep mark (see renderTree) */
+  #hubHome .st.kept { color: #3f8f4f; }
+  #hubHome .st.wait { color: #b9770e; font-weight: 700; }
   /* icon buttons: the sidebar's own controls, and the player's */
   .ic { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 3px; border: 0; color: var(--muted); }
   .ic svg { display: block; width: 100%; height: 100%; }
@@ -206,8 +209,11 @@
   #settings[hidden] { display: none; }
   #netBrief { display: block; margin: 0 10px 8px 0; padding: 0; border: 0; text-align: left; color: #c0392b; font-size: 12.5px; }
   #netBrief[hidden], #settings:not([hidden]) ~ #netBrief { display: none; }
-  .label.row { display: flex; align-items: center; gap: 2px; padding-right: 8px; }
-  .label.row .ic:first-of-type { margin-left: auto; }
+  /* Make a group, add files, upload a folder: at the end of the first line of the file list (see renderTree). */
+  #treeTools { flex: none; align-self: center; display: flex; align-items: center; gap: 2px; margin-left: auto; }
+  #treeTools .ic { visibility: visible; width: 22px; height: 22px; padding: 3px; color: var(--muted); }
+  #treeTools .ic:hover { color: var(--accent); }
+  .file.bare { cursor: default; }
   #sideTools button { margin: 0 4px 8px 0; }
   .label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); padding: 8px 0 4px; border-top: 1px solid var(--rule); }
   #tree, #toc { flex: 1 1 50%; min-height: 0; overflow-y: auto; padding: 0 8px 12px 0; }
@@ -249,9 +255,26 @@
   #tree .sect.cat > details > summary small { font-weight: 400; }
   #tree .sect.cat > details > .kids { padding-left: 0; }
   #tree .sect.cat .sect.up { margin-top: 6px; }
+  /* the pin at the end of a folder's line, and the pinned folders over the kinds */
+  #tree summary .pin { float: right; width: 18px; height: 18px; padding: 2px; margin-left: 4px; border: 0; background: none; color: var(--muted); opacity: 0; }
+  #tree summary .pin svg { display: block; width: 100%; height: 100%; }
+  #tree summary:hover .pin, #tree summary .pin:focus-visible, #tree summary .pin[aria-pressed="true"] { opacity: 1; }
+  #tree summary .pin[aria-pressed="true"] { color: var(--accent); }
+  @media (pointer: coarse) { #tree summary .pin { opacity: .45; } }
+  /* the + at the end of a folder's line: its page in a tab of its own (a file's line has the same) */
+  #tree summary .plus { float: right; margin-left: 4px; padding: 0 4px; border: 0; background: none; color: var(--accent); font: 700 15px/18px var(--head); opacity: 0; }
+  #tree summary:hover .plus, #tree summary .plus:focus-visible { opacity: 1; }
+  @media (pointer: coarse) { #tree summary .plus { opacity: 1; } }
+  #tree .sect.pins { border-top: 0; margin-top: 8px; padding-top: 0; }
+  #tree .sect.pins .sect.up { margin-top: 6px; }
   /* the sign of its kind, before a folder's name */
   #tree summary .kind { display: inline-block; width: 14px; height: 14px; margin-right: 5px; vertical-align: -2px; color: var(--muted); }
   #tree summary .kind svg { display: block; width: 100%; height: 100%; }
+  /* a book's own line has the sign too; and where there is a picture for the line (a cover, an album's artwork), that takes the sign's place */
+  #tree .file .kind { flex: none; align-self: center; display: inline-block; width: 14px; height: 14px; color: var(--muted); }
+  #tree .file .kind svg { display: block; width: 100%; height: 100%; }
+  #tree .kind.pic { width: 20px; height: 20px; vertical-align: -5px; }
+  #tree .kind.pic img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top; border: 1px solid var(--rule); box-sizing: border-box; }
   /* An open folder is as long as what is in it: the list is the one thing that scrolls. Its own line stays at the top while it is
      scrolled through (to close it by), and the next folder's line is held at the bottom (.nextPin), to get past it by. */
   #tree summary { cursor: pointer; padding: 2px 0; font-weight: 600; }
@@ -282,6 +305,23 @@
   #toc a.l3 { padding-left: 22px; font-size: 13px; }
   #toc a.active { color: var(--accent); border-left-color: var(--accent2); }
   #toc a.here { color: var(--accent); }   /* the chapter being read, in a book's outline */
+  /* The outline is a panel of its own, docked under the file list, and is made to look it: a tinted ground out to the
+     sidebar's edge, a heavier line over it, a sign before its name. Its text is lighter and quieter than the files'
+     (no bold: the levels are told apart by how far in they sit), with a rule down the side that the place being read lights up. */
+  #tocLabel { margin-left: -14px; padding: 7px 8px 5px 14px; background: var(--shade); border-top: 2px solid color-mix(in srgb, var(--muted) 40%, var(--rule)); }
+  #tocLabel::before { content: ''; display: inline-block; width: 12px; height: 12px; margin-right: 6px; vertical-align: -2px; background: currentColor;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='square'%3E%3Cpath d='M3 5h3M9 5h12M3 12h3M9 12h9M3 19h3M9 19h6'/%3E%3C/svg%3E") center / contain no-repeat;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='square'%3E%3Cpath d='M3 5h3M9 5h12M3 12h3M9 12h9M3 19h3M9 19h6'/%3E%3C/svg%3E") center / contain no-repeat; }
+  #toc { margin-left: -14px; padding: 2px 8px 12px 14px; background: var(--shade); font-size: 13px; }
+  #toc:empty { padding-bottom: 6px; }
+  #toc a { padding-left: 10px; font-weight: 400; color: var(--muted); border-left: 1px solid var(--rule); }
+  #toc a:hover { color: var(--ink); }
+  #toc a.l1 { font-weight: 400; color: color-mix(in srgb, var(--ink) 68%, var(--shade)); margin-top: 0; padding-top: 8px; }
+  #toc a.l1:first-child { padding-top: 3px; }
+  #toc a.l2 { padding-left: 20px; }
+  #toc a.l3 { padding-left: 30px; font-size: 12px; }
+  #toc a.active { color: var(--accent); border-left-color: var(--accent2); box-shadow: inset 1px 0 0 var(--accent2); }
+  #toc a.here { color: var(--accent); }
 
   /* workspace: one or two panes, each with tabs along the top */
   #work { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
@@ -295,7 +335,8 @@
   .tabs { display: flex; align-items: stretch; background: var(--shade); border-bottom: 1px solid var(--rule); font: 13px var(--head); overflow-x: auto; flex: none; }
   .tab { display: flex; align-items: center; gap: 8px; padding: 7px 8px 6px 12px; border-right: 1px solid var(--rule); border-top: 2px solid transparent; cursor: pointer; color: var(--muted); white-space: nowrap; }
   .tab span { max-width: 190px; overflow: hidden; text-overflow: ellipsis; }
-  .tab.preview span { font-style: italic; }
+  /* a book's or a PDF's cover, before its name on its tab */
+  .tab .tabCover { flex: none; height: 20px; width: auto; max-width: 20px; object-fit: cover; margin: -3px -2px -3px -4px; border: 1px solid var(--rule); background: var(--paper); }
   .tab.active { background: var(--paper); color: var(--ink); }
   .pane.active .tab.active { border-top-color: var(--accent); }
   .tab button, .tabs > button { border: 0; padding: 0 4px; color: var(--muted); }
@@ -307,6 +348,19 @@
   /* back, at the start of the tab bar */
   .tabs > button.back { margin-left: 0; left: 0; right: auto; z-index: 1; padding: 0 12px; border-right: 1px solid var(--rule); color: var(--ink); font-size: 20px; line-height: 1; }
   .tabs > button.back:disabled { color: var(--rule); cursor: default; }
+  /* Beside back: the list of the latest opened. */
+  .tabs > button.recentB { position: static; margin-left: 0; padding: 0 7px; border-right: 1px solid var(--rule); font-size: 11px; }
+  /* on a phone only: the list of files, to open one more from (the rules are with the phone's) */
+  .tabs > button.newTab, #pickNote, .tab .tabWhere { display: none; }
+  .recent { position: fixed; z-index: 6; display: flex; flex-direction: column; min-width: 200px; max-width: min(340px, calc(100vw - 16px)); overflow-y: auto; padding: 4px 0; background: var(--field); border: 1px solid var(--rule); box-shadow: 0 2px 8px rgba(0, 0, 0, .14); font: 13px var(--head); }
+  .recent[hidden] { display: none; }
+  .recent > small { padding: 3px 10px 4px; color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+  .recent button { flex: none; display: flex; align-items: baseline; gap: 8px; border: 0; padding: 5px 10px; text-align: left; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .recent button:hover, .recent button:focus-visible { background: var(--shade); color: var(--accent); }
+  .recent button small { margin-left: auto; padding-left: 8px; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+  /* A copy being made: a thin bar along the foot of the item's line or card, as wide as the share that has arrived. */
+  .getting { position: relative; }
+  .getting::after { content: ''; position: absolute; left: 0; bottom: 0; z-index: 1; height: 2px; width: var(--got, 0%); background: var(--accent); transition: width .15s linear; pointer-events: none; }
   .body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   /* a document scrolls up and down only; wide tables and code scroll inside themselves */
   .scroller { flex: 1; overflow-y: auto; overflow-x: hidden; overscroll-behavior-x: none; padding: 0 32px; }
@@ -318,6 +372,19 @@
   .bookwrap .step.prev { left: 2px; }
   .bookwrap .step.next { right: 18px; }
   .bookwrap .step:disabled { display: none; }
+  /* The cover of the book or PDF being read, at the top right of its page. A book's sits against the right side of its
+     column of text (the column is 40em of the reader's text size, in the middle of the pane; the page's own scroll bar
+     takes a little off the right, hence the few pixels); a PDF's sits at the pane's edge, clear of the scroll bar. In a
+     pane too narrow for that (.tight, set by addPageCover) it is as small as the contents button, in the corner. On a
+     phone it is #coverBtn instead, beside the contents button. */
+  .bookwrap, .pdfwrap { position: relative; }
+  .pageCover { position: absolute; z-index: 3; top: 14px; right: 30px; width: 60px; padding: 0; border: 1px solid var(--rule); background: var(--paper); box-shadow: 0 2px 10px rgba(0, 0, 0, .2); line-height: 0; opacity: .95; }
+  .pageCover.byText { right: auto; left: calc(50% + 20 * var(--fs, 18px) + 6px); }
+  .pageCover img { display: block; width: 100%; height: auto; }
+  .pageCover[hidden] { display: none; }
+  .pageCover.tight { top: 4px; left: auto; right: 22px; width: auto; height: 34px; opacity: .85; box-shadow: 0 1px 4px rgba(0, 0, 0, .2); }
+  .pageCover.tight img { width: auto; height: 100%; }
+  body.side-closed .pageCover.tight, body.side-closed .pageCover:not(.byText) { right: 58px; }   /* clear of the contents button, which is out when the sidebar is in */
   /* at the end of a book's page: what scrolling on leads to */
   .bookwrap .turnHint { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); max-width: 80%; padding: 4px 12px; border: 1px solid var(--rule); border-radius: 14px; background: color-mix(in srgb, var(--paper) 92%, transparent); color: var(--muted); font: 12px var(--head); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .bookwrap .turnHint[hidden] { display: none; }
@@ -328,6 +395,10 @@
   #work { position: relative; }
   #tocBtn { display: none; position: absolute; z-index: 4; top: 44px; right: 14px; width: 34px; height: 34px; padding: 6px; border: 0; background: transparent; color: var(--muted); }
   #tocBtn svg { display: block; width: 100%; height: 100%; }
+  /* the cover of what is being read, beside the contents button: a phone's version of .pageCover */
+  #coverBtn { display: none; position: absolute; z-index: 4; top: 44px; right: 46px; height: 34px; padding: 0; border: 1px solid var(--rule); background: var(--paper); line-height: 0; box-shadow: 0 1px 4px rgba(0, 0, 0, .2); }
+  #coverBtn img { display: block; height: 100%; width: auto; }
+  body.lightbox #coverBtn { display: none !important; }
   #tocBtn[aria-expanded="true"] { color: var(--accent); }
   body.side-closed #tocBtn { display: block; }
   #dial { position: absolute; z-index: 4; top: 82px; right: 10px; width: min(72%, 300px); height: 46vh; overflow-y: auto; overscroll-behavior: contain; scroll-snap-type: y mandatory; padding: calc(23vh - 13px) 0; background: color-mix(in srgb, var(--paper) 93%, transparent); border: 1px solid var(--rule); font-family: var(--head); }
@@ -535,7 +606,7 @@
   .type.cur span { font-weight: 600; }
   #types > button { margin-top: 6px; border: 0; padding: 0; color: var(--accent); font-size: 12px; }
   .md h1 .editPen, .md p .editPen { display: inline-flex; vertical-align: middle; width: 26px; height: 26px; padding: 4px; margin-left: 8px; }
-  .editFront { float: right; margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+  .editFront { clear: both; margin-top: 48px; padding-top: 10px; border-top: 1px solid var(--rule); display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px; opacity: .8; }
   /* a locked folder: the password form, in place of the document */
   .lockbox { width: min(100%, 420px); margin: 8vh auto; padding: 20px 22px; border: 1px solid var(--rule); font: 15px/1.5 var(--head); }
   .lockbox h2 { margin: 0 0 10px; font-size: 19px; }
@@ -575,6 +646,26 @@
   .cardSize { display: flex; align-items: center; gap: 6px; margin: 4px 0; font: 12px var(--head); color: var(--muted); }
   .cardSize input { width: 150px; accent-color: var(--accent); }
   .thumb img, .thumb video, .thumb canvas { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+  /* the library on the front page: the folders at the top of the workspace as cards, under their kinds */
+  .library { clear: both; }
+  .library h5 { margin: 18px 0 6px; font: 400 11px var(--head); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .library .thumbs.sets { margin: 0 0 4px; }
+  /* over a folder page's title: the pages above it */
+  .md .crumbs { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; margin: 0 0 -1.2em; font: 12px var(--head); color: var(--muted); }
+  .md .crumbs button { border: 0; padding: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; }
+  .md .crumbs button:hover { text-decoration: underline; }
+  /* on a card with sound in it: play all of it from here */
+  .thumb .playB { position: absolute; top: 4px; right: 4px; width: 28px; height: 28px; padding: 6px; border-radius: 50%; background: color-mix(in srgb, var(--paper) 88%, transparent); color: var(--ink); }
+  .thumb .playB:hover, .thumb .playB:focus-visible { background: var(--accent); color: var(--paper); }
+  .thumb .playB svg { display: block; width: 100%; height: 100%; }
+  /* on a book's card: which form of the book it is */
+  .thumb.book em { position: absolute; top: 4px; left: 4px; padding: 1px 5px; background: color-mix(in srgb, var(--paper) 88%, transparent); color: var(--muted); font: 600 9px var(--head); letter-spacing: .06em; font-style: normal; }
+  /* a folder as a card, on the page of the set it is in (an album, an author, a season): its picture, its name, how much is in it */
+  .thumbs.sets { margin: 14px 0 6px; clear: both; }
+  .thumb.unit { cursor: pointer; }
+  .thumb.unit:hover, .thumb.unit:focus-visible { border-color: var(--accent); }
+  .thumb.unit i svg { width: 34%; height: auto; }
+  .thumb.unit b small { float: right; margin-left: 8px; color: var(--muted); font-weight: 400; }
   /* a book on a shelf: upright, its cover whole */
   .thumb.book { aspect-ratio: 2 / 3; cursor: pointer; background: var(--paper); }
   .thumb.book img, .thumb.book canvas { object-fit: contain; object-position: top; }
@@ -674,10 +765,15 @@
   #grip { display: block; width: 64px; height: 16px; margin: -4px auto 2px; padding: 0; border: 0; cursor: ns-resize; touch-action: none; }
   #grip::before { content: ''; display: block; width: 40px; height: 4px; margin: 6px auto; border-radius: 2px; background: var(--rule); }
   #grip:hover::before, #grip:focus-visible::before { background: var(--muted); }
-  #context { font: 13px var(--head); color: var(--muted); margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #ctxRow { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  #context { flex: 1; min-width: 0; font: 13px var(--head); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Saves the note, over the box's top right corner. Where there is a keyboard, Enter does it; a phone's keyboard
+     cannot be counted on to send Enter as a key, so there (and on any touch screen) this is shown. */
+  #send { display: none; flex: none; padding: 6px 12px; border-color: var(--accent); color: var(--accent); font: 600 13px var(--head); }
+  @media (max-width: 760px), (pointer: coarse) { #send { display: block; } }
   #context b { color: var(--ink); font-weight: 600; }
   #context button { border: 0; padding: 0 4px; color: var(--accent); }
-  #input { display: block; width: 100%; height: 56px; resize: none; padding: 8px 10px; border: 1px solid var(--rule); background: var(--field); font: 16px/1.4 var(--body); }
+  #input { display: block; width: 100%; height: 56px; resize: none; padding: 8px 10px; border: 1px solid var(--rule); border-radius: 0 0 20px 20px; background: var(--field); font: 16px/1.4 var(--body); }
 
   /* ---- phone: one column; files and notes become slide-over drawers ---- */
   @media (max-width: 760px) {
@@ -685,8 +781,17 @@
     #mobileBar { display: flex; grid-row: 1; align-items: center; gap: 8px; padding: 6px 8px; background: var(--shade); border-bottom: 1px solid var(--rule); font: 14px var(--head); }
     #mobileBar b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
     #mobileBar button { padding: 8px 12px; font-size: 14px; background: var(--paper); }
+    /* The button that brings a PDF's own bar out: that bar is put away here, for the room. The page being read is said on the PDF's tab, whose name is cut shorter for it. */
+    .tab .tabWhere:not(:empty) { display: inline; color: var(--muted); font-size: 12px; }
+    .tab.paged span { max-width: 90px; }
+    #mobileBar #mTools { flex: none; padding: 8px; }
+    #mTools svg { display: block; width: 18px; height: 18px; }
+    #mTools[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+    .viewer.pdfv:not(.tools) > .viewbar, .viewer.pdfv .pdfwhere { display: none; }
     #work { grid-row: 2; padding-left: 0 !important; }
     #tocBtn { display: block; right: 6px; }
+    .pageCover { display: none; }   /* on a phone: #coverBtn, beside the contents button */
+    #coverBtn:not([hidden]) { display: block; }
     #dial { right: 6px; }
 
     #side { position: fixed; z-index: 8; left: 0; top: 0; bottom: 0; width: min(86vw, 330px); background: var(--paper); box-shadow: 4px 0 16px rgba(0, 0, 0, .25); transform: translateX(-105%) !important; font-size: 15px; }
@@ -699,12 +804,17 @@
     body.m-side #backdrop, body.m-right #backdrop { display: block; position: fixed; inset: 0; z-index: 7; background: rgba(0, 0, 0, .4); }
     #sideEdge, #sideToggle, #notesToggle, #rightGrip, .tabs > button:not(.keep), .file .sideBtn { display: none !important; }
     .file .plus { visibility: visible; font-size: 22px; line-height: 1; padding: 0 10px; }
+    #tree summary .plus { opacity: 1; font-size: 22px; line-height: 1; padding: 0 10px; }
+    /* + at the end of the tab bar, held there while the tabs scroll: opens the list to add a tab from, which then says so at its top */
+    .tabs > button.newTab { display: block; margin-left: auto !important; padding: 0 14px; border-left: 1px solid var(--rule); color: var(--ink); font-size: 22px; line-height: 1; }
+    body.m-add #pickNote { display: block; margin: 0 0 8px; padding: 8px 10px; border-left: 3px solid var(--accent2); background: var(--shade); color: var(--ink); font: 14px var(--head); }
     .file .q { visibility: visible; width: 32px; height: 32px; padding: 6px; }
     .track .q, .listing .item .q, .viewbar .q { width: 34px; height: 34px; padding: 6px; }
     .viewbar .keepB, .thumb .keepB { width: 34px; height: 34px; padding: 7px; }
 
     /* icons and settings sized for a thumb */
-    #sideHead .ic, .label.row .ic { width: 38px; height: 38px; padding: 8px; }
+    #sideHead .ic { width: 38px; height: 38px; padding: 8px; }
+    #treeTools .ic { width: 32px; height: 32px; padding: 6px; }
     #find { font-size: 16px; padding: 8px 40px 8px 10px; }   /* 16px: smaller makes an iPhone zoom the page on focus */
     #findClear { width: 34px; height: 34px; padding: 9px; }
     .viewer .viewbar { overflow-x: auto; }   /* a PDF's bar has more buttons than a phone is wide */
@@ -756,7 +866,7 @@
 
     /* the input sits in the lower part of the screen and grows while typing */
     #composer { padding: 6px 10px calc(8px + env(safe-area-inset-bottom)); }
-    #input { height: 46px; }
+    #input { height: 46px; padding: 8px 18px; border-radius: 0 0 40px 40px; }   /* the lower corners follow the phone's own, which are far rounder than a window's */
     #flyout { gap: 12px; padding: 9px 12px; }
     #flyout .sw { width: 28px; height: 28px; }
     #flyout button:not(.sw) { font-size: 15px; padding: 4px; }
@@ -765,7 +875,7 @@
 </head>
 <body>
 <div id="app">
-  <header id="mobileBar"><button id="mFiles" aria-label="Files and outline">☰ Files</button><b><span class="dot"></span><span id="mTitle"></span></b><button id="mNotes">Notes</button></header>
+  <header id="mobileBar"><button id="mFiles" aria-label="Files and outline">☰ Files</button><b><span class="dot"></span><span id="mTitle"></span></b><button id="mTools" hidden aria-pressed="false" aria-label="This PDF's controls: size, night, reader, keep" title="This PDF's controls: size, night, reader, keep"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg></button><button id="mNotes">Notes</button></header>
   <button id="sideEdge" aria-label="Show sidebar" title="Sidebar (hover to peek, click to keep open)">›</button>
   <nav id="side" aria-label="Files and outline">
     <div id="sideHead">
@@ -787,9 +897,10 @@
     <button id="netBrief" hidden title="Open the settings for the details"></button>
     <select id="hubSel" title="Which hub to look at" hidden></select>
     <select id="workspace" title="Workspace" hidden></select>
-    <div class="label row">Files<button id="addBtn" class="ic" aria-label="Add files" title="Add files from this device. If the server is out of reach they are held here and sent later."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></button><input id="fileInput" type="file" multiple hidden><button id="uploadBtn" class="ic" aria-label="Upload a folder" title="Bring a folder from your computer into the hub. For several at once, drop them here on the sidebar, or press “add another folder…” after choosing the first."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h6l2 2h10v11H3z"/><path d="M12 17v-6M9.5 13.5L12 11l2.5 2.5"/></svg></button><input id="folderInput" type="file" webkitdirectory multiple hidden></div>
+    <span id="treeTools"><button id="addBtn" class="ic" aria-label="Add files" title="Add files from this device. If the server is out of reach they are held here and sent later."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></button><button id="uploadBtn" class="ic" aria-label="Upload a folder" title="Bring a folder from your computer into the hub. For several at once, drop them here on the sidebar, or press “add another folder…” after choosing the first."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h6l2 2h10v11H3z"/><path d="M12 17v-6M9.5 13.5L12 11l2.5 2.5"/></svg></button></span><input id="fileInput" type="file" multiple hidden><input id="folderInput" type="file" webkitdirectory multiple hidden>
     <button id="fresh" hidden title="The reader itself has changed since this page was kept on this device">A newer version of the reader is ready. Reload</button>
     <button id="keptOnly" hidden title="The lists are showing only what is kept on this device. Press to show everything."></button>
+    <div id="pickNote" role="status">Choose what to open in a new tab. It opens beside what is already open.</div>
     <div id="findWrap"><input id="find" type="search" placeholder="Find a file, or words in files and notes" aria-label="Find a file, or words in files and notes" autocomplete="off" spellcheck="false"><button id="findClear" class="ic" type="button" hidden aria-label="Clear what is being looked for" title="Clear (Escape)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
     <div id="found" hidden role="status"></div>
     <div id="tree"></div>
@@ -804,7 +915,7 @@
     <form id="composer">
       <div class="inner">
         <button type="button" id="grip" aria-label="Make the note box taller or shorter" title="Drag up to make the note box taller, or press to switch between small and tall"></button>
-        <div id="context"></div>
+        <div id="ctxRow"><div id="context"></div><button type="submit" id="send" title="Save the note">Save note</button></div>
         <textarea id="input" placeholder="Write a note or a question…  (Enter to save, Shift+Enter for a new line; // to link to a file, heading or note)"></textarea>
       </div>
     </form>

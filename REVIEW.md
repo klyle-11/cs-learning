@@ -261,6 +261,15 @@ This is a deliberate exception to "opening a document never contacts the interne
 
 - The server now opens zip files (`.epub`) and sends what is inside them. What is served is still only what is under the workspace folder: a path into a book is cleaned like any other (no `..`, no hidden names) and then looked up by exact name in the zip's own list, so a zip cannot name a file outside itself. Each entry is limited to what the device profile holds in memory (16 MB, 1 MB on the board), the limit is enforced while unpacking and not only read from the zip's header, and the result is checked against the recorded size and CRC. Pages of a book are sent with the same sandboxing content policy as any other page, so a book's scripts do not run. Not yet done: a limit on how many entries a zip may list (the directory itself is limited to 16 MB).
 
+### Updating an uploaded folder (6 October 2026)
+
+Four additions to what the server answers, for the reader's "update…", for splitting `app.js`, and for a look that outlasts the browser. Built and tested on Windows (MSYS2 UCRT64, `make test-own`: 191 requests); not yet built on macOS or Linux.
+
+- `GET /api/files?path=<folder>` lists every file under a folder of the workspace with its size and date. It names files the document list leaves out (a `.txt` with no addresses in it, any type the reader does not show). Only a paired device can ask, and a paired device can already fetch any of those by `/raw/`; hidden names and `node_modules` are left out, and the page's own folder is refused.
+- `POST /api/upload?...&replace=1` replaces a file that is there. Until now an upload never overwrote. A paired device could already remove a folder and upload it again, so this adds no reach, but it does make an overwrite one request, with nothing kept of what was there. The page's own folder is still refused, so `app.js` cannot be replaced this way (item 18 stands as it was).
+- `PUT /api/config` takes `"look"` (the reader's theme, typeface and reading settings) and stores it in `hub.json`; `GET /api/config` gives it back. Any paired device can set it, as it can the title. What is stored is cleaned: at most 12 values, names and text of letters, digits and hyphens only, numbers, and true or false, so nothing stored there can be markup or a path. The reader uses it only where a device has no choice of its own, and checks a theme against its own list before applying it.
+- `GET /js/<name>.js` serves the page's modules from `hub/js/`, by names of lowercase letters, digits and hyphens only, so nothing outside that folder can be named.
+
 ### Data model weaknesses
 
 - A highlight is located by searching for its quoted text; if that text occurs twice, it lands on the first. **Addressed for markdown, source files and HTML pages:** a new highlight carries an anchor (its block's hash, which of the blocks with that hash, the offset in it, and the characters on either side), and is placed by that; one that cannot be placed is marked as not found. Highlights made before this have no anchor and are placed at the first occurrence under their heading. The server's side (`/api/blocks`, the anchor kept on a note) is in the contract tests; the placing in the page was tried on hand-made documents outside a browser, not yet in one. Notes at a moment in a video, on a region of a picture, and EPUB and PDF still wait.
@@ -285,6 +294,8 @@ No changes were made for this section; these are observations and ideas. It is b
 - Keyboard focus is always visible, and rows and tabs work from the keyboard.
 
 ### Rough edges
+
+Startup repair (6 October 2026): the book-scroll code declared `pushed` for both wheel distance and a touch handler in the same scope. Chromium rejected `app.js` before any of the reader could start. The touch handler now has its own name. Verified on Windows in headless Chromium against an isolated scratch workspace: desktop startup, a cached reload, and phone-sized startup, with no page errors. This does not cover a full reading session or real-phone book gestures; the startup-message suggestion below remains open.
 
 | Where | What happens now | Idea |
 |---|---|---|

@@ -944,6 +944,26 @@ About this folder.
 400 {"error": "bad path"}
 ## upload hidden
 400 {"error": "bad path"}
+## look saved
+200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "locks": {"a": {}, "b": {}}, "look": {"font": "sans", "fs": 20, "roomy": true, "theme": "lime-dark", "themeSide": ""}, "root": "<root>", "scripts": ["b/app.html", "page.html"], "side": ["references.md"], "title": "Edited"}
+## upload replaces
+200 {"replaced": true, "root": "<root>", "saved": true}
+## replaced content
+200 # Newer, and longer
+## replace, nothing there
+200 {"root": "<root>", "saved": true}
+## files of a folder
+200 [{"changed": "<changed>", "path": "up/fresh.md", "size": 7}, {"changed": "<changed>", "path": "up/new file.md", "size": 19}]
+## files, no such folder
+404 {"error": "no such folder"}
+## files, a file
+404 {"error": "no such folder"}
+## files, escape
+400 {"error": "bad path"}
+## module, none such
+404 
+## module, odd name
+404 
 ## other site posts a note
 403 {"error": "requests from other sites are not allowed"}
 ## other site uploads
@@ -1066,7 +1086,7 @@ Cache-Control: no-store
 ## notes at home
 200 
 ## config at home
-200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "locks": {"a": {}, "b": {}}, "root": "<root>", "scripts": ["b/app.html", "page.html"], "side": ["references.md"], "title": "Edited"}
+200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "locks": {"a": {}, "b": {}}, "look": {"font": "sans", "fs": 20, "roomy": true, "theme": "lime-dark", "themeSide": ""}, "root": "<root>", "scripts": ["b/app.html", "page.html"], "side": ["references.md"], "title": "Edited"}
 ## unpair
 200 {"ok": true}
 ## after unpairing

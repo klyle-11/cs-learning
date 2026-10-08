@@ -10,6 +10,7 @@ All JSON bodies are UTF-8. Errors are `{ "error": "message" }` with a 4xx or 5xx
 |---|---|
 | `GET /` | `index.html` |
 | `GET /app.js`, `/local.js`, `/vault.js` | the page's own scripts |
+| `GET /js/<name>.js` | a module of the page's (`hub/js/`): `<name>` is lowercase letters, digits and hyphens only; 404 for anything else, or a name that is not there |
 | `GET /sw.js`, `/manifest.webmanifest`, `/icon-192.png`, `/icon-512.png`, `/apple-touch-icon.png` | the service worker, manifest and icons: they let the page be installed and opened without the server |
 | `GET /vendor/marked.js`, `/vendor/highlight.js`, `/vendor/purify.js` | the three libraries the page loads |
 | `GET /raw/<path>` | the file as it is on disk, with a content type from its extension. 404 if missing |
@@ -75,6 +76,8 @@ An `.epub` file is listed as a folder of its pages, in reading order: each page 
 
 `GET /api/hubs` → `[{ "name": "Desktop", "url": "https://192.168.1.20:4321" }]`: other hubs the reader may connect to. `PUT /api/hubs` with `{ "hubs": [ … ] }` replaces the list (at most 12) and answers with it. Each `url` is cut down to its origin (scheme and host in lower case, the port unless it is the usual one, nothing after it); entries with no name, with an address that is not `http(s)`, or repeating an address are dropped. Kept in `hubs.json` in the state folder, not in the workspace: it is about this server, not about a folder. The server never contacts these hubs itself; the list only says what the page may talk to and what the reader offers.
 
+`PUT /api/config` also takes `"look"`: how the reader looks, as the device that last changed it left it (`{ "theme": "lime-dark", "font": "sans", "fs": 20, "roomy": true }` and the like). The whole object is replaced. Up to 12 values are kept: names of 1 to 20 letters, digits and hyphens; text of up to 40 such characters (or empty), numbers, and true or false. Anything else is dropped. `GET /api/config` gives it back as it was stored; the reader uses it only on a device that has no choice of its own yet.
+
 `PUT /api/config` also takes `"locks"`: `{ "some/folder": { "salt": "…", "hash": "…" }, "other": {} }`, the folders the reader asks a password for. The whole set is replaced. `salt` and `hash` are base64 (up to 64 and 128 characters); an entry without both is kept as `{}`, a lock whose password is still to be chosen. Folder names that try to leave the workspace are dropped. The server only stores these: the reader does the asking, and the files are stored as they are.
 
 `DELETE /api/folder?path=some/folder` → `{ "removed": "some/folder" }`. Deletes the folder and everything in it, and any lock on it or inside it. 400 if it is not a folder in the workspace, tries to leave it, or is `notes`.
@@ -100,7 +103,9 @@ Stored in `notes/notes.json`.
 
 ## Uploads and workspaces
 
-`POST /api/upload?path=<path>` with the file as the raw body → `{ "saved": true, "root": "…" }`, or `{ "skipped": true }` if the file already exists (never overwritten). 400 for a path with `..`, a hidden part or `node_modules`, or one longer than the system will open (on Windows, 259 characters for the whole path, the served folder included). 413 over the profile's upload limit (200 MB on a computer).
+`POST /api/upload?path=<path>` with the file as the raw body → `{ "saved": true, "root": "…" }`, or `{ "skipped": true }` if the file already exists (not overwritten). With `&replace=1` a file that is there is replaced by the body (written beside it first, then put in its place) and the answer has `"replaced": true` as well; a folder of that name is still skipped, and a path with nothing at it is saved as usual.
+
+`GET /api/files?path=<folder>` → `[{ "path", "size", "changed" }]`: every file under that folder of the workspace (paths from the top of the workspace, sizes in bytes, `changed` in seconds), hidden names and `node_modules` left out. It is what the reader's "update" compares a folder on the device with, so that only what is new or changed is sent. 400 for a path that leaves the workspace; 404 if it is not a folder. 400 for a path with `..`, a hidden part or `node_modules`, or one longer than the system will open (on Windows, 259 characters for the whole path, the served folder included). 413 over the profile's upload limit (200 MB on a computer).
 
 `GET /api/workspaces` → `[{ "name", "root", "home", "current" }]`.
 

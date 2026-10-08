@@ -486,6 +486,31 @@ static void walk(const string &dir, const string &rel, const Strings &ignore, co
   }
 }
 
+// Every file under a folder, with its size and when it was last changed. A device that
+// holds the folder these came from works out from this what it has that is new or
+// changed, and sends only that (see "update" in the reader). Hidden names and
+// node_modules are left out, as an upload leaves them out.
+static void walk_files(const string &dir, const string &rel, cJSON *out) {
+  DIR *d = ::opendir(dir.c_str());
+  if (!d) return;
+  Strings names;
+  while (dirent *e = ::readdir(d)) names.push_back(e->d_name);
+  ::closedir(d);
+  std::sort(names.begin(), names.end(), natural_less);
+  for (const string &name : names) {
+    if (name[0] == '.' || name == "node_modules") continue;
+    string r = rel + "/" + name, abs = dir + "/" + name;
+    struct stat st;
+    if (::stat(abs.c_str(), &st) != 0) continue;
+    if (S_ISDIR(st.st_mode)) { if (abs != WWW) walk_files(abs, r, out); continue; }
+    cJSON *f = cJSON_CreateObject();
+    cJSON_AddStringToObject(f, "path", r.c_str());
+    cJSON_AddNumberToObject(f, "size", static_cast<double>(st.st_size));
+    cJSON_AddNumberToObject(f, "changed", static_cast<double>(st.st_mtime));
+    cJSON_AddItemToArray(out, f);
+  }
+}
+
 // ---- notes --------------------------------------------------------------------------
 
 static cJSON *read_notes() {
@@ -1197,6 +1222,10 @@ static http::Response answer(http::Request &req) {
     }
     if (p == "/manifest.webmanifest") return asset_response(WWW + p, "application/manifest+json");
     if (p == "/icon-192.png" || p == "/icon-512.png" || p == "/apple-touch-icon.png") return asset_response(WWW + p, "image/png");
+    // The reader's own modules: hub/js/<name>.js, by plain names only.
+    if (starts_with(p, "/js/") && p.size() > 7 && p.compare(p.size() - 3, 3, ".js") == 0 &&
+        std::all_of(p.begin() + 4, p.end() - 3, [](unsigned char c) { return std::islower(c) || std::isdigit(c) || c == '-'; }))
+      return asset_response(WWW + p, "text/javascript");
     for (const auto &a : ASSETS) {
       if (p != a.first) continue;
       // Scripts sit beside the page (copied there for the board), or in node_modules.
@@ -1508,6 +1537,30 @@ static http::Response answer(http::Request &req) {
       cJSON_DeleteItemFromObjectCaseSensitive(file.p, "locks");
       cJSON_AddItemToObject(file.p, "locks", clean);
     }
+    // How the reader looks (its theme, its typeface, its reading settings), as the device that
+    // last changed it left it. A device with no choice of its own yet starts from this, so the
+    // look outlasts a browser that forgets, and is the same at another address. Only short,
+    // plain values are kept: up to 12, names and text of letters, digits and hyphens.
+    const cJSON *look = cJSON_GetObjectItemCaseSensitive(body.p, "look");
+    if (cJSON_IsObject(look)) {
+      auto plain = [](const char *chars, size_t most, bool or_empty) {
+        const string t = chars ? chars : "";
+        return (or_empty || !t.empty()) && t.size() <= most && std::all_of(t.begin(), t.end(), [](unsigned char c) { return std::isalnum(c) || c == '-'; });
+      };
+      cJSON *clean = cJSON_CreateObject();
+      int kept = 0;
+      const cJSON *v;
+      cJSON_ArrayForEach(v, look) {
+        if (kept >= 12 || !plain(v->string, 20, false)) continue;
+        if (cJSON_IsString(v) && plain(v->valuestring, 40, true)) cJSON_AddStringToObject(clean, v->string, v->valuestring);
+        else if (cJSON_IsBool(v)) cJSON_AddBoolToObject(clean, v->string, cJSON_IsTrue(v));
+        else if (cJSON_IsNumber(v)) cJSON_AddNumberToObject(clean, v->string, v->valuedouble);
+        else continue;
+        kept++;
+      }
+      cJSON_DeleteItemFromObjectCaseSensitive(file.p, "look");
+      cJSON_AddItemToObject(file.p, "look", clean);
+    }
     if (!write_file(ROOT + "/hub.json", dump(file.p, true) + "\n")) return http::error(500, "could not save");
     touch_tree();
     Json cfg(read_config());
@@ -1516,6 +1569,17 @@ static http::Response answer(http::Request &req) {
 
   // Take a folder, and everything in it, out of the workspace. The notes
   // folder is the reader's own and stays. Any lock on the folder goes with it.
+  if (p == "/api/files" && m == "GET") {
+    Strings parts;
+    auto it = req.query.find("path");
+    if (it == req.query.end() || !clean_parts(it->second, parts, true) || parts.empty()) return http::error(400, "bad path");
+    string abs = ROOT + "/" + join(parts);
+    if (!is_dir(abs) || sys::is_link(abs) || in_page_folder(abs)) return http::error(404, "no such folder");
+    Json out(cJSON_CreateArray());
+    walk_files(abs, join(parts), out.p);
+    return json_response(out.p);
+  }
+
   if (p == "/api/folder" && m == "DELETE") {
     Strings parts;
     auto it = req.query.find("path");
@@ -1781,18 +1845,25 @@ static http::Response answer(http::Request &req) {
     string tmp = abs + "." + secure::random_hex(4) + ".tmp";
     if (sys::path_too_long(tmp)) return refuse(400, "the name is too long for this system");
     Json out(cJSON_CreateObject());
-    if (is_file(abs) || is_dir(abs)) {
+    // A file that is here already is left as it is, unless the upload says it is a newer
+    // copy of it ("replace=1": an update of a folder that was uploaded before). A folder
+    // of that name is never replaced by a file.
+    const bool replace = req.query.count("replace") && is_file(abs);
+    if (!replace && (is_file(abs) || is_dir(abs))) {
       req.discard_body(profile.max_upload);
       cJSON_AddBoolToObject(out.p, "skipped", true);
       return json_response(out.p);
     }
+    struct stat was;
+    const unsigned long long old_size = replace && ::stat(abs.c_str(), &was) == 0 ? static_cast<unsigned long long>(was.st_size) : 0;
     if (!room_in(base, req.content_length)) return http::error(507, "storage is full");
     make_dirs(dirname_of(abs));
     if (int bad = req.save_body(tmp, profile.max_upload, profile.piece)) return bad == 507 ? http::error(507, "storage is full") : bad == 500 ? refuse(500, "could not save") : body_error(bad);
     if (!sys::replace(tmp, abs)) { ::unlink(tmp.c_str()); return http::error(500, "could not save"); }
-    if (base == ROOT) used_more(req.content_length);
+    if (base == ROOT) used_more(static_cast<unsigned long long>(req.content_length) - old_size);   // what it adds; less than nothing if it shrank (the count wraps round and back)
     touch_tree();
     cJSON_AddBoolToObject(out.p, "saved", true);
+    if (replace) cJSON_AddBoolToObject(out.p, "replaced", true);
     cJSON_AddStringToObject(out.p, "root", base.c_str());
     return json_response(out.p);
   }

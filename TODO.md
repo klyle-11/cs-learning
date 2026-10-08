@@ -31,6 +31,7 @@ Not yet checked on real devices: installing the authority on an iPhone and an An
 - [x] System-specific code gathered in `server-cpp/src/platform.hpp`, with a Windows half; Makefile branch, UTF-8 manifest, path checks for Windows; a Node launcher and `:win` scripts; `WINDOWS.md`
 - [x] First build on Windows, working through the checklist in `WINDOWS.md`: built unchanged, 144 checks pass; `.gitattributes` and the test script needed fixing
 - [ ] On Windows: a second device over HTTPS, and a full browser session
+- [x] Repair the blank reader caused by a duplicate declaration in book scrolling (6 October 2026); scratch Chromium checks passed for desktop startup, cached reload and phone-sized startup. A full browser session remains unchecked.
 - [ ] First build on a Raspberry Pi (needs mbedTLS 3)
 - [ ] Then: a packaged desktop app with its own window (Tauri), starting with Windows
 - [ ] Start with the system (a Windows service; a systemd unit on the Pi)
@@ -137,7 +138,7 @@ Not yet checked on real devices: installing the authority on an iPhone and an An
 - [x] Highlight types: each type has its own colour and a name the user can set (e.g. "definition", "question", "don't understand yet")
 - [x] Highlights are saved and persist across sessions — markdown and code files
 - [x] Same for HTML pages (drawn inside the frame)
-- [x] Same for EPUB (a page of a book is an HTML page to the reader, anchors included; not yet tried in a browser). [ ] PDF
+- [x] Same for EPUB (a page of a book is an HTML page to the reader, anchors included). Tried in headless Chromium on a scratch copy, desktop and phone width (7 October 2026): select, highlight, a note on it, drawn again after a reload (`server-cpp/build/check-epubhl.cjs`). [ ] Not tried by touch on a phone itself. [ ] PDF
 
 **Annotating**
 - [x] The existing bottom text input stays where it is and is also the annotation input
@@ -162,6 +163,19 @@ Not yet checked on real devices: installing the authority on an iPhone and an An
 - [x] Added folders are listed with the one most recently added to first, under `inbox/` (the server sends each file's `changed` time). [ ] The pages of a book carry no time, so a book at the top level sorts last
 - [ ] The held line is for top-level folders only: a long open subfolder has no such handle
 - [ ] None of this has been looked at in a browser
+
+**Tabs, inbox, first line (6 October 2026)**
+- [x] Opening takes the place of the tab being looked at; a tab is added only by a double click or the + on a file's line. The "preview" tab (italic, kept by a double click on it) is gone
+- [x] Beside back, the latest opened as a list (the ▾, holding back down, or the other mouse button). The list is kept with the layout, and shows 11 at most
+- [x] Inbox: a line of its own in the file list, and a page of cards of everything in it, the latest changed first. [ ] A book in it sorts last (its pages carry no time, as above). [ ] `.txt` and other files the server does not list are not on it
+- [x] The "Files" line is gone; #, + and upload are at the end of the list's first line
+- [x] A thin bar on a line or card while its copy is being made. [ ] It needs a `Content-Length` from the server; without one the bar stays a sliver until the copy is done
+- [x] On a phone, a + at the end of the tab bar opens the file list to add a tab from: the list says so at its top, and whatever is pressed there next (a file, a book, a folder's line, something found) opens in a tab of its own. A book's line and a gallery's have the + of a file's line too (7 October 2026)
+- [x] A folder's line, a one-line folder's and the inbox's have the + too: the folder's page (its front page, else the one made for it) in a tab of its own, the line neither opening nor closing (7 October 2026)
+- [x] On a phone a PDF's own bar (size, night, reader, keep) is put away, for the room: a button in the top bar brings it out and puts it back (kept with the layout), and the PDF's tab says "page x of y", its name cut shorter for it. A computer keeps the bar as it was (7 October 2026)
+- [x] Where a PDF was left is kept while it is read (until now only on leaving its tab, so closing the reader lost it), as its page and how far down that page, so it is found again on a screen of another width. A folder's page is gone back to as well. Text, HTML and a page of a book were kept already. Checked in headless Chromium, both widths (`server-cpp/build/check-pdfbar.cjs`). [ ] Kept on this device only: another device does not know of it. [ ] Not kept: a PDF in the browser's own viewer ("reader" off), how far into a video or a sound file, a book page that scrolls a box of its own
+- [x] "Save note" over the right end of the note box, on a phone and on any touch screen: until now Enter was the only way to save, and a phone's keyboard cannot be counted on to send it. On a phone the box's lower corners are rounder (40px), after the phone's own. Saved in headless Chromium at phone width on a page of each kind (markdown, source, PDF, picture, video, sound file). [ ] Not tried on a phone itself (7 October 2026)
+- Checked in headless Chromium, desktop and phone width, on a scratch workspace (`server-cpp/build/check-tabs.cjs`). [ ] Not tried on a phone itself; a double tap may or may not arrive there as a double click
 
 **Saved links (4 October 2026)**
 - [x] A filter by the entries a JSON file's items have (thumbnail, video, webm, picture, sound, page, linked page, source page); `.webm` is a kind apart from video; the words filter looks in every address of a card, not only its name; an address with a media type anywhere in it (`….mp4/?rnd=1`) is direct media
@@ -213,6 +227,11 @@ Still to do:
 - [ ] Measure free memory with 1 to 4 HTTPS connections open; lower the connection limit if needed
 - [ ] Show the address, the certificate fingerprint and the pairing code on the board's screen (they go to the serial monitor for now)
 - [ ] Answer to `hub.local` (mDNS component)
+- [ ] One hub on two computers (Windows and the Mac, one running at a time), so a phone keeps the one installed reader and what it saved to the device. Three parts:
+  - [ ] Announce `hub.local` from the desktop server too, both halves in `platform.hpp` (the name is already accepted and already in the certificate: `hub.cpp`, the list of host names). The phone then has one address whichever computer answers
+  - [ ] The same state folder on both (`%APPDATA%` on Windows, `~/.config/hub` on the Mac): one authority, one list of paired devices. `issuer-key.pem` is then on two machines: a line in `CERTIFICATES.md` and `REVIEW.md` when it is done
+  - [ ] The same `data/` on both (it is not in git): synced by something outside the hub, or served from one place
+  - The reader installed from the Windows address stays tied to that address: it is installed once more from `hub.local`, and what was saved to the device is fetched once more. Not tried
 - [ ] A way to set the Wi-Fi name and password without rebuilding (they are build settings for now)
 - [ ] One notes file per document, so a save on the board rewrites a small file
 - [ ] Try it on the board; measure SD read speed and how long the document list takes

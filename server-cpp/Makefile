@@ -65,6 +65,7 @@ card:
 	cp ../hub/node_modules/dompurify/dist/purify.min.js "$(CARD)/hub/www/vendor/purify.js"
 	cp ../hub/node_modules/pdfjs-dist/legacy/build/pdf.min.mjs "$(CARD)/hub/www/vendor/pdf.mjs"
 	cp ../hub/node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs "$(CARD)/hub/www/vendor/pdf.worker.mjs"
+	if ls ../hub/js/*.js >/dev/null 2>&1; then mkdir -p "$(CARD)/hub/www/js" && cp ../hub/js/*.js "$(CARD)/hub/www/js/"; fi
 
 clean:
 	rm -rf build hubd hubd.exe
