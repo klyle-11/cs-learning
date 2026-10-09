@@ -244,6 +244,30 @@ Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'
 404
 Content-Type: application/json; charset=utf-8
 Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'
+## the engine worker of the reader itself, and the policy it runs under
+200
+Content-Type: text/javascript; charset=utf-8
+Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'
+## sha256 of a file
+200 {"path": "a/1-doc.md", "sha256": "9b17d3e742f33191c10a6ea1b5ecb9ecb23838c49c581ee95c2780f66909ad78", "size": 19}
+## sha256 again, kept
+200 {"path": "a/1-doc.md", "sha256": "9b17d3e742f33191c10a6ea1b5ecb9ecb23838c49c581ee95c2780f66909ad78", "size": 19}
+## sha256 of media
+200 {"path": "b/clip.mp4", "sha256": "6bc14bdc4517a7a682c6910de2e2946eb8e1ecd04090728fef6d092a7ceb62c5", "size": 20}
+## sha256 of a book
+200 {"path": "b/book.epub", "sha256": "<sha256>", "size": 1676}
+## sha256 inside a book
+404 {"error": "no such file"}
+## sha256 of a folder
+404 {"error": "no such file"}
+## sha256 no such file
+404 {"error": "no such file"}
+## sha256 hidden
+404 {"error": "no such file"}
+## sha256 escape
+404 {"error": "no such file"}
+## sha256 no path
+404 {"error": "no such file"}
 ## unknown route
 404 {"error": "not found"}
 ## notes empty

@@ -177,6 +177,17 @@ run() { # run <port> <root> <log>: the request script
   req "vendor highlight"      status-only "$B/vendor/highlight.js"
   echo "## vendor pdf, and its worker"; for f in pdf.mjs pdf.worker.mjs; do curl -s -o /dev/null -D - "$B/vendor/$f" | tr -d '\r' | grep -iE '^(HTTP/|content-type|content-security-policy)' | sed 's/^HTTP\/1.1 \([0-9]*\).*/\1/'; done
   echo "## vendor document engine: a module, its worker, its WebAssembly, and what is not served"; for f in index.js worker.js recolor-worker.js ui.css wasm/marginalia_wasm_bg.wasm wasm-ocr/marginalia_wasm.js ../package.json Index.js .js; do curl -s -o /dev/null --path-as-is -D - "$B/vendor/marginalia/$f" | tr -d '' | grep -iE '^(HTTP/|content-type|content-security-policy)' | sed 's/^HTTP\/1.1 \([0-9]*\).*/\1/'; done
+  echo "## the engine worker of the reader itself, and the policy it runs under"; curl -s -o /dev/null -D - "$B/js/engine-worker.js" | tr -d '\r' | grep -iE '^(HTTP/|content-type|content-security-policy)' | sed 's/^HTTP\/1.1 \([0-9]*\).*/\1/'
+  req "sha256 of a file"      body "$B/api/sha256?path=a/1-doc.md"
+  req "sha256 again, kept"    body "$B/api/sha256?path=a/1-doc.md"
+  req "sha256 of media"       body "$B/api/sha256?path=b/clip.mp4"
+  req "sha256 of a book"      body "$B/api/sha256?path=b/book.epub" | sed -E 's/[0-9a-f]{64}/<sha256>/'
+  req "sha256 inside a book"  body "$B/api/sha256?path=b/book.epub/OEBPS/text/ch1.xhtml"
+  req "sha256 of a folder"    body "$B/api/sha256?path=a"
+  req "sha256 no such file"   body "$B/api/sha256?path=a/nope.md"
+  req "sha256 hidden"         body "$B/api/sha256?path=.hidden.md"
+  req "sha256 escape"         body "$B/api/sha256?path=../x"
+  req "sha256 no path"        body "$B/api/sha256"
   req "unknown route"         body "$B/api/nope"
   req "notes empty"           body "$B/api/notes"
   req "note create"           body -X POST "${J[@]}" -d '{"doc":"a/1-doc.md","text":"why \"this\"?\nline two","quote":"Body one.","type":"question","heading":"first","headingText":"First"}' "$B/api/notes"

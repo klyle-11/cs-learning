@@ -17,6 +17,7 @@
 #include <cstring>
 #include <ctime>
 #include <fstream>
+#include <map>
 #include <mutex>
 #include <set>
 #include <sstream>
@@ -1099,6 +1100,40 @@ static cJSON *clean_mg(const cJSON *in) {
   return mg;
 }
 
+// ---- a file's SHA-256 ------------------------------------------------------------------------
+// What the document engine knows a file by (a note's `mg.doc`). Working it out reads the whole file, so it is done here,
+// where the file is, rather than by sending the file to a device; and the answer is kept while the file's size and time
+// stay the same (for the 64 files asked about last).
+struct FilePrint { unsigned long long size; long long mtime; string hex; };
+static std::mutex prints_lock;
+static std::map<string, FilePrint> prints;
+static string file_sha256(const string &abs, unsigned long long size, long long mtime) {
+  {
+    std::lock_guard<std::mutex> g(prints_lock);
+    auto it = prints.find(abs);
+    if (it != prints.end() && it->second.size == size && it->second.mtime == mtime) return it->second.hex;
+  }
+  FILE *f = std::fopen(abs.c_str(), "rb");
+  if (!f) return "";
+  mbedtls_sha256_context ctx;
+  mbedtls_sha256_init(&ctx);
+  mbedtls_sha256_starts(&ctx, 0);
+  std::vector<unsigned char> buf(32u << 10);
+  size_t n;
+  while ((n = std::fread(buf.data(), 1, buf.size(), f)) > 0) mbedtls_sha256_update(&ctx, buf.data(), n);
+  const bool bad = std::ferror(f) != 0;
+  std::fclose(f);
+  unsigned char out[32];
+  mbedtls_sha256_finish(&ctx, out);
+  mbedtls_sha256_free(&ctx);
+  if (bad) return "";
+  const string hex = secure::hex(out, sizeof out);
+  std::lock_guard<std::mutex> g(prints_lock);
+  if (prints.size() >= 64 && !prints.count(abs)) prints.erase(prints.begin());
+  prints[abs] = {size, mtime, hex};
+  return hex;
+}
+
 // A file that is there but cannot be read as what it should be. Writing would
 // replace everything in it with what little this request knows, so writes are
 // refused until it is repaired by hand.
@@ -1275,8 +1310,13 @@ static http::Response answer(http::Request &req) {
     if (p == "/icon-192.png" || p == "/icon-512.png" || p == "/apple-touch-icon.png") return asset_response(WWW + p, "image/png");
     // The reader's own modules: hub/js/<name>.js, by plain names only.
     if (starts_with(p, "/js/") && p.size() > 7 && p.compare(p.size() - 3, 3, ".js") == 0 &&
-        std::all_of(p.begin() + 4, p.end() - 3, [](unsigned char c) { return std::islower(c) || std::isdigit(c) || c == '-'; }))
-      return asset_response(WWW + p, "text/javascript");
+        std::all_of(p.begin() + 4, p.end() - 3, [](unsigned char c) { return std::islower(c) || std::isdigit(c) || c == '-'; })) {
+      http::Response r = asset_response(WWW + p, "text/javascript");
+      // The reader's own worker for the document engine: the engine's worker, which also reads a book on this server a
+      // piece at a time. It runs under the policy its file is sent with, the same as the engine's own worker's.
+      if (p == "/js/engine-worker.js") r.extra += "Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'\r\n";
+      return r;
+    }
     for (const auto &a : ASSETS) {
       if (p != a.first) continue;
       // Scripts sit beside the page (copied there for the board), or in node_modules.
@@ -1766,6 +1806,24 @@ static http::Response answer(http::Request &req) {
       cJSON_AddNumberToObject(one, "len", static_cast<double>(b.len));
       cJSON_AddItemToArray(list, one);
     }
+    return json_response(out.p);
+  }
+
+  // A file's SHA-256 (see file_sha256): { path, size, sha256 }.
+  if (p == "/api/sha256" && m == "GET") {
+    Strings parts;
+    auto it = req.query.find("path");
+    if (it == req.query.end() || !clean_parts(it->second, parts, true)) return http::error(404, "no such file");
+    const string abs = ROOT + "/" + join(parts);
+    struct stat st;
+    if (::stat(abs.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) return http::error(404, "no such file");
+    const unsigned long long size = static_cast<unsigned long long>(st.st_size);
+    const string hex = file_sha256(abs, size, static_cast<long long>(st.st_mtime));
+    if (hex.empty()) return http::error(500, "could not read the file");
+    Json out(cJSON_CreateObject());
+    cJSON_AddStringToObject(out.p, "path", join(parts).c_str());
+    cJSON_AddNumberToObject(out.p, "size", static_cast<double>(size));
+    cJSON_AddStringToObject(out.p, "sha256", hex.c_str());
     return json_response(out.p);
   }
 

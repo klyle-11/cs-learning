@@ -222,7 +222,7 @@ function dressBook(v) {
     ` line-height: ${view.roomy ? 1.95 : 1.65} !important; letter-spacing: ${view.roomy ? '.015em' : 'normal'} !important; word-spacing: ${view.roomy ? '.08em' : 'normal'} !important;` +
     ' max-width: 40em !important; margin: 0 auto !important; padding: 16px 16px 120px !important; }' +
     ' body *:not(mark) { color: inherit !important; background-color: transparent !important; }' +
-    ` body a:any-link, body a:any-link * { color: ${c.accent} !important; }` +
+    ` body a:any-link, body a:any-link *, body [data-mg-href], body [data-mg-href] *, body [data-mg-external], body [data-mg-external] * { color: ${c.accent} !important; }` +
     // The reader's typeface for the text and for the headings; what is set as code keeps its own.
     ' body :not(pre, code, kbd, samp, tt, pre *, code *) { font-family: inherit !important; }' +
     ` body :is(h1, h2, h3, h4, h5, h6), body :is(h1, h2, h3, h4, h5, h6) * { font-family: ${face.head} !important; }` +
@@ -2556,11 +2556,22 @@ async function learnBookFronts() {
     if (!net.online) break;   // another time
     let engine = null;
     try {
+      // A book open in the engine already (one of its pages is being read) is asked as it is.
+      const open = bookOpen.get(b.book);
+      if (open) {
+        const roles = {}, pageOf = new Map([...open.units].map(([page, unit]) => [unit, page]));
+        for (const f of await open.engine.frontMatter()) { const page = pageOf.get(f.unit); if (page) roles[page] = f.role; }
+        known[b.book] = { pages: b.pages.length, roles };
+        learned = true;
+        store.set('bookFronts:' + config.root, known);
+        continue;
+      }
       lib ||= await marginalia();
-      const blob = await call(rawUrl(b.book), { quiet: true }).then((r) => (r.ok ? r.blob() : null));
-      if (!blob) continue;
-      engine = new lib.Engine();
-      const summary = await engine.open(blob), roles = {};
+      // From this hub, read in place (see bookEngine); from another, fetched whole.
+      const source = hub.url ? await call(rawUrl(b.book), { quiet: true }).then((r) => (r.ok ? r.blob() : null)) : { url: rawUrl(b.book) };
+      if (!source) continue;
+      engine = hub.url ? new lib.Engine() : new lib.Engine(engineWorker);
+      const summary = await engine.open(source, hub.url ? {} : { fingerprint: ZERO_PRINT }), roles = {};
       for (const f of await engine.frontMatter()) { const href = summary.units[f.unit]?.href; if (href) roles[b.book + '/' + href] = f.role; }
       known[b.book] = { pages: b.pages.length, roles };
     } catch (e) {
@@ -3055,7 +3066,8 @@ async function showDoc(pane, hash, keepScroll) {
 async function drawDoc(pane, hash, keepScroll) {
   const v = views[pane], path = state.panes[pane].active;
   const y = v.scroller ? v.scroller.scrollTop : 0;
-  Object.assign(v, { heads: [], cur: null, article: null, surface: null, scroller: null, frame: null, dress: null, bookHere: null, place: null, pdfMarks: null, zoom: null });
+  for (const u of v.urls || []) URL.revokeObjectURL(u);   // the pictures of a book's page drawn from the engine
+  Object.assign(v, { heads: [], cur: null, article: null, surface: null, scroller: null, frame: null, dress: null, bookHere: null, place: null, pdfMarks: null, zoom: null, urls: null });
   sweepBooks();
   if (!path) { v.body.replaceChildren(el('p', 'empty', 'Nothing open. Pick a file on the left.')); return; }
   if (gateOf(path)) { showLock(pane, gateOf(path)); return; }
@@ -3086,7 +3098,15 @@ async function drawDoc(pane, hash, keepScroll) {
     if (app) frame.allow = 'clipboard-write; picture-in-picture; fullscreen';
     frame.referrerPolicy = 'no-referrer';
     let bounced = false;
-    if (net.online && !isPending(path) && !hub.url) {
+    // A page of a book: drawn from the engine where it can be (see bookChapter), else as the server sends it.
+    const chapter = isBookPage(path) && net.online && !isPending(path) && !hub.url ? await bookChapter(path) : null;
+    if (views[pane] !== v || state.panes[pane].active !== path) { for (const u of chapter?.urls || []) URL.revokeObjectURL(u); return; }   // changed while loading
+    if (chapter) {
+      v.urls = chapter.urls;
+      frame.chapter = chapter;
+      frame.srcdoc = '<!doctype html><html><head><meta charset="utf-8"></head><body></body></html>';
+      if (keepsItself(path)) call(rawUrl(path)).then((r) => (r.ok ? r.text() : null)).then((t) => t != null && rememberDoc(path, t)).catch(() => {});   // the copy kept for reading offline is the server's
+    } else if (net.online && !isPending(path) && !hub.url) {
       frame.src = rawUrl(path);
       if (keepsItself(path)) call(rawUrl(path)).then((r) => (r.ok ? r.text() : null)).then((t) => t != null && rememberDoc(path, t)).catch(() => {});   // a kept copy is brought up to date
     } else {
@@ -3099,6 +3119,7 @@ async function drawDoc(pane, hash, keepScroll) {
       if (app) { v.heads = []; v.surface = null; if (pane === state.active) { renderOutline(); renderContext(); } return; }
       try {
         const d = frame.contentDocument, used = new Set();
+        if (frame.chapter) fillChapter(d, frame.chapter);
         v.heads = [...d.querySelectorAll('h1, h2, h3')];
         for (const h of v.heads) h.dataset.slug = slugify(h.textContent, used);
         v.surface = d.body;
@@ -3148,6 +3169,20 @@ async function drawDoc(pane, hash, keepScroll) {
         d.addEventListener('click', (e) => {
           const mark = e.target.closest?.('mark[data-note]');
           if (mark) { e.preventDefault(); return selectHighlight(mark.dataset.note, where(mark.getBoundingClientRect())); }
+          // A link in a page drawn from the engine: to a place in the book, or elsewhere (http, https or mailto only: the engine checked).
+          const link = frame.chapter && e.target.closest?.('[data-mg-href], [data-mg-external]');
+          if (link) {
+            e.preventDefault();
+            const out = link.getAttribute('data-mg-external');
+            if (out) { window.open(out, '_blank', 'noopener,noreferrer'); return; }
+            const [file, frag = ''] = link.getAttribute('data-mg-href').split('#');
+            let id = frag;
+            try { id = decodeURIComponent(frag); } catch { /* as written */ }
+            const to = bookOf(path) + '/' + file;
+            if (to === path) { if (id) d.getElementById(id)?.scrollIntoView(); }
+            else if (docOf(to)) openDoc(to, { pane, hash: id, side: e.metaKey || e.ctrlKey || e.altKey });
+            return;
+          }
           // Links never take the frame somewhere else. Another document in the
           // folder opens in the reader; anything on another site opens in a new
           // browser tab, outside the hub.
@@ -3192,7 +3227,8 @@ async function drawDoc(pane, hash, keepScroll) {
         // Bring the saved page back; if it leaves again, stop and say so.
         v.heads = [];
         v.surface = null;
-        if (!bounced && !hub.url) { bounced = true; frame.src = rawUrl(path); }
+        frame.chapter = null;
+        if (!bounced && !hub.url) { bounced = true; frame.removeAttribute('srcdoc'); frame.src = rawUrl(path); }
         else v.body.replaceChildren(el('p', 'empty', 'This page keeps trying to leave for another site, so it was stopped.'));
       }
       if (pane === state.active) { renderOutline(); renderContext(); }
@@ -3917,17 +3953,32 @@ const marginalia = () => (mgLib ||= Promise.all(['index', 'selection', 'themes']
 const pdfBlob = async (path) => (kept.has(path) ? (await idb.get('docs', keyOf(path)))?.blob : null) || call(rawUrl(path)).then((r) => (r.ok ? r.blob() : null));
 // The file's SHA-256 is what the engine knows it by. Working it out reads the whole file, so it is remembered.
 const mgPrints = () => store.get('mgPrints:' + config.root) || {};
-// A book (an .epub) is given to the engine too, whole, while one of its pages is open. Its pages are still drawn as
-// they always were, in a frame; the engine is asked where a highlight's words are, and makes the anchor a new one is
-// found again by (kept on the note as `mg`, beside the reader's own `anchor`): by the words and those around them,
-// their place in the chapter and in the book's own structure, so a highlight is still found when the book's text has
-// changed a little, and means the same to anything else that reads the engine's anchors. This holds only where a
-// page's text is, letter for letter, the text the engine has for that chapter (see bookSpot); where it is not, or
-// with no engine (no server in reach: a book is kept on the device as its pages, not as its file), the reader's own
-// anchor is all there is, as before.
-const bookEngines = new Map();   // book -> a promise of { engine, print, units: page -> its number, texts: number -> its text }, or of null
+// A book (an .epub) is opened in the engine while one of its pages is open. From this hub the engine reads it from the
+// server a piece at a time (js/engine-worker.js): the end of the zip and its directory, then each chapter as it is
+// drawn, never the whole file. A page of the book is then drawn from the engine (bookChapter): rebuilt from what is
+// allowed, its text the engine's own letter for letter, so each highlight is placed by the engine's anchor (kept on
+// the note as `mg`, beside the reader's own `anchor`): by the words and those around them, and their place in the
+// chapter and in the book's own structure. So a highlight is still found when the book's text has changed a little,
+// and means the same to anything else that reads the engine's anchors. With no engine (no server in reach, or a server
+// from before it had one), a page is drawn as the server sends it and the reader's own anchor is all there is; where
+// such a page's text is still the engine's (see bookSpot), new highlights get the engine's anchor all the same. From
+// another hub, the book is fetched whole for the engine (the engine's own worker reads only what is in the browser).
+const bookEngines = new Map();   // book -> a promise of { engine, print (a promise of the file's SHA-256, or null), units: page -> its number, texts: number -> its text }, or of null
 const bookOpen = new Map();      // book -> the same, once it is there
 const bookFailed = new Map();    // book -> when the engine last could not be had for it: not asked for again within the minute
+// The engine's worker that also reads files on this server in pieces; the engine is opened in it with a stand-in for
+// the file's SHA-256 (which it would otherwise work out by reading the whole file) and told the real one by the server.
+const engineWorker = () => new Worker('/js/engine-worker.js', { type: 'module' });
+const ZERO_PRINT = '0'.repeat(64);
+// A file's SHA-256 as the server works it out, where the file is; remembered here with the file's size. null if it cannot be had.
+async function serverPrint(path) {
+  try {
+    const { size, sha256 } = await api('/api/sha256?path=' + encodeURIComponent(path));
+    const prints = mgPrints();
+    if (prints[path]?.print !== sha256 || prints[path]?.size !== size) store.set('mgPrints:' + config.root, { ...prints, [path]: { size, print: sha256 } });
+    return sha256;
+  } catch { return null; }
+}
 function bookEngine(book) {
   if (bookEngines.has(book)) return bookEngines.get(book);
   if (Date.now() - (bookFailed.get(book) || 0) < 60000) return Promise.resolve(null);
@@ -3935,14 +3986,23 @@ function bookEngine(book) {
     let engine = null;
     try {
       if (!net.online) return null;
-      const lib = await marginalia(), blob = await call(rawUrl(book), { quiet: true }).then((r) => (r.ok ? r.blob() : null));
-      if (!blob || bookEngines.get(book) !== opening) return null;
-      engine = new lib.Engine();
-      const prints = mgPrints(), known = prints[book];
-      const summary = await engine.open(blob, known?.size === blob.size ? { fingerprint: known.print } : {});
+      const lib = await marginalia();
+      let summary, print;
+      if (!hub.url) {
+        engine = new lib.Engine(engineWorker);
+        summary = await engine.open({ url: rawUrl(book) }, { fingerprint: ZERO_PRINT });
+        print = serverPrint(book);
+      } else {
+        const blob = await call(rawUrl(book), { quiet: true }).then((r) => (r.ok ? r.blob() : null));
+        if (!blob || bookEngines.get(book) !== opening) return null;
+        engine = new lib.Engine();
+        const prints = mgPrints(), known = prints[book];
+        summary = await engine.open(blob, known?.size === blob.size ? { fingerprint: known.print } : {});
+        if (known?.print !== summary.info.fingerprint || known.size !== blob.size) store.set('mgPrints:' + config.root, { ...prints, [book]: { size: blob.size, print: summary.info.fingerprint } });
+        print = Promise.resolve(summary.info.fingerprint);
+      }
       if (bookEngines.get(book) !== opening) { engine.close(); return null; }   // the book was left meanwhile
-      if (known?.print !== summary.info.fingerprint || known.size !== blob.size) store.set('mgPrints:' + config.root, { ...prints, [book]: { size: blob.size, print: summary.info.fingerprint } });
-      const rec = { engine, print: summary.info.fingerprint, units: new Map(summary.units.map((u, i) => [book + '/' + u.href, i])), texts: new Map() };
+      const rec = { engine, print, units: new Map(summary.units.map((u, i) => [book + '/' + u.href, i])), texts: new Map() };
       engine.onBroken = () => { if (bookOpen.get(book) === rec) { bookOpen.delete(book); bookEngines.delete(book); } };
       bookOpen.set(book, rec);
       return rec;
@@ -3966,8 +4026,9 @@ function sweepBooks() {
   }
 }
 // Where each piece of a page's text begins in the page's whole text, which is what the engine counts in.
+// Text in <script>, <style> and <noscript> is not part of it, for the engine as for the reader's own map (VISIBLE).
 function rawIndex(article) {
-  const walker = article.ownerDocument.createTreeWalker(article, NodeFilter.SHOW_TEXT), starts = new Map();
+  const walker = article.ownerDocument.createTreeWalker(article, NodeFilter.SHOW_TEXT, VISIBLE), starts = new Map();
   let text = '', node;
   while ((node = walker.nextNode())) { starts.set(node, text.length); text += node.data; }
   return { text, starts };
@@ -3979,9 +4040,65 @@ function bookSpot(article, path) {
   const raw = rawIndex(article);
   return raw.text === rec.texts.get(unit) ? { rec, unit, raw } : null;
 }
+// A page of a book as the engine makes it, for its frame: { root, sheets, urls, text }. The markup is rebuilt from
+// what is allowed (no scripts, forms or frames; links and pictures named by the engine, not followed by the browser),
+// with every HTML entity resolved, and its text is the engine's own. The book's style sheets come with it, and the
+// pictures and fonts they name are given addresses on this device (`urls`), let go with the page (drawDoc). null where
+// the engine cannot be had within a few seconds or cannot make this page: the page is then drawn as the server sends it.
+async function bookChapter(path) {
+  const rec = await Promise.race([bookEngine(bookOf(path)), new Promise((ok) => setTimeout(ok, 6000, null))]);
+  const unit = rec?.units.get(path);
+  if (unit == null) return null;
+  const urls = [], made = new Map();
+  try {
+    const cv = await rec.engine.chapter(unit);
+    const parsed = new DOMParser().parseFromString(cv.html, 'application/xhtml+xml');
+    if (parsed.getElementsByTagName('parsererror').length) return null;
+    // A file in the book (a picture, a font), as an address here.
+    const address = (file) => {
+      if (!made.has(file)) made.set(file, rec.engine.resource(file).then(({ bytes, mediaType }) => { const u = URL.createObjectURL(new Blob([bytes], { type: mediaType })); urls.push(u); return u; }, () => ''));
+      return made.get(file);
+    };
+    // The engine writes a file a style sheet names as url("mg-res:<file>"), and the page's <body> as :host, since its
+    // own reader puts a page in a shadow root. Here the page is a document of its own.
+    const sheet = async (css) => {
+      const files = [...new Set([...css.matchAll(/mg-res:([^"')\s]+)/g)].map((m) => m[1]))];
+      const at = new Map(await Promise.all(files.map(async (f) => [f, await address(f)])));
+      return css.replace(/mg-res:([^"')\s]+)/g, (_, f) => at.get(f) || '').replace(/:host\(([^)]*)\)/g, 'body$1').replace(/:host\b/g, 'body');
+    };
+    const sheets = [];
+    for (const file of cv.stylesheets) {
+      try { sheets.push(await sheet(new TextDecoder().decode((await rec.engine.resource(file)).bytes))); } catch { /* a style sheet the book names and does not hold */ }
+    }
+    for (const css of cv.styles) sheets.push(await sheet(css));
+    const root = parsed.documentElement;
+    await Promise.all([...root.querySelectorAll('[data-mg-src], [data-mg-poster]')].map(async (m) => {
+      const src = m.getAttribute('data-mg-src'), poster = m.getAttribute('data-mg-poster');
+      if (src) { const u = await address(src); if (u) m.setAttribute(m.namespaceURI === 'http://www.w3.org/2000/svg' ? 'href' : 'src', u); }
+      if (poster) { const u = await address(poster); if (u) m.setAttribute('poster', u); }
+    }));
+    rec.texts.set(unit, cv.text);
+    return { root, sheets, urls, text: cv.text };
+  } catch {
+    for (const u of urls) URL.revokeObjectURL(u);
+    return null;
+  }
+}
+// Put a page made by bookChapter into its frame's (empty) document: the book's style sheets, then the markup.
+function fillChapter(d, ch) {
+  for (const css of [...ch.sheets, '[data-mg-href], [data-mg-external] { cursor: pointer; text-decoration: underline; }']) {
+    const s = d.createElement('style');
+    s.textContent = css;
+    d.head.append(s);
+  }
+  d.body.replaceChildren(d.importNode(ch.root, true));
+  ch.root = null;   // the frame has its own copy now
+  if (rawIndex(d.body).text !== ch.text) console.warn('A page of a book does not have the engine\'s text: its highlights are placed by the reader alone.');
+}
 // Where the engine found each highlight of a book: note id -> { exact (the words it was asked about), at: { unit, start, end } or null }.
 const mgPlaces = new Map();
 const placing = new WeakSet();
+const backfilled = new Set();   // highlights already given the engine's anchor, or tried, in this session
 // Ask the engine where the highlights on this page of a book are; if it has anything new to say, they are drawn again.
 async function placeBookMarks(article, path) {
   if (placing.has(article)) return;
@@ -3998,6 +4115,22 @@ async function placeBookMarks(article, path) {
       try { at = await rec.engine.resolve(n.mg.anchor); } catch { /* an anchor the engine cannot read: the reader's own places it */ }
       mgPlaces.set(n.id, { exact, at });
       news = true;
+    }
+    // A highlight made before the engine placed highlights on books has no anchor of the engine's. While this page's
+    // text is the engine's, it is given one, once, from where the reader places it, and saved like any edit.
+    const old = notes.filter((x) => x.doc === path && x.quote && !x.mg?.anchor && !backfilled.has(x.id));
+    const spot = old.length ? bookSpot(article, path) : null, doc = spot ? await rec.print : null;
+    if (doc && article.isConnected) {
+      const map = textMap(article), raw = ([node, offset]) => spot.raw.starts.get(node) + offset;
+      for (const n of old) {
+        backfilled.add(n.id);
+        const start = placeOf(map, n, article), length = n.quote.replace(/\s+/g, '').length;
+        if (start < 0 || !length) continue;
+        try {
+          const anchor = await rec.engine.createAnchor(unit, raw(map.at[start]), raw(map.at[start + length - 1]) + 1);
+          await noteOp({ kind: 'set', id: n.id, fields: { mg: { doc, anchor } } });
+        } catch { /* left with the reader's own anchor */ }
+      }
     }
     if (news && article.isConnected && notes.some((x) => x.doc === path && x.mg?.anchor)) highlightAll(article, path);
   } catch { /* the engine went away meanwhile */ } finally { placing.delete(article); }
@@ -5719,7 +5852,10 @@ async function pendingPlace() {
   const at = views[state.active].surface === article ? bookSpot(article, path) : null;
   if (at) {
     const raw = ([node, offset]) => at.raw.starts.get(node) + offset;
-    try { fields.mg = { doc: at.rec.print, anchor: await at.rec.engine.createAnchor(at.unit, raw(spot.map.at[spot.start]), raw(spot.map.at[spot.start + spot.length - 1]) + 1) }; } catch { /* the reader's own anchor stands alone */ }
+    try {
+      const doc = await at.rec.print, anchor = doc && (await at.rec.engine.createAnchor(at.unit, raw(spot.map.at[spot.start]), raw(spot.map.at[spot.start + spot.length - 1]) + 1));
+      if (anchor) fields.mg = { doc, anchor };
+    } catch { /* the reader's own anchor stands alone */ }
   }
   return fields;
 }

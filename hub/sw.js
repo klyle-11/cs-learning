@@ -16,7 +16,7 @@ const SHELL = ['/', '/app.js', '/local.js', '/vault.js', '/vendor/marked.js', '/
 // The document engine too (selecting and highlighting on a PDF's pages): its modules, its two workers and its WebAssembly.
 const ENGINE = ['index', 'client', 'worker', 'wasm/marginalia_wasm', 'selection', 'selection-engine', 'frame', 'geometry', 'overlay', 'surfaces', 'caret', 'dom', 'themes', 'recolor', 'recolor-worker']
   .map((m) => `/vendor/marginalia/${m}.js`).concat('/vendor/marginalia/ui.css', '/vendor/marginalia/wasm/marginalia_wasm_bg.wasm');
-const LATER = ['/vendor/pdf.mjs', '/vendor/pdf.worker.mjs', ...ENGINE];
+const LATER = ['/vendor/pdf.mjs', '/vendor/pdf.worker.mjs', ...ENGINE, '/js/engine-worker.js'];
 const WAIT = 8000;   // how long the check behind a served file may take
 
 self.addEventListener('install', (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL).then(() => Promise.all(LATER.map((u) => c.add(u).catch(() => {}))))).then(() => self.skipWaiting())));
