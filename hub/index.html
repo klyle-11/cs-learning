@@ -953,59 +953,104 @@
   }
 
   /* ---- Soft edges (settings: "soft edges"). The same colours, in any theme, with rounded corners and controls that
-     are a faint fill rather than an outline. Where two parts of the reader meet there is no line and no shadow: the
-     line's own colour, at the edge, fading into the background of the part it belongs to. What floats over the page
-     (a dialog, a menu, the note box) is ringed the same way, the line's colour fading outward. Defaults are changed
-     with :where(), so such a rule weighs no more than the default it replaces (a plain `button`) and whatever has a
-     look of its own keeps it; the reader's own parts are named one by one below. A document's own lines (tables,
-     rules, quotes) are left as they are. ---- */
+     are a faint fill rather than an outline. Where two parts of the reader meet, the seam is drawn the way two pieces
+     of leather meet in a briefcase or a binder: a groove (the dividing line, deepened), the leather rising a little
+     either side of it and flattening out, and a line of stitches running beside it. All of it is gradients, nothing
+     blurred: no shadows anywhere. A dialog is a stitched panel with a burnished edge; a field is pressed in. Defaults
+     are changed with :where(), so such a rule weighs no more than the default it replaces (a plain `button`) and
+     whatever has a look of its own keeps it; the reader's own parts are named one by one below. A document's own
+     lines (tables, rules, quotes) are left as they are. ---- */
   :root[data-edges="soft"], :root[data-edges="soft"] [data-theme] {
-    --fade: 14px;                                              /* how far a line's colour runs before it is gone */
     --tint: color-mix(in srgb, var(--ink) 6%, transparent);    /* a control's fill, in place of its outline */
     --faint: color-mix(in srgb, var(--rule) 45%, transparent); /* a line between rows, barely there */
-    --ring: 0 0 var(--fade) 2px var(--rule);                   /* the line's colour around something that floats, fading out */
-    --ring-small: 0 0 8px 1px var(--rule);
+    --groove: color-mix(in srgb, var(--rule) 72%, black);      /* where two pieces meet: the dividing line, deepened */
+    --lip: color-mix(in srgb, var(--paper) 82%, white);        /* the leather rising beside the groove */
+    --thread: color-mix(in srgb, var(--muted) 55%, transparent);
+    /* stitches: 5px of thread, 4px apart */
+    --stitch-down: repeating-linear-gradient(to bottom, var(--thread) 0 5px, transparent 5px 9px);
+    --stitch-across: repeating-linear-gradient(to right, var(--thread) 0 5px, transparent 5px 9px);
   }
   :where(:root[data-edges="soft"]) button:where(:not(.ic, .sw)) { border-color: transparent; background: var(--tint); border-radius: 9px; }
   /* buttons drawn as links, icons or rows of a list have no outline to begin with: they stay without a fill */
   :root[data-edges="soft"] :is(.file button, .tab button, .tabs > button, .recent button, #net button, #hubsBox button, #panes > button.link, #privacy button,
     #gate button.link, #flyout button:not(.sw), #types > button, .lockbox button.link, .searches .item button, .note .meta button, #context button) { background: none; }
   :root[data-edges="soft"] :focus-visible { border-radius: 9px; }
-  /* fields: no outline; the line's colour fades in a little from their edges */
-  :root[data-edges="soft"] :is(#theme, #themeSide, #themeRight, #workspace, #hubSel, #find, #gate select, #gate input, .lockbox input, #pickBar input, .frontEditor textarea, #input) {
-    border-color: transparent; border-radius: 10px; box-shadow: inset 0 0 6px var(--rule);
+  /* fields: pressed in, the edge deep at the top and light at the bottom */
+  :root[data-edges="soft"] :is(#find, #gate select, #gate input, .lockbox input, #pickBar input, .frontEditor textarea, #input) {
+    border: 1.5px solid transparent; border-radius: 10px; box-shadow: none;
+    background: linear-gradient(var(--field), var(--field)) padding-box, linear-gradient(to bottom, var(--groove), var(--lip)) border-box;
   }
-  :root[data-edges="soft"] :is(#theme, #themeSide, #themeRight, #workspace, #hubSel) { background: var(--tint); box-shadow: none; }
+  :root[data-edges="soft"] :is(#theme, #themeSide, #themeRight, #workspace, #hubSel) { border-color: transparent; border-radius: 10px; background: var(--tint); }
   :root[data-edges="soft"] #sideTools :is(button, select) { border-color: transparent; border-radius: 9px; }
-  /* where two parts meet: the line's colour at the edge, fading into the part's own background */
-  :root[data-edges="soft"] #side { border-right-color: transparent; background-image: linear-gradient(to left, var(--rule), transparent var(--fade)); }
-  :root[data-edges="soft"] #right { border-left-color: transparent; background-image: linear-gradient(to right, var(--rule), transparent var(--fade)); }
-  :root[data-edges="soft"] #sideEdge { border-right-color: transparent; background-image: linear-gradient(to left, var(--rule), transparent 8px); }
-  :root[data-edges="soft"] #hGrip { border-color: transparent; background: linear-gradient(to bottom, transparent, var(--rule) 50%, transparent); }
-  :root[data-edges="soft"] #rightGrip:hover, :root[data-edges="soft"] #hGrip:hover { background: var(--tint); }
-  :root[data-edges="soft"] .tabs { border-bottom-color: transparent; background-image: linear-gradient(to top, var(--rule), transparent var(--fade)); }
+  /* Seams. Each is drawn inside the part it closes: the groove at the very edge, the lip beside it, flat by 13px,
+     and the stitches 7px in. */
+  :root[data-edges="soft"] #side {
+    border-right-color: transparent;
+    background-image: var(--stitch-down), linear-gradient(to left, var(--groove), var(--rule) 1px, var(--lip) 3px, transparent 13px);
+    background-size: 1.5px 100%, 100% 100%; background-position: right 7px top 0, 0 0; background-repeat: no-repeat;
+  }
+  :root[data-edges="soft"] #right {
+    border-left-color: transparent;
+    background-image: var(--stitch-down), linear-gradient(to right, var(--groove), var(--rule) 1px, var(--lip) 3px, transparent 13px);
+    background-size: 1.5px 100%, 100% 100%; background-position: left 7px top 0, 0 0; background-repeat: no-repeat;
+  }
+  :root[data-edges="soft"] #sideEdge { border-right-color: transparent; background-image: linear-gradient(to left, var(--groove), var(--lip) 3px, transparent 10px); }
+  :root[data-edges="soft"] .tabs {
+    border-bottom-color: transparent;
+    background-image: var(--stitch-across), linear-gradient(to top, var(--groove), var(--rule) 1px, var(--lip) 3px, transparent 13px);
+    background-size: 100% 1.5px, 100% 100%; background-position: left 0 bottom 6px, 0 0; background-repeat: no-repeat;
+  }
   :root[data-edges="soft"] .tab { border-right-color: transparent; border-radius: 10px 10px 0 0; }
   :root[data-edges="soft"] .tabs > button:is(.back, .recentB, .newTab) { border-color: transparent; background: none; border-radius: 0; }
-  :root[data-edges="soft"] .viewbar { border-bottom-color: transparent; background-image: linear-gradient(to top, var(--rule), transparent var(--fade)); }
-  :root[data-edges="soft"] :is(#mini, .reel) { border-top-color: transparent; background-image: linear-gradient(to bottom, var(--rule), transparent var(--fade)); }
-  :root[data-edges="soft"] #composer { border-color: transparent; box-shadow: var(--ring); }
+  :root[data-edges="soft"] .viewbar { border-bottom-color: transparent; background-image: linear-gradient(to top, var(--groove), var(--rule) 1px, var(--lip) 3px, transparent 12px); }
+  :root[data-edges="soft"] :is(#mini, .reel) { border-top-color: transparent; background-image: linear-gradient(to bottom, var(--groove), var(--rule) 1px, var(--lip) 3px, transparent 12px); }
+  /* between the side document and the notes: a fold, the groove in the middle with the leather rising either side */
+  :root[data-edges="soft"] #hGrip { border-color: transparent; background: linear-gradient(to bottom, transparent, var(--lip) 25%, var(--groove) 50%, var(--lip) 75%, transparent); }
+  :root[data-edges="soft"] #rightGrip:hover, :root[data-edges="soft"] #hGrip:hover { background: var(--tint); }
+  /* the note box: a burnished edge, light above and deep below */
+  :root[data-edges="soft"] #composer {
+    border: 1.5px solid transparent; box-shadow: none;
+    background: linear-gradient(color-mix(in srgb, var(--paper) 90%, transparent), color-mix(in srgb, var(--paper) 90%, transparent)) padding-box,
+      linear-gradient(to bottom, var(--lip), var(--groove)) border-box;
+  }
   /* boxes in the settings, and lists that stand apart: a faint fill and round corners, no outline */
   :root[data-edges="soft"] :is(#net, #privacy, #hubsBox, #found, .latest) { border-color: transparent; background: var(--tint); border-radius: 12px; }
-  :root[data-edges="soft"] .lockbox { border-color: transparent; background: var(--tint); border-radius: 18px; }
-  /* what floats over the page: rounder, ringed by the line's colour fading out */
-  :root[data-edges="soft"] :is(#gate .card, .ask > div) { border-color: transparent; border-radius: 18px; box-shadow: var(--ring); }
-  :root[data-edges="soft"] :is(#flyout, .recent, #dial, .linkcard .fly) { border-color: transparent; border-radius: 14px; box-shadow: var(--ring); }
-  :root[data-edges="soft"] :is(.pageCover, #coverBtn, .turnHint, .pl-row .ic, #tree summary .quick, .tag) { border-color: transparent; border-radius: 10px; box-shadow: var(--ring-small); }
-  :root[data-edges="soft"] :is(.tile, .thumb, .linkcard, .md .onecard) { border-color: transparent; border-radius: 14px; box-shadow: var(--ring-small); overflow: hidden; }
+  :root[data-edges="soft"] .lockbox { border-color: transparent; background: var(--tint); border-radius: 18px; outline: 1.5px dashed var(--thread); outline-offset: -8px; }
+  /* dialogs: a stitched panel with a burnished edge */
+  :root[data-edges="soft"] :is(#gate .card, .ask > div) {
+    border: 2px solid transparent; border-radius: 18px; box-shadow: none;
+    background: linear-gradient(var(--paper), var(--paper)) padding-box, linear-gradient(to bottom, var(--lip), var(--groove)) border-box;
+    outline: 1.5px dashed var(--thread); outline-offset: -8px;
+  }
+  /* small things that float (the highlight menu, the list of recent pages): the burnished edge without stitches */
+  :root[data-edges="soft"] :is(#flyout, .recent) {
+    border: 1.5px solid transparent; border-radius: 14px; box-shadow: none;
+    background: linear-gradient(var(--field), var(--field)) padding-box, linear-gradient(to bottom, var(--lip), var(--groove)) border-box;
+  }
+  :root[data-edges="soft"] .linkcard .fly {
+    border: 1.5px solid transparent; border-radius: 14px; box-shadow: none;
+    background: linear-gradient(var(--paper), var(--paper)) padding-box, linear-gradient(to bottom, var(--lip), var(--groove)) border-box;
+  }
+  :root[data-edges="soft"] #dial { border-color: var(--faint); border-radius: 14px; box-shadow: none; }
+  /* cards and small marks: round, with a line that is barely there */
+  :root[data-edges="soft"] :is(.pageCover, #coverBtn, .turnHint, .pl-row .ic, #tree summary .quick, .tag) { border-color: var(--faint); border-radius: 10px; box-shadow: none; }
+  :root[data-edges="soft"] :is(.tile, .thumb, .linkcard, .md .onecard) { border-color: var(--faint); border-radius: 14px; box-shadow: none; overflow: hidden; }
   :root[data-edges="soft"] :is(#tree .kind.pic img, .tab .tabCover, .md img.cover) { border-color: transparent; border-radius: 6px; }
   /* lines between rows: still there, barely */
   :root[data-edges="soft"] :is(.note, .hit, .track, .listing .item, #gate .dev, .label, #tree .sect, .editFront, .linksAsk .fly, .linkcard.super iframe) { border-top-color: var(--faint); }
   :root[data-edges="soft"] #toc a { border-left-color: var(--faint); }
   @media (max-width: 760px) {
-    :root[data-edges="soft"] #mobileBar { border-bottom-color: transparent; background-image: linear-gradient(to top, var(--rule), transparent var(--fade)); }
+    /* the top bar's seam has no stitches: the tab bar's, just under it, are the ones into the page */
+    :root[data-edges="soft"] #mobileBar { border-bottom-color: transparent; background-image: linear-gradient(to top, var(--groove), var(--rule) 1px, var(--lip) 3px, transparent 13px); }
     :root[data-edges="soft"] #mobileBar button { border-radius: 10px; }
-    :root[data-edges="soft"] #composer { border-color: transparent; border-radius: 18px 18px 0 0; box-shadow: none; background-image: linear-gradient(to bottom, var(--rule), transparent var(--fade)); }
-    :root[data-edges="soft"] .md table.wide tr { border-color: transparent; border-radius: 12px; box-shadow: var(--ring-small); overflow: hidden; }
+    /* the note box along the foot of the screen: the seam along its top */
+    :root[data-edges="soft"] #composer {
+      border: 0; border-radius: 18px 18px 0 0;
+      background: color-mix(in srgb, var(--paper) 90%, transparent);
+      background-image: var(--stitch-across), linear-gradient(to bottom, var(--groove), var(--rule) 1px, var(--lip) 3px, transparent 13px);
+      background-size: 100% 1.5px, 100% 100%; background-position: left 0 top 6px, 0 0; background-repeat: no-repeat;
+    }
+    :root[data-edges="soft"] .md table.wide tr { border-color: var(--faint); border-radius: 12px; overflow: hidden; }
   }
 </style>
 </head>
@@ -1022,7 +1067,7 @@
     </div>
     <div id="settings" hidden>
       <div class="label">Text</div>
-      <div id="sideTools"><select id="theme" title="Theme"><option value="plain">Plain</option><option value="selenized">Selenized Light</option><option value="lime">Pale Lime</option><option value="sky">Pale Sky</option><option value="lime-dark">Lime Night</option><option value="sky-dark">Sky Night</option><option value="eva">Eva Night</option><option value="triple-m">Triple-M</option><option value="sun-sound">Sun Sound</option><option value="periwinkle">Periwinkle</option><option value="mahogany">Mahogany</option></select><button id="themeOne" title="One theme for the whole reader. Release it to give the left and right panes themes of their own.">one theme</button><select id="themeSide" title="Theme of the left pane (files and outline)"></select><select id="themeRight" title="Theme of the right pane (the side document and notes)"></select><button id="fontToggle"></button><button id="focusToggle" title="Fade everything except the paragraph you are reading">reading focus</button><button id="turnToggle" title="In a book, scrolling on at the end of a page turns to the next, and scrolling back at the top to the one before">scroll through books</button><button id="roomyToggle" title="More space between lines and words">roomy text</button><button id="softToggle" title="Softer edges: rounded corners, controls without outlines, and where parts meet, the dividing line's colour fading into the background instead of a hard line. Works with every theme">soft edges</button><button id="smaller" aria-label="Smaller text" title="Smaller text">A−</button><button id="bigger" aria-label="Larger text" title="Larger text">A+</button></div>
+      <div id="sideTools"><select id="theme" title="Theme"><option value="plain">Plain</option><option value="selenized">Selenized Light</option><option value="lime">Pale Lime</option><option value="sky">Pale Sky</option><option value="lime-dark">Lime Night</option><option value="sky-dark">Sky Night</option><option value="eva">Eva Night</option><option value="triple-m">Triple-M</option><option value="sun-sound">Sun Sound</option><option value="periwinkle">Periwinkle</option><option value="mahogany">Mahogany</option></select><button id="themeOne" title="One theme for the whole reader. Release it to give the left and right panes themes of their own.">one theme</button><select id="themeSide" title="Theme of the left pane (files and outline)"></select><select id="themeRight" title="Theme of the right pane (the side document and notes)"></select><button id="fontToggle"></button><button id="focusToggle" title="Fade everything except the paragraph you are reading">reading focus</button><button id="turnToggle" title="In a book, scrolling on at the end of a page turns to the next, and scrolling back at the top to the one before">scroll through books</button><button id="roomyToggle" title="More space between lines and words">roomy text</button><button id="softToggle" title="Softer edges: rounded corners, controls without outlines, and seams drawn like stitched leather where parts meet, instead of hard lines. Works with every theme">soft edges</button><button id="smaller" aria-label="Smaller text" title="Smaller text">A−</button><button id="bigger" aria-label="Larger text" title="Larger text">A+</button></div>
       <div class="label">Connection</div>
       <div id="net" role="status" aria-live="polite"></div>
       <div class="label">This device</div>

@@ -58,7 +58,7 @@ Not yet checked on real devices: installing the authority on an iPhone and an An
 - [x] A book with no page to resume at opens at the start of its front matter (from the engine's `frontMatter`), not at its contents (9 October 2026)
 - [x] "space on this device…" in the settings: every kept copy with its size, largest first, removed from the device (not the server) on a second press. A book is one item. Sizes are read without decrypting protected copies. Checked in headless Chromium. [ ] Not tried on an iPhone
 - [x] With the bars put away, a PDF's sliders button sits with the muted ones at the top left on a phone (9 October 2026)
-- [x] "soft edges" in the settings: rounded corners, fills instead of outlines, the dividing line's colour fading into the background at the seams (no shadows), with any theme; kept with the look (9 October 2026). [ ] Not looked at on a real phone or in every theme
+- [x] "soft edges" in the settings: rounded corners, fills instead of outlines, seams drawn as stitched leather (groove, lip and thread, all gradients, no shadows), stitched dialogs, pressed-in fields, with any theme; kept with the look (9 October 2026). [ ] Not looked at on a real phone or in every theme
 - [ ] Find in a PDF's text (`engine.search`), and its table of contents (`engine.sections`) in the outline
 - [ ] Scanned PDFs: the engine's OCR, which needs two model files (about 12 MB) that are not in the package
 - [ ] A PDF that is not kept on the device is fetched whole for the engine; the engine worker that reads books in pieces (`hub/js/engine-worker.js`) would spare that, with the file's SHA-256 from `/api/sha256`
