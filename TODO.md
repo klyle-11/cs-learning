@@ -145,7 +145,9 @@ Not yet checked on real devices: installing the authority on an iPhone and an An
 
 **Formats**
 - [x] EPUB reader: a book is listed as a folder of its pages in reading order and each page opens like an HTML page, served from inside the zip by the server (`server-cpp/src/zip.hpp`, own inflate; `epub.hpp`). Checked: every entry of two real books comes out byte for byte as a reference unzip gives it. [ ] Look at a book in a browser (pages are sent as XHTML, which the reader's frame code has not been run against). [ ] Next/previous page at the foot of a page. [ ] Search inside books. [ ] A page kept on the device shows without its pictures when the server is away
-- [ ] PDF reader for PDFs with a real text layer (not scans)
+- [x] PDF reader for PDFs with a real text layer: drawn with PDF.js; the document engine (`marginalia-engine`, WebAssembly, served from `/vendor/marginalia/`) reads their text and where each character is. [ ] Scans (the engine's OCR and its models are not served)
+- [x] A book's front matter, from the engine (`frontMatter`): each book is read once, quietly, and what is found is kept on the device. A book opens at its contents if it has them in front, else where its text begins; a leading page with no name but its file's is called by what it is (Cover, Title page, Copyright, Contents…). The older ways of finding a book's start stand where there is no engine. Checked on the sample book in headless Chromium (8 October 2026). [ ] Not kept across devices. [ ] The whole book file is fetched for this, once per book and device
+- [x] A page of a book, named away from its book (a tab, #fav and the other groups, find, the latest notes, the note box, a reference written into a note), has the book's title after its name: "Contents - <title>". What was saved in a group before this is shown so too (8 October 2026)
 - [ ] Markdown and HTML keep working as now
 
 **Highlighting**
@@ -154,7 +156,8 @@ Not yet checked on real devices: installing the authority on an iPhone and an An
 - [x] Highlight types: each type has its own colour and a name the user can set (e.g. "definition", "question", "don't understand yet")
 - [x] Highlights are saved and persist across sessions — markdown and code files
 - [x] Same for HTML pages (drawn inside the frame)
-- [x] Same for EPUB (a page of a book is an HTML page to the reader, anchors included). Tried in headless Chromium on a scratch copy, desktop and phone width (7 October 2026): select, highlight, a note on it, drawn again after a reload (`server-cpp/build/check-epubhl.cjs`). [ ] Not tried by touch on a phone itself. [ ] PDF
+- [x] Same for EPUB (a page of a book is an HTML page to the reader, anchors included). Tried in headless Chromium on a scratch copy, desktop and phone width (7 October 2026): select, highlight, a note on it, drawn again after a reload (`server-cpp/build/check-epubhl.cjs`). [ ] Not tried by touch on a phone itself. [x] PDF: words on a page are selected with the engine's own selection (double-press a word, drag the handles), and a highlight is kept with the engine's anchor (`mg` on the note). Tried in headless Chromium on a scratch copy, a word after an emoji included (8 October 2026). [ ] Not tried by touch
+- [x] A highlight on a page of a book carries the engine's anchor as well as the reader's own (`mg`: the words and those around them, the place in the chapter, an EPUB CFI), and is placed by the engine first; the reader's own anchor is the fallback, and all there is with no server in reach or where the engine's text for the chapter is not the page's text letter for letter. The pages are still drawn in the frame, selected with the browser's own selection. Tried in headless Chromium: saved, drawn again after a reload, and found by the engine alone with the reader's anchor and quote spoilt (`server-cpp/build/mgcheck/check_epub.py`). [ ] Books drawn by the engine itself (its chapters, its selection with handles), as PDFs are
 
 **Annotating**
 - [x] The existing bottom text input stays where it is and is also the annotation input

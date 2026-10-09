@@ -39,7 +39,7 @@ Each entry in `notes/notes.json`:
   "text": "what the user wrote, empty for a bare highlight", "ts": "ISO time", "status": "open" }
 ```
 
-A highlight made in the reader may also carry `"anchor": { "block", "nth", "start", "before", "after" }`: where in the document its `quote` is (see `server-cpp/src/anchor.hpp`). Leave it as it is; a note written here (a terminal question) has none.
+A highlight made in the reader may also carry `"anchor": { "block", "nth", "start", "before", "after" }`: where in the document its `quote` is (see `server-cpp/src/anchor.hpp`). Leave it as it is; a note written here (a terminal question) has none. One made on a PDF or on a page of a book may carry `"mg": { "doc", "anchor" }` as well: the file's SHA-256 and the document engine's own anchor. Leave that as it is too.
 
 A highlight on a PDF's page carries `"mg": { "doc", "anchor" }` instead: the file's SHA-256 and the document engine's anchor (`marginalia-engine-integration/API.md`, "Anchor"). Its `headingText` is the page ("page 12") and its `heading` is empty. Leave `mg` exactly as it is: the engine finds the words by it.
 

@@ -59,6 +59,8 @@ An `.epub` file is listed as a folder of its pages, in reading order: each page 
 
 `changed` is when the file was last changed, in seconds since 1970 (the pages of a book have none): the reader lists the added folders with the one most recently added to first.
 
+A page of a book also has `bookTitle`, the book's own title, when the book gives one: the reader puts it after the page's name wherever the page is named away from its book.
+
 `title` is the first `# Heading` (markdown), `<title>` (HTML), or the file name. Pictures, video, sound and PDFs are listed by their file names. Hidden files, `node_modules`, `notes/`, the server's own folder and anything matching `ignore` are left out.
 
 ## Settings

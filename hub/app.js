@@ -193,6 +193,19 @@ setFont(store.get('font') || 'serif', !fresh.font);
 // of it is worked out here and written into a style element in the page.
 // Other HTML pages are left looking as their author made them.
 const isBookPage = (path) => /\.epub\//i.test(path);
+// A page of a book, named anywhere but among the book's own pages, says whose it is after its name: "Contents" alone
+// could be any book's. The book goes by its title, else by its file's name.
+const bookOf = (path) => path.slice(0, path.search(/\.epub\//i) + 5);
+const bookName = (path) => docOf(path)?.bookTitle || bookOf(path).split('/').pop().replace(/\.epub$/i, '');
+const withBook = (path, name) => (isBookPage(path) && !name.endsWith(' - ' + bookName(path)) ? name + ' - ' + bookName(path) : name);
+const titleOf = (d) => withBook(d.path, pageTitle(d));
+// The same for what a group (#fav and the rest) holds: it was saved under the page's name alone, or a note's words.
+const shownLabel = (item) => {
+  try {
+    const path = decodeURIComponent(item.target.split('#')[0]), d = docOf(path);
+    return withBook(path, d && !item.target.includes('#') && item.label === d.title ? pageTitle(d) : item.label);   // saved under its file's name, before the page was known for a title page or the contents
+  } catch { return item.label; }
+};
 function dressBook(v) {
   if (!v?.dress || !v.body) return;
   const probe = el('span'), c = {};
@@ -2136,10 +2149,10 @@ function drawFound() {
   const q = inside?.q, hits = (inside?.hits || []).filter((h) => docOf(h.path) && !gateOf(h.path)), mine = (inside?.mine || []).filter((n) => docOf(n.doc));
   for (const h of hits) {
     // A line of a document opens it there. What was found in a file of saved links is one of its items: the file opens at that item's card, or its row.
-    if (h.item != null) row(docOf(h.path).title, shortPath(h.path) + ', saved link', h.text, () => openDoc(h.path, { hash: 'item=' + h.item }), { path: h.path, hash: 'item=' + h.item });
-    else row(docOf(h.path).title, shortPath(h.path) + ', line ' + h.line, h.text.replace(/[*_`#>|]+/g, ' ').replace(/\s+/g, ' ').trim(), async () => { await openDoc(h.path); showFound(state.active, q); }, { path: h.path, words: q });
+    if (h.item != null) row(titleOf(docOf(h.path)), shortPath(h.path) + ', saved link', h.text, () => openDoc(h.path, { hash: 'item=' + h.item }), { path: h.path, hash: 'item=' + h.item });
+    else row(titleOf(docOf(h.path)), shortPath(h.path) + ', line ' + h.line, h.text.replace(/[*_`#>|]+/g, ' ').replace(/\s+/g, ' ').trim(), async () => { await openDoc(h.path); showFound(state.active, q); }, { path: h.path, words: q });
   }
-  for (const n of mine) row(docOf(n.doc).title, n.text ? 'your note' : 'your highlight', n.text || n.quote, async () => { await openDoc(n.doc, { hash: n.heading || undefined }); if (n.quote) showFound(state.active, n.quote.toLowerCase().slice(0, 40)); }, { path: n.doc, id: n.id, hash: n.heading || undefined, words: n.quote ? n.quote.toLowerCase().slice(0, 40) : undefined });
+  for (const n of mine) row(titleOf(docOf(n.doc)), n.text ? 'your note' : 'your highlight', n.text || n.quote, async () => { await openDoc(n.doc, { hash: n.heading || undefined }); if (n.quote) showFound(state.active, n.quote.toLowerCase().slice(0, 40)); }, { path: n.doc, id: n.id, hash: n.heading || undefined, words: n.quote ? n.quote.toLowerCase().slice(0, 40) : undefined });
   const some = (n, what) => `${n} ${what}${n === 1 ? '' : 's'}`;
   let said = some(names.length, 'file') + ' by name' + (names.length > 20 ? ' (the first 20)' : '');
   if (finding.length < 3) said += '. From three letters on, documents and notes are looked inside too.';
@@ -2383,7 +2396,7 @@ function renderTree() {
       draw(sub, kids, prefix + name + '/');
       parent.append(det);
     }
-    for (const f of node.files) if (f !== fp && !shots.includes(f) && !songs.includes(f)) parent.append(fileRow(f, /\.epub\//i.test(f.path) ? f.title : undefined));   // a page of a book goes by its name in the contents
+    for (const f of node.files) if (f !== fp && !shots.includes(f) && !songs.includes(f)) parent.append(fileRow(f, /\.epub\//i.test(f.path) ? pageTitle(f) : undefined));   // a page of a book goes by its name in the contents
   };
   // Sections. What hub.json lists under "starter" (the material every copy
   // begins with) is kept together, first. Each other top-level folder, added
@@ -2525,10 +2538,48 @@ function asItems(list) {
 // "contents"). Many books name neither; for those the page is looked for once, in the background (see
 // learnBookStarts), and remembered. Failing that, a file named "nav" (every newer book has one, though some keep
 // it out of the reading order), and failing that the first page.
+// What comes before a book's text (its cover, title page, copyright page, dedication, contents and the like) is told
+// apart by the document engine (its frontMatter: from the book's own landmarks and contents, its file names and its
+// text). Each book is read for this once, quietly (learnBookFronts), and what is found is kept on this device:
+// book -> { pages (how many it had then), roles: { page: role } }, roles null for a book the engine could not read.
+// From it come where a book begins (bookStart), and a name for a leading page that has none but its file's.
+const FRONT_NAMES = { cover: 'Cover', titlePage: 'Title page', copyright: 'Copyright', dedication: 'Dedication', epigraph: 'Epigraph', alsoBy: 'Also by', toc: 'Contents' };
+let fronts = null;
+const bookFronts = () => (fronts?.root === config.root ? fronts.books : (fronts = { root: config.root, books: store.get('bookFronts:' + config.root) || {} }).books);
+const frontRole = (path) => (isBookPage(path) ? bookFronts()[bookOf(path)]?.roles?.[path] : undefined);
+const pageTitle = (d) => { const named = FRONT_NAMES[frontRole(d.path)]; return named && (!d.title || d.title === d.path.split('/').pop().replace(/\.x?html?$/i, '')) ? named : d.title; };
+async function learnBookFronts() {
+  const known = bookFronts();
+  let lib = null, learned = false;
+  for (const b of asItems(docs).filter((d) => d.book)) {
+    if (known[b.book]?.pages === b.pages.length || gateOf(b.book)) continue;
+    if (!net.online) break;   // another time
+    let engine = null;
+    try {
+      lib ||= await marginalia();
+      const blob = await call(rawUrl(b.book), { quiet: true }).then((r) => (r.ok ? r.blob() : null));
+      if (!blob) continue;
+      engine = new lib.Engine();
+      const summary = await engine.open(blob), roles = {};
+      for (const f of await engine.frontMatter()) { const href = summary.units[f.unit]?.href; if (href) roles[b.book + '/' + href] = f.role; }
+      known[b.book] = { pages: b.pages.length, roles };
+    } catch (e) {
+      if (!lib) return;   // no engine to be had (a server from before it had one): the older ways of finding a book's start stand
+      if (!['malformed', 'unsupported', 'encrypted', 'limit_exceeded'].includes(e?.code)) continue;   // not the book's doing: tried again another time
+      known[b.book] = { pages: b.pages.length, roles: null };
+    } finally { engine?.close(); }
+    learned = true;
+    store.set('bookFronts:' + config.root, known);
+  }
+  if (learned) { renderTree(); views.forEach((v, i) => renderTabs(i)); chrome(); }
+}
 const bookStarts = () => store.get('bookStarts:' + config.root) || {};   // book -> the page found to be its contents ('' for none)
 function bookStart(pages) {
   const named = (test) => pages.find((d) => test.test(d.path.split('/').pop().replace(/\.x?html?$/i, '')));
   const found = pages.length ? bookStarts()[pages[0].path.slice(0, pages[0].path.search(/\.epub\//i) + 5)] : '';
+  // The engine has read this book: its contents if it has them in front, else where its text begins.
+  const roles = pages.length ? bookFronts()[bookOf(pages[0].path)]?.roles : null;
+  if (roles) return pages.find((d) => roles[d.path] === 'toc') || pages.find((d) => !roles[d.path]) || pages[0];
   return pages.find((d) => /^\s*(table\s+of\s+)?contents\s*$/i.test(d.title || '')) || named(/^(toc|contents|table[-_ ]?of[-_ ]?contents)$/i)
     || (found && pages.find((d) => d.path === found)) || named(/^nav$/i) || pages[0];
 }
@@ -2538,7 +2589,7 @@ function bookStart(pages) {
 async function learnBookStarts() {
   const known = bookStarts();
   for (const b of asItems(docs).filter((d) => d.book)) {
-    if (b.book in known || bookStart(b.pages) !== b.pages[0]) continue;
+    if (b.book in known || bookFronts()[b.book]?.roles || bookStart(b.pages) !== b.pages[0]) continue;
     let best = '', most = 3;
     for (const d of b.pages.slice(0, 8)) {
       if (!net.online) return;   // another time
@@ -2595,7 +2646,7 @@ function paintQuick(sum) {
   sum.querySelector('.quick')?.remove();
   const d = docOf(state.last?.[sum.dataset.folder]);
   if (!d || !inView(d) || gateOf(d.path) || d.path === sum.dataset.path) return;   // a one-line folder's own page is what its line opens already
-  const b = el('button', 'quick', d.front || isFront(d.path) ? 'Front page' : d.title || d.path.split('/').pop());
+  const b = el('button', 'quick', d.front || isFront(d.path) ? 'Front page' : d.title ? titleOf(d) : d.path.split('/').pop());
   b.title = 'Open what was last opened in this folder: ' + d.path;
   b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); if (isAudio(d.path) && playable(d.path)) askPlay(d.path); else openDoc(d.path); };   // not a press on the folder's line: it stays closed. A track plays, as it does from its own line
   sum.append(b);
@@ -2833,7 +2884,7 @@ function tabKeepBtn(path) {
   };
   return b;
 }
-const tabName = (path) => { const d = docOf(path); return gateOf(path) ? gateOf(path).split('/').pop() + ' (locked)' : d ? (d.front ? 'Front page' : isFront(path) ? d.title + ' (front page)' : d.title) : path; };
+const tabName = (path) => { const d = docOf(path); return gateOf(path) ? gateOf(path).split('/').pop() + ' (locked)' : d ? (d.front ? 'Front page' : isFront(path) ? d.title + ' (front page)' : titleOf(d)) : path; };
 // The latest opened, newest first, as a list dropped from the tab bar: a tab is taken over by whatever is opened
 // next, so this is the way back to something from a while ago. Pressing one opens it in the place of the tab being looked at.
 const recentEl = el('div', 'recent');
@@ -3005,6 +3056,7 @@ async function drawDoc(pane, hash, keepScroll) {
   const v = views[pane], path = state.panes[pane].active;
   const y = v.scroller ? v.scroller.scrollTop : 0;
   Object.assign(v, { heads: [], cur: null, article: null, surface: null, scroller: null, frame: null, dress: null, bookHere: null, place: null, pdfMarks: null, zoom: null });
+  sweepBooks();
   if (!path) { v.body.replaceChildren(el('p', 'empty', 'Nothing open. Pick a file on the left.')); return; }
   if (gateOf(path)) { showLock(pane, gateOf(path)); return; }
 
@@ -3128,6 +3180,7 @@ async function drawDoc(pane, hash, keepScroll) {
         d.addEventListener('scroll', follow, { capture: true, passive: true });
         frame.contentWindow.addEventListener('scroll', () => { follow(); hideFlyout(); keepPlace(path, frame.contentWindow.scrollY); }, { passive: true });
         highlightAll(v.surface, path);
+        if (isBookPage(path)) placeBookMarks(v.surface, path);   // the engine is fetched now, so that it is there by the time words are selected
         // Turned to by scrolling: the next page begins at its top, the one before at its end, wherever it was left.
         if (landAt?.path === path) { frame.contentWindow.scrollTo(0, landAt.end ? d.documentElement.scrollHeight : 0); landAt = null; }
         else if (hash) goTo(pane, hash);
@@ -3160,7 +3213,7 @@ async function drawDoc(pane, hash, keepScroll) {
       addPageCover(wrap, book, () => 40 * view.fs + 190, true);
       if (frame.next) {
         // At the end of the page: what scrolling on leads to.
-        frame.hint = el('button', 'turnHint', '\u2193 ' + frame.next.title);
+        frame.hint = el('button', 'turnHint', '\u2193 ' + pageTitle(frame.next));
         frame.hint.title = 'Scroll on, or press, for the next part of the book';
         frame.hint.hidden = true;
         frame.hint.onclick = () => frame.turn(1);
@@ -3864,6 +3917,91 @@ const marginalia = () => (mgLib ||= Promise.all(['index', 'selection', 'themes']
 const pdfBlob = async (path) => (kept.has(path) ? (await idb.get('docs', keyOf(path)))?.blob : null) || call(rawUrl(path)).then((r) => (r.ok ? r.blob() : null));
 // The file's SHA-256 is what the engine knows it by. Working it out reads the whole file, so it is remembered.
 const mgPrints = () => store.get('mgPrints:' + config.root) || {};
+// A book (an .epub) is given to the engine too, whole, while one of its pages is open. Its pages are still drawn as
+// they always were, in a frame; the engine is asked where a highlight's words are, and makes the anchor a new one is
+// found again by (kept on the note as `mg`, beside the reader's own `anchor`): by the words and those around them,
+// their place in the chapter and in the book's own structure, so a highlight is still found when the book's text has
+// changed a little, and means the same to anything else that reads the engine's anchors. This holds only where a
+// page's text is, letter for letter, the text the engine has for that chapter (see bookSpot); where it is not, or
+// with no engine (no server in reach: a book is kept on the device as its pages, not as its file), the reader's own
+// anchor is all there is, as before.
+const bookEngines = new Map();   // book -> a promise of { engine, print, units: page -> its number, texts: number -> its text }, or of null
+const bookOpen = new Map();      // book -> the same, once it is there
+const bookFailed = new Map();    // book -> when the engine last could not be had for it: not asked for again within the minute
+function bookEngine(book) {
+  if (bookEngines.has(book)) return bookEngines.get(book);
+  if (Date.now() - (bookFailed.get(book) || 0) < 60000) return Promise.resolve(null);
+  const opening = (async () => {
+    let engine = null;
+    try {
+      if (!net.online) return null;
+      const lib = await marginalia(), blob = await call(rawUrl(book), { quiet: true }).then((r) => (r.ok ? r.blob() : null));
+      if (!blob || bookEngines.get(book) !== opening) return null;
+      engine = new lib.Engine();
+      const prints = mgPrints(), known = prints[book];
+      const summary = await engine.open(blob, known?.size === blob.size ? { fingerprint: known.print } : {});
+      if (bookEngines.get(book) !== opening) { engine.close(); return null; }   // the book was left meanwhile
+      if (known?.print !== summary.info.fingerprint || known.size !== blob.size) store.set('mgPrints:' + config.root, { ...prints, [book]: { size: blob.size, print: summary.info.fingerprint } });
+      const rec = { engine, print: summary.info.fingerprint, units: new Map(summary.units.map((u, i) => [book + '/' + u.href, i])), texts: new Map() };
+      engine.onBroken = () => { if (bookOpen.get(book) === rec) { bookOpen.delete(book); bookEngines.delete(book); } };
+      bookOpen.set(book, rec);
+      return rec;
+    } catch (e) {
+      engine?.close();
+      console.warn('The document engine did not open ' + book + ': its highlights are placed by the reader alone.', e?.code || e);
+      return null;
+    }
+  })();
+  bookEngines.set(book, opening);
+  opening.then((rec) => { if (!rec && bookEngines.get(book) === opening) { bookEngines.delete(book); bookFailed.set(book, Date.now()); } });   // not had this time: asked for again later
+  return opening;
+}
+// A book none of whose pages is being read any more is closed: the engine holds its file, and a worker, until then.
+function sweepBooks() {
+  for (const [book, opening] of bookEngines) {
+    if (state.panes.some((p) => inBook(book, p.active))) continue;
+    bookEngines.delete(book);
+    bookOpen.delete(book);
+    opening.then((rec) => rec?.engine.close());
+  }
+}
+// Where each piece of a page's text begins in the page's whole text, which is what the engine counts in.
+function rawIndex(article) {
+  const walker = article.ownerDocument.createTreeWalker(article, NodeFilter.SHOW_TEXT), starts = new Map();
+  let text = '', node;
+  while ((node = walker.nextNode())) { starts.set(node, text.length); text += node.data; }
+  return { text, starts };
+}
+// The engine for the page of a book that `article` is, if it is there and has the same text for it: { rec, unit, raw }.
+function bookSpot(article, path) {
+  const rec = isBookPage(path) ? bookOpen.get(bookOf(path)) : null, unit = rec?.units.get(path);
+  if (unit == null || !rec.texts.has(unit)) return null;
+  const raw = rawIndex(article);
+  return raw.text === rec.texts.get(unit) ? { rec, unit, raw } : null;
+}
+// Where the engine found each highlight of a book: note id -> { exact (the words it was asked about), at: { unit, start, end } or null }.
+const mgPlaces = new Map();
+const placing = new WeakSet();
+// Ask the engine where the highlights on this page of a book are; if it has anything new to say, they are drawn again.
+async function placeBookMarks(article, path) {
+  if (placing.has(article)) return;
+  placing.add(article);
+  try {
+    const rec = await bookEngine(bookOf(path)), unit = rec?.units.get(path);
+    if (unit == null || !article.isConnected) return;
+    let news = false;
+    if (!rec.texts.has(unit)) { rec.texts.set(unit, (await rec.engine.text(unit)).text); news = true; }
+    for (const n of notes.filter((x) => x.doc === path && x.mg?.anchor)) {
+      const exact = n.mg.anchor.quote?.exact;
+      if (mgPlaces.get(n.id)?.exact === exact) continue;
+      let at = null;
+      try { at = await rec.engine.resolve(n.mg.anchor); } catch { /* an anchor the engine cannot read: the reader's own places it */ }
+      mgPlaces.set(n.id, { exact, at });
+      news = true;
+    }
+    if (news && article.isConnected && notes.some((x) => x.doc === path && x.mg?.anchor)) highlightAll(article, path);
+  } catch { /* the engine went away meanwhile */ } finally { placing.delete(article); }
+}
 let pdfLib = null;   // PDF.js, fetched from the server the first time a PDF is drawn here
 const pdfjs = () => (pdfLib ||= import('/vendor/pdf.mjs').then((m) => { m.GlobalWorkerOptions.workerSrc = '/vendor/pdf.worker.mjs'; return m; }).catch((e) => { pdfLib = null; throw e; }));
 // The pages of a PDF, drawn by the reader: one under the other, each as wide
@@ -4780,7 +4918,7 @@ function appendBrowse(article, pane, folder, first = null, key = 'browse:' + fol
         row.dataset.path = d.path;
         row.tabIndex = 0;
         row.setAttribute('role', 'button');
-        row.append(el('span', '', isBinary(d.path) ? showName(d.path) : d.title));
+        row.append(el('span', '', isBinary(d.path) ? showName(d.path) : titleOf(d)));
         if (!grouped && where !== 'here') row.append(pathLabel(where));
         if (kept.has(d.path)) row.append(el('small', '', 'on this device'));
         if (isAudio(d.path) || isVideo(d.path)) row.append(keepBtn(d.path), queueBtn(d.path));   // keep a copy on this device; line it up
@@ -5010,7 +5148,7 @@ function renderOutline() {
     $('tocLabel').textContent = 'Outline · ' + book.split('/').pop().replace(/\.epub$/i, '');
     for (const d of docs) {
       if (!inBook(book, d.path) || !inView(d)) continue;
-      const a = el('a', 'l1' + (d === of ? ' here' : ''), d.title);
+      const a = el('a', 'l1' + (d === of ? ' here' : ''), pageTitle(d));
       a.href = '?doc=' + encodeURIComponent(d.path);
       a.onclick = (e) => { e.preventDefault(); drawer(null); openDoc(d.path); };
       tocEl.append(a);
@@ -5066,7 +5204,7 @@ function openDial() {
     const book = of.path.slice(0, of.path.search(/\.epub\//i) + 5);
     for (const d of docs) {
       if (!inBook(book, d.path) || !inView(d)) continue;
-      const page = line('l1', d.title, () => { if (d !== of) openDoc(d.path); else (v.article || v.surface)?.scrollIntoView(); });   // the page being read: back to its top
+      const page = line('l1', pageTitle(d), () => { if (d !== of) openDoc(d.path); else (v.article || v.surface)?.scrollIntoView(); });   // the page being read: back to its top
       if (d !== of) continue;
       at = page;
       for (const h of v.heads) {
@@ -5172,7 +5310,7 @@ function renderContext() {
     c.append('On: ', x, el('b', '', '“' + pendingQuote + '”'));
   } else {
     const cur = views[state.active].cur;
-    c.append('In: ', el('b', '', (d.front ? 'Front page' : d.title) + (cur && cur.textContent !== d.title ? ' › ' + cur.textContent : '')), '  · select text to pin the note to it');
+    c.append('In: ', el('b', '', (d.front ? 'Front page' : titleOf(d)) + (cur && cur.textContent !== d.title ? ' › ' + cur.textContent : '')), '  · select text to pin the note to it');
   }
 }
 
@@ -5241,7 +5379,7 @@ function refParts(node) {
 }
 function refTo(node) {
   const p = refParts(node);
-  return p ? `[${p.label}](${p.target})` : '';
+  return p ? `[${shownLabel(p)}](${p.target})` : '';
 }
 // The buttons on the items: a link button while references are being added
 // to a note, a "+" while items are being picked for a group.
@@ -5444,7 +5582,7 @@ function appendTags(article) {
       const row = el('div', 'item');
       row.tabIndex = 0;
       row.setAttribute('role', 'button');
-      row.append(el('span', '', item.label));
+      row.append(el('span', '', shownLabel(item)));
       row.onclick = (e) => openRef(item.target, e.metaKey || e.ctrlKey || e.altKey);
       return row;
     }));
@@ -5485,11 +5623,11 @@ function drawGroups(section) {
       const row = el('div', 'file'), out = el('button', '', '\u00d7');
       row.tabIndex = 0;
       row.setAttribute('role', 'button');
-      row.title = item.label;
+      row.title = shownLabel(item);
       out.title = 'Take out of this group';
       out.setAttribute('aria-label', out.title);
       out.onclick = (e) => { e.stopPropagation(); g.items = g.items.filter((x) => x !== item); if (!g.items.length) groups = groups.filter((x) => x !== g); saveGroups(); renderTree(); };
-      row.append(el('span', 'name', item.label), out);
+      row.append(el('span', 'name', shownLabel(item)), out);
       row.onclick = (e) => openRef(item.target, e.metaKey || e.ctrlKey || e.altKey);
       kids.append(row);
     }
@@ -5572,7 +5710,19 @@ function seekNote(n) {
 }
 // Where the words now selected are, as fields to add to a note: an anchor in a document's text, or the engine's on a
 // PDF's page (with the page as its heading); {} if it cannot be worked out.
-const pendingPlace = async () => (pendingMg ? pendingMg.fields().catch(() => ({})) : pendingAnchor());
+async function pendingPlace() {
+  if (pendingMg) return pendingMg.fields().catch(() => ({}));
+  const spot = pendingSpot();
+  if (!spot) return {};
+  const fields = { anchor: spot.anchor }, path = activeDoc(), article = pendingAt.article;
+  // On a page of a book the engine's anchor goes with it, where the engine has this very text (see bookSpot).
+  const at = views[state.active].surface === article ? bookSpot(article, path) : null;
+  if (at) {
+    const raw = ([node, offset]) => at.raw.starts.get(node) + offset;
+    try { fields.mg = { doc: at.rec.print, anchor: await at.rec.engine.createAnchor(at.unit, raw(spot.map.at[spot.start]), raw(spot.map.at[spot.start + spot.length - 1]) + 1) }; } catch { /* the reader's own anchor stands alone */ }
+  }
+  return fields;
+}
 // The selection on a PDF's page is done with (made into a highlight, or let go).
 function dropPendingMg() { const m = pendingMg; pendingMg = null; m?.clear(); }
 const laterNotes = perFrame(() => renderNotes(false));
@@ -5798,7 +5948,7 @@ function renderLatest() {
       if (n.type) row.style.borderLeftColor = typeOf(n.type).color;
       if (n.quote) row.append(el('div', 'quote', '“' + cut(n.quote, n.text ? 70 : 120) + '”'));
       if (n.text) row.append(el('div', 'said', cut(n.text, 120)));
-      row.append(el('div', 'meta', new Date(n.ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) + ' · ' + docOf(n.doc).title));
+      row.append(el('div', 'meta', new Date(n.ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) + ' · ' + titleOf(docOf(n.doc))));
       row.onclick = async () => { await openDoc(n.doc); showNote(n.id); };
       box.append(row);
     }
@@ -5813,7 +5963,7 @@ function renderLatest() {
       const row = el('div', 'tick');
       row.tabIndex = 0;
       row.setAttribute('role', 'button');
-      row.append(el('div', 'said', item.label));
+      row.append(el('div', 'said', shownLabel(item)));
       row.onclick = (e) => openRef(item.target, e.metaKey || e.ctrlKey || e.altKey);
       box.append(row);
     }
@@ -5902,10 +6052,11 @@ function anchorAt(map, start, length) {
   if (!block?.hash) return null;
   return { block: block.hash, nth: block.nth, start: start - block.start, before: map.flat.slice(Math.max(0, start - 24), start), after: map.flat.slice(start + length, start + length + 24) };
 }
-// The anchor for the text now selected, as { anchor } to add to a note; {} if it cannot be worked out.
-function pendingAnchor() {
+// Where the text now selected is: { anchor, map, start, length } (the anchor to add to a note, and the place in the
+// page's map it was worked out from); null if it cannot be worked out.
+function pendingSpot() {
   const p = pendingAt, needle = pendingQuote.replace(/\s+/g, '');
-  if (!p || !needle || !p.article.isConnected) return {};
+  if (!p || !needle || !p.article.isConnected) return null;
   try {
     const map = textMap(p.article), point = p.article.ownerDocument.createRange();
     point.setStart(p.node, p.offset);
@@ -5915,10 +6066,10 @@ function pendingAnchor() {
     while (lo < hi) { const mid = (lo + hi) >> 1; if (point.comparePoint(map.at[mid][0], map.at[mid][1]) < 0) lo = mid + 1; else hi = mid; }
     // What the browser gives as the selected text can differ a little from the page's text at that point.
     let start = map.flat.startsWith(needle, lo) ? lo : map.flat.indexOf(needle, Math.max(0, lo - needle.length));
-    if (start < 0 || Math.abs(start - lo) > needle.length + 40) return {};
+    if (start < 0 || Math.abs(start - lo) > needle.length + 40) return null;
     const anchor = anchorAt(map, start, needle.length);
-    return anchor ? { anchor } : {};
-  } catch { return {}; }
+    return anchor ? { anchor, map, start, length: needle.length } : null;
+  } catch { return null; }
 }
 // Where a note's words are in the map; -1 if they are not there.
 function placeOf(map, n, article) {
@@ -5959,7 +6110,16 @@ function highlightAll(article, path) {
   const mine = notes.filter((n) => n.doc === path && n.quote);
   let map = mine.length ? textMap(article) : null;
   const placed = [];
+  // On a page of a book the engine's word on where a highlight is comes first, where it has one (see placeBookMarks).
+  const book = mine.some((n) => n.mg?.anchor) ? bookSpot(article, path) : null;
+  const rawOf = (k) => book.raw.starts.get(map.at[k][0]) + map.at[k][1];
+  const firstAt = (offset) => { let lo = 0, hi = map.at.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (rawOf(mid) < offset) lo = mid + 1; else hi = mid; } return lo; };
   for (const n of mine) {
+    const at = book && n.mg?.anchor ? mgPlaces.get(n.id)?.at : null;
+    if (at && at.unit === book.unit) {
+      const start = firstAt(at.start), length = firstAt(at.end) - start;
+      if (length > 0) { lost.delete(n.id); placed.push({ n, start, length }); continue; }
+    }
     const start = placeOf(map, n, article);
     if (start < 0) { lost.add(n.id); continue; }
     lost.delete(n.id);
@@ -5976,6 +6136,7 @@ function highlightAll(article, path) {
   }
   for (const d of notesEl.querySelectorAll('.note')) d.classList.toggle('lost', lost.has(d.dataset.id));
   markActive();
+  if (isBookPage(path) && mine.some((n) => n.mg?.anchor && mgPlaces.get(n.id)?.exact !== n.mg.anchor.quote?.exact)) placeBookMarks(article, path);   // a highlight the engine has not been asked about yet
 }
 function mark(article, map, start, length, id, color) {
   const doc = article.ownerDocument, framed = doc !== document, at = map.at;
@@ -6092,7 +6253,7 @@ $('fresh').onclick = () => location.reload();
   kept = new Set(((await idb.keys('docs')) || []).filter((k) => k.startsWith(config.root + '|')).map((k) => k.slice(config.root.length + 1)));
   if (kept.size || matchMedia('(display-mode: standalone)').matches) askDurable();
   setTimeout(catchUpParts, 8000);
-  setTimeout(learnBookStarts, 5000);
+  setTimeout(() => learnBookFronts().catch(() => {}).then(learnBookStarts), 5000);
   try { notes = outbox.some((op) => op.kind !== 'file') ? store.get('notes:' + config.root) || [] : await api('/api/notes'); saveLocal(); }
   catch { notes = store.get('notes:' + config.root) || []; }
   await loadDocs();

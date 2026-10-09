@@ -200,7 +200,7 @@ static const char *mime_of(const string &name) {
       {".xhtml", "application/xhtml+xml"}, {".otf", "font/otf"}, {".ttf", "font/ttf"}, {".woff", "font/woff"},
       {".mjs", "text/javascript"}, {".json", "application/json"}, {".svg", "image/svg+xml"}, {".png", "image/png"},
       {".jpg", "image/jpeg"}, {".jpeg", "image/jpeg"}, {".gif", "image/gif"}, {".webp", "image/webp"},
-      {".pdf", "application/pdf"}, {".woff2", "font/woff2"}, {".mp4", "video/mp4"}, {".m4v", "video/mp4"},
+      {".pdf", "application/pdf"}, {".wasm", "application/wasm"}, {".woff2", "font/woff2"}, {".mp4", "video/mp4"}, {".m4v", "video/mp4"},
       {".mov", "video/quicktime"}, {".webm", "video/webm"}, {".ogv", "video/ogg"}, {".mp3", "audio/mpeg"},
       {".m4a", "audio/mp4"}, {".wav", "audio/wav"}, {".ogg", "audio/ogg"}};
   string ext = lower(ext_of(name));
@@ -425,6 +425,7 @@ static void list_book(const string &abs, const string &rel, bool side, cJSON *ou
     cJSON_AddStringToObject(doc, "path", path.c_str());
     cJSON_AddStringToObject(doc, "group", rel.c_str());
     cJSON_AddStringToObject(doc, "title", c.title.c_str());
+    if (!book.title.empty()) cJSON_AddStringToObject(doc, "bookTitle", book.title.c_str());   // whose page it is, for wherever the page is named away from its book
     cJSON_AddBoolToObject(doc, "side", side);
     cJSON_AddBoolToObject(doc, "front", false);
     cJSON_AddItemToArray(out, doc);
