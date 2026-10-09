@@ -14,6 +14,7 @@
     "build": "node start.mjs build",
     "test": "node start.mjs test",
     "test:own": "node start.mjs test-own",
+    "test:browser": "node test/browser.mjs",
     "start:win": "node start.mjs --win",
     "start:network:win": "node start.mjs --win --network",
     "start:network:insecure:win": "node start.mjs --win --network --insecure",
@@ -24,7 +25,8 @@
     "cert:new-authority:win": "node start.mjs --win new-authority",
     "build:win": "node start.mjs --win build",
     "test:win": "node start.mjs --win test",
-    "test:own:win": "node start.mjs --win test-own"
+    "test:own:win": "node start.mjs --win test-own",
+    "test:browser:win": "node test/browser.mjs --win"
   },
   "keywords": [],
   "author": "",
@@ -38,5 +40,8 @@
     "marked": "^18.0.14",
     "pdfjs-dist": "4.10.38"
   },
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "playwright-core": "1.56.1"
+  }
 }

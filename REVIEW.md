@@ -200,7 +200,7 @@ Also open, from the sections further down:
 
 - [x] Retire the Node server. Done after this pass: workspaces were added to `hubd`, checked against Node on 123 requests, and `hub/server.js` deleted. Not yet done: a full browser session against `hubd` alone.
 - [ ] Split `app.js` into modules. It has grown from about 2,000 lines to about 2,700.
-- [ ] A browser test suite in the repo. This pass ran a dozen browser checks (queue, offline start, locks, two hubs side by side); all were throwaway scripts again, and they are already gone.
+- [x] A browser test suite in the repo. This pass ran a dozen browser checks (queue, offline start, locks, two hubs side by side); all were throwaway scripts again, and they are already gone. *Done 9 October:* `hub/test/browser.mjs` (`npm run test:browser`), 14 checks; see "Tests".
 - [ ] Data model: highlight position as well as quote (done for markdown, HTML and source by `anchor`, for PDFs by `mg`; books: third pass); note versions (stamps per part: 51; no history); clean-up of device copies (the storage window lists and removes them one by one).
 - [x] Books drawn from the engine, read in pieces from the server (third pass, "Books drawn from the engine"). [ ] Offline and on another hub.
 - [x] Service worker, so the reader opens with the server off (`hub/sw.js`).
@@ -453,6 +453,8 @@ Four additions to what the server answers, for the reader's "update…", for spl
 
 The server comparison test is in the repo and is good. The page has no tests in the repo. *Recommendation:* commit a small browser suite: open, highlight, note, split, offline round-trip, lock and unlock, two hubs, and the three confirmed attacks from the first pass.
 
+*Done 9 October 2026:* `hub/test/browser.mjs`, run with `npm run test:browser` (`:win` on Windows). It needs the server built and a Chrome, Edge or Chromium on the machine; `playwright-core` (a dev dependency, pinned at 1.56.1) drives it and downloads no browser. It starts a hub of its own on a scratch copy of the sample and runs 14 checks: the reader starting; the file list opening short; notes, replies and stamps; the outbox when the server refuses, and when the small store is full; a page left on another workspace; removing and putting back a folder; going to an open tab, in either pane; a book's page drawn by the engine, its cover not fetched on turning; a PDF with its text and PDF.js's data; "where was I"; margin counts; the reading typefaces; and that markup in a document, or an HTML page in the reader, does not run and that `/raw/` HTML is sent sandboxed. Passed 14 of 14, three runs in a row, in headless Chromium 141 on Linux. **Not yet in it:** highlighting with the flyout, split view beyond tabs, locks, two hubs (pairing), the phone layout, and a PDF's highlights. **Not run:** on Windows or macOS.
+
 ## Design, experience and flow
 
 No changes were made for this section; these are observations and ideas. It is based on the screens rendered during today's testing, at desktop width and at phone widths of 375 and 320, and on the code.
@@ -552,7 +554,7 @@ Five layers, each closing one way in.
 2. **Quiet data loss (19, 20, 21).** Small, contained changes; each gets a regression in the comparison test or the browser suite.
 3. **Today's loose ends (25, 28, 29, 30).** An hour each.
 4. **The page's folder (18).**
-5. **A browser test suite in the repo**, starting with the checks from this pass.
+5. **A browser test suite in the repo**, starting with the checks from this pass. *Done (14 checks); to grow.*
 6. **Efficiency for the board (32, 33, 24, 36), in that order.** 32 and 33 are also what make a phone feel quick.
 7. **Design: the rough-edges table**, starting with the note box on a phone, the contents button overlap, and "play without leaving the page".
 8. Then the standing items: split the page into modules, decide on layer 5.

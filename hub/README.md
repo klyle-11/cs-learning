@@ -14,11 +14,12 @@ npm run start:scratch                     # the scratch workspace (../data-test)
 npm run cert                              # make or renew the certificates and print the fingerprint
 npm run cert:new-authority                # replace the authority; every device then installs the new one
 npm run build        npm test             # build the server; run its checks
+npm run test:browser                      # the reader in a browser: 14 checks on a hub of its own (needs the server built, and Chrome, Edge or Chromium)
 ```
 
 On Windows every one of these has a twin ending in `:win` (`npm run start:win`, `npm run start:network:win`, …); see `../WINDOWS.md`.
 
-`npm start` runs `../start.sh`, which starts the server, `../server-cpp/hubd`, building it first if needed. This folder holds only the page; npm is used for the page's libraries and nothing else (the document engine among them, from its package in `../marginalia-engine-integration/`).
+`npm start` runs `../start.sh`, which starts the server, `../server-cpp/hubd`, building it first if needed. This folder holds only the page; npm is used for the page's libraries (the document engine among them, from its package in `../marginalia-engine-integration/`), and for `playwright-core`, which drives a browser for `npm run test:browser` and downloads none. That suite (`test/browser.mjs`) makes a scratch copy of `../sample` under `../server-cpp/build/browser-test/`, starts a hub of its own on port 4420, and checks: the reader starting; the file list opening short; notes, replies and stamps; the outbox when the server refuses, and when the browser's small store is full; a page left on another workspace; removing a folder and putting it back; going to a tab that is open; a book's page drawn by the engine, and its cover not fetched again on turning; a PDF drawn, with its text and PDF.js's data; "where was I"; notes counted in the margin; the reading typefaces; and that markup in a document, or an HTML page, cannot run. `node test/browser.mjs notes tabs` runs some. `HUB_TEST_BROWSER=<path>` names a browser.
 
 The server answers this computer only unless started with `HOST=0.0.0.0`. Then it speaks HTTPS (it makes its certificates on that first start), prints a pairing code, and each device goes through two steps once: trust the hub's certificate (open `http://<address>:4321/` on the device and follow the page), then type the pairing code. On the computer the hub runs on, `http://localhost:4321` keeps working with nothing installed. `../CERTIFICATES.md` explains what trusting that certificate means; `server-cpp/API.md`, "Security", has the details.
 
