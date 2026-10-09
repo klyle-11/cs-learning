@@ -64,8 +64,9 @@ if (folder === join(top, 'data') && !existsSync(folder)) {
   if (existsSync(join(top, 'sample'))) cpSync(join(top, 'sample'), folder, { recursive: true }); else mkdirSync(folder, { recursive: true });
   console.log('made data/ from sample/');
 }
-// The page's three libraries (markdown, code colouring, the HTML sanitiser) come from npm.
-if (!existsSync(join(here, 'node_modules', 'marked')) || !existsSync(join(here, 'node_modules', 'pdfjs-dist'))) run(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['install'], { cwd: here });
+// The page's libraries (markdown, code colouring, the HTML sanitiser, PDF.js) come from npm; the document engine from
+// its package in ../marginalia-engine-integration, which npm unpacks the same way.
+if (['marked', 'pdfjs-dist', 'marginalia-engine'].some((lib) => !existsSync(join(here, 'node_modules', lib)))) run(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['install'], { cwd: here });
 build();
 
 const argv = [folder, '--www', here, ...rest];

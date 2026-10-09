@@ -13,7 +13,10 @@ const SHELL = ['/', '/app.js', '/local.js', '/vault.js', '/vendor/marked.js', '/
   '/manifest.webmanifest', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png'];
 // What a PDF is drawn with: kept as well, so a PDF kept on the device opens without the server. The reader installs
 // without them if they cannot be had (a server from before it had them); they are then kept the first time one is drawn.
-const LATER = ['/vendor/pdf.mjs', '/vendor/pdf.worker.mjs'];
+// The document engine too (selecting and highlighting on a PDF's pages): its modules, its two workers and its WebAssembly.
+const ENGINE = ['index', 'client', 'worker', 'wasm/marginalia_wasm', 'selection', 'selection-engine', 'frame', 'geometry', 'overlay', 'surfaces', 'caret', 'dom', 'themes', 'recolor', 'recolor-worker']
+  .map((m) => `/vendor/marginalia/${m}.js`).concat('/vendor/marginalia/ui.css', '/vendor/marginalia/wasm/marginalia_wasm_bg.wasm');
+const LATER = ['/vendor/pdf.mjs', '/vendor/pdf.worker.mjs', ...ENGINE];
 const WAIT = 8000;   // how long the check behind a served file may take
 
 self.addEventListener('install', (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL).then(() => Promise.all(LATER.map((u) => c.add(u).catch(() => {}))))).then(() => self.skipWaiting())));

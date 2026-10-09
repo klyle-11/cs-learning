@@ -290,6 +290,7 @@
   #tree .leaf > summary { list-style: none; }
   #tree .leaf > summary::-webkit-details-marker { display: none; }
   #tree .leaf > summary.active { color: var(--accent); }
+  #tree .leaf > summary.lockedLine small { color: var(--muted); font-weight: 400; }
   #tree .leaf > summary.playing::before { content: '♪ '; color: var(--accent2); }
   #tree .kids { padding-left: 14px; }
   .file { display: flex; align-items: baseline; gap: 6px; padding: 2px 4px; cursor: pointer; color: var(--muted); }
@@ -456,6 +457,15 @@
   .ic:disabled { opacity: .4; cursor: default; }
   .viewbar .keepB, .track .keepB, #mini .keepB { flex: none; width: 22px; height: 22px; padding: 2px; }
   .thumb .keepB { position: absolute; top: 4px; right: 4px; width: 26px; height: 26px; padding: 5px; border-radius: 50%; background: color-mix(in srgb, var(--paper) 88%, transparent); }
+  /* asked before a press on a track takes the place of what is playing */
+  .ask { position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(0, 0, 0, .4); }
+  .ask[hidden] { display: none; }
+  .ask > div { width: 100%; max-width: 380px; padding: 16px; background: var(--paper); border: 1px solid var(--rule); box-shadow: 0 4px 20px rgba(0, 0, 0, .3); font: 14px/1.4 var(--head); color: var(--ink); }
+  .ask p { margin: 0 0 6px; color: var(--muted); overflow-wrap: anywhere; }
+  .ask p b { color: var(--ink); }
+  .ask .row { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+  .ask button { padding: 9px 14px; font-size: 14px; }
+  .ask button.main { background: var(--ink); color: var(--paper); border-color: var(--ink); }
   .qnone { margin: 4px 0; color: var(--muted); font-size: 13px; }
   .qlink { display: block; border: 0; padding: 0; margin: 6px 0; color: var(--accent); text-decoration: underline; }
   .pl-row .ic { width: 34px; height: 34px; padding: 7px; border: 1px solid var(--rule); color: inherit; }
@@ -467,6 +477,12 @@
   #mini .mini-q { position: relative; max-height: 78px; overflow-y: auto; margin-top: 4px; }
   #mini .track { height: 26px; padding: 0 2px; align-items: center; }
   #mini .track .q { flex: none; margin-left: auto; }
+  /* a line's place in the queue: to the top, up, down, to the bottom; narrow, so the name keeps its room */
+  .track .mvs { flex: none; display: flex; align-self: center; }
+  .track .mvs .mv { width: 18px; padding: 2px 0; margin: 0; }
+  #mini .track { gap: 4px; }
+  #mini .track .mvs { margin-left: auto; }
+  #mini .track .mvs .mv, #mini .track .mvs ~ .q { margin-left: 0; }
   #mini .pl-time { margin-left: auto; padding-left: 4px; font-size: 11px; white-space: nowrap; }
   /* a video that carries on in the background: kept in the page, out of sight */
   #park { position: fixed; left: -10px; top: 0; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
@@ -500,6 +516,9 @@
   #gate button { font-size: 14px; padding: 4px 10px; }
   #gate button.main { display: block; margin: 12px 0 8px; padding: 8px 18px; background: var(--ink); color: var(--paper); border-color: var(--ink); }
   #gate button.main:disabled { opacity: .5; }
+  /* the name a folder being uploaded goes by in the hub */
+  #gate .nameRow { display: block; margin: 8px 0 4px; color: var(--muted); font-size: 13px; }
+  #gate .fly .nameRow { margin: 2px 0; }
   #gate button.link { display: block; border: 0; padding: 4px 0; color: var(--accent); text-decoration: underline; text-align: left; }
   #gate button.x { position: absolute; top: 14px; right: 14px; border: 0; color: var(--muted); }
   #gate .code { font: 700 28px Menlo, Consolas, monospace; letter-spacing: .08em; margin: 8px 0 4px; }
@@ -645,6 +664,8 @@
   .thumb { display: block; padding: 0; margin: 0 0 8px; break-inside: avoid; border: 1px solid var(--rule); background: var(--shade); aspect-ratio: 1; overflow: hidden; position: relative; }
   .cardSize { display: flex; align-items: center; gap: 6px; margin: 4px 0; font: 12px var(--head); color: var(--muted); }
   .cardSize input { width: 150px; accent-color: var(--accent); }
+  article:has(.cardSize:not(.auto)) .cardSize.auto { display: none; }   /* the page shows a slider of its own just now */
+  .library .cardSize { margin: 0 0 6px; }
   .thumb img, .thumb video, .thumb canvas { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
   /* the library on the front page: the folders at the top of the workspace as cards, under their kinds */
   .library { clear: both; }
@@ -654,6 +675,9 @@
   .md .crumbs { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; margin: 0 0 -1.2em; font: 12px var(--head); color: var(--muted); }
   .md .crumbs button { border: 0; padding: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; }
   .md .crumbs button:hover { text-decoration: underline; }
+  /* "lock now" under the title of an open locked folder's page */
+  .md .lockTop { margin: -6px 0 10px; }
+  .md .lockTop button { padding: 2px 10px; font: 12px var(--head); color: var(--accent); }
   /* on a card with sound in it: play all of it from here */
   .thumb .playB { position: absolute; top: 4px; right: 4px; width: 28px; height: 28px; padding: 6px; border-radius: 50%; background: color-mix(in srgb, var(--paper) 88%, transparent); color: var(--ink); }
   .thumb .playB:hover, .thumb .playB:focus-visible { background: var(--accent); color: var(--paper); }
@@ -709,9 +733,17 @@
   #groupBtn { font: 700 14px/1 var(--head); }
   #groupBtn[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
   #tree .sect.group { border-top: 0; margin-top: 2px; padding-top: 0; }
-  #tree .sect.group summary { color: var(--accent); }
+  /* a group's mark: #name and how many are in it; in the list they run on, wrapping, and one that is pressed lists what is in it under them */
+  .tags { display: flex; flex-wrap: wrap; gap: 4px 5px; }
+  .tags[hidden] { display: none; }
+  .tag { flex: none; max-width: 100%; padding: 1px 8px; border: 1px solid var(--rule); border-radius: 11px; background: none; color: var(--accent); font: 12px/1.5 var(--head); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tag small { color: var(--muted); font-size: 11px; }
+  .tag[aria-expanded="true"], .tag[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+  .tag[aria-expanded="true"] small, .tag[aria-pressed="true"] small { color: inherit; }
+  #tree .sect.group .tags { padding: 4px 0 2px; }
+  #tree .sect.group > .kids { padding: 2px 0 0 4px; }
+  #pickBar .tags { flex: 1 1 100%; margin-top: 3px; }
   #tree .sect.group .file button { visibility: visible; font-size: 13px; }
-  #tree .sect.group summary small { color: var(--muted); font-weight: 400; }
   #tree .group-foot { display: flex; gap: 12px; padding-left: 4px; }
   /* a file of saved links: one card, a list of its addresses on pointing at it, the media itself on pressing it */
   .linkcard { position: relative; border: 1px solid var(--rule); background: var(--shade); margin: 6px 0; }
@@ -729,9 +761,11 @@
   /* a PDF drawn by the reader itself: its pages one under the other */
   .pdfwrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .pdfpages { flex: 1; min-height: 0; overflow: auto; -webkit-overflow-scrolling: touch; background: var(--shade); padding: 8px 0; }
-  .pdfpage { width: calc(var(--zoom, 1) * 100%); max-width: calc(var(--zoom, 1) * 1100px); margin: 0 auto 8px; background: #fff; }
+  /* `relative`: the selection and the highlights are laid inside the page (the document engine's layers, vendor/marginalia/ui.css), and scroll with it */
+  .pdfpage { position: relative; width: calc(var(--zoom, 1) * 100%); max-width: calc(var(--zoom, 1) * 1100px); margin: 0 auto 8px; background: #fff; }
   .pdfpage canvas { display: block; width: 100%; height: 100%; }
-  .pdfwrap.night .pdfpage { filter: invert(1) hue-rotate(180deg); }
+  /* a dark theme: a page the engine recoloured is in the theme's colours already, pictures untouched; any other is turned inside out */
+  .pdfwrap.night .pdfpage:not(.recoloured) { filter: invert(1) hue-rotate(180deg); }
   .viewbar .pdfwhere { flex: none; color: var(--muted); }
   .viewbar button[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
   .linksAsk { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 16px 24px; font: 14px/1.45 var(--head); }
@@ -746,6 +780,7 @@
   .latest { float: right; width: 230px; max-height: 70vh; overflow-y: auto; margin: 16px 0 12px 24px; padding: 8px 10px; border: 1px solid var(--rule); background: var(--shade); font: 13px/1.35 var(--head); }
   .latest h5 { margin: 0 0 2px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 400; }
   .latest .empty { margin: 6px 0 0; color: var(--muted); }
+  .latest.favs { clear: right; margin-top: 0; max-height: 50vh; }   /* what is in #fav, under the latest notes */
   .tick { border-left: 3px solid var(--rule); padding: 3px 0 3px 8px; margin-top: 8px; cursor: pointer; }
   .tick .quote { font-family: var(--body); font-style: italic; color: var(--muted); }
   .tick .meta { margin-top: 2px; font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -760,20 +795,50 @@
   .note .reply p { margin: 0 0 .5em; }
 
   /* composer: along the bottom, like talking to the open document */
-  #composer { flex: none; border-top: 1px solid var(--rule); padding: 8px 32px 12px; }
-  #composer .inner { max-width: 720px; margin: 0 auto; }
+  /* The note box is a card that floats over the foot of the page, as in the document engine's own reader: the page is not
+     cut short for it, it scrolls behind. `--kb` lifts it over a phone's keyboard, which does not make the page shorter.
+     `--note-room` is the card's height (kept by app.js): what scrolls is given that much more at its end, so its last
+     lines can be brought clear of the card; what cannot scroll behind it (a frame, a picture) ends above it instead. */
+  #composer { position: absolute; z-index: 5; left: 50%; bottom: 14px; width: min(720px, calc(100% - 28px)); transform: translate(-50%, calc(-1 * var(--kb, 0px))); padding: 4px 12px 10px; border: 1px solid var(--rule); border-radius: 22px; background: color-mix(in srgb, var(--paper) 90%, transparent); -webkit-backdrop-filter: blur(14px) saturate(1.4); backdrop-filter: blur(14px) saturate(1.4); box-shadow: 0 12px 34px rgba(0, 0, 0, .14); }
+  #work .body { padding-bottom: var(--note-room, 0px); }
+  #work .body:has(> .scroller), #work .body:has(.pdfpages) { padding-bottom: 0; }
+  #work .scroller { padding-bottom: var(--note-room, 0px); }
+  #work .pdfpages { padding-bottom: calc(8px + var(--note-room, 0px)); }
   #grip { display: block; width: 64px; height: 16px; margin: -4px auto 2px; padding: 0; border: 0; cursor: ns-resize; touch-action: none; }
   #grip::before { content: ''; display: block; width: 40px; height: 4px; margin: 6px auto; border-radius: 2px; background: var(--rule); }
   #grip:hover::before, #grip:focus-visible::before { background: var(--muted); }
   #ctxRow { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  /* Before "In:": puts the bars over the page away (the tabs, a phone's top bar), and brings them back. The note box stays, so the button does. */
+  #bare { flex: none; width: 26px; height: 26px; padding: 4px; border: 0; color: var(--muted); }
+  #bare svg { display: block; width: 100%; height: 100%; }
+  #bare .in, #bare[aria-pressed="true"] .out { display: none; }
+  #bare[aria-pressed="true"] .in { display: inline; }
+  #bare[aria-pressed="true"] { color: var(--accent); }
+  body.bare #mobileBar, body.bare .tabs { display: none; }
+  /* over the page's top left corner while the bars are away: a gear (settings, and the bars back) and a PDF's page, both muted */
+  #bareBar { display: none; position: absolute; z-index: 4; top: 6px; left: 8px; align-items: center; gap: 4px; color: var(--muted); opacity: .6; pointer-events: none; }
+  body.bare #bareBar { display: flex; }
+  body.bare.side-closed #bareBar { left: 20px; }
+  #bareBar:hover, #bareBar:focus-within { opacity: 1; }
+  #bareBar button { pointer-events: auto; width: 30px; height: 30px; padding: 5px; border: 0; border-radius: 50%; background: color-mix(in srgb, var(--paper) 78%, transparent); color: inherit; }
+  #bareBar button svg { display: block; width: 100%; height: 100%; }
+  #bareBar button[hidden] { display: none; }
+  #bareLess, #bareMore { font: 600 17px/1 var(--head); }
+  #bareBar small { padding: 2px 7px; border-radius: 9px; background: color-mix(in srgb, var(--paper) 78%, transparent); font: 11px var(--head); white-space: nowrap; }
+  #bareBar small:empty { display: none; }
+  body.lightbox #bareBar { display: none; }
   #context { flex: 1; min-width: 0; font: 13px var(--head); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* Saves the note, over the box's top right corner. Where there is a keyboard, Enter does it; a phone's keyboard
      cannot be counted on to send Enter as a key, so there (and on any touch screen) this is shown. */
   #send { display: none; flex: none; padding: 6px 12px; border-color: var(--accent); color: var(--accent); font: 600 13px var(--head); }
+  /* puts what is open in the group #fav, and takes it out: dark while it is in */
+  #favBtn { flex: none; padding: 3px 9px; color: var(--muted); font: 600 12px var(--head); }
+  #favBtn[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  #favBtn:disabled { opacity: .45; }
   @media (max-width: 760px), (pointer: coarse) { #send { display: block; } }
   #context b { color: var(--ink); font-weight: 600; }
   #context button { border: 0; padding: 0 4px; color: var(--accent); }
-  #input { display: block; width: 100%; height: 56px; resize: none; padding: 8px 10px; border: 1px solid var(--rule); border-radius: 0 0 20px 20px; background: var(--field); font: 16px/1.4 var(--body); }
+  #input { display: block; width: 100%; height: 56px; resize: none; padding: 8px 12px; border: 1px solid var(--rule); border-radius: 14px; background: var(--field); font: 16px/1.4 var(--body); }
 
   /* ---- phone: one column; files and notes become slide-over drawers ---- */
   @media (max-width: 760px) {
@@ -805,6 +870,8 @@
     #sideEdge, #sideToggle, #notesToggle, #rightGrip, .tabs > button:not(.keep), .file .sideBtn { display: none !important; }
     .file .plus { visibility: visible; font-size: 22px; line-height: 1; padding: 0 10px; }
     #tree summary .plus { opacity: 1; font-size: 22px; line-height: 1; padding: 0 10px; }
+    .tag { padding: 4px 10px; border-radius: 15px; font-size: 13px; }
+    .tags { gap: 6px; }
     /* + at the end of the tab bar, held there while the tabs scroll: opens the list to add a tab from, which then says so at its top */
     .tabs > button.newTab { display: block; margin-left: auto !important; padding: 0 14px; border-left: 1px solid var(--rule); color: var(--ink); font-size: 22px; line-height: 1; }
     body.m-add #pickNote { display: block; margin: 0 0 8px; padding: 8px 10px; border-left: 3px solid var(--accent2); background: var(--shade); color: var(--ink); font: 14px var(--head); }
@@ -823,6 +890,8 @@
     #mini { font-size: 13.5px; }
     #mini .mini-q { max-height: 114px; }
     #mini .track { height: 38px; }
+    .track .mvs .mv { width: 26px; padding: 6px 1px; }
+    #bare { width: 34px; height: 34px; padding: 7px; margin-left: -6px; }
     #sideTools { gap: 6px; }
     #sideTools button, #sideTools select { padding: 6px 10px; font-size: 14px; }
     #net, #privacy, #hubsBox, #net button, #privacy button, #hubsBox button, #netBrief { font-size: 13.5px; }
@@ -864,8 +933,8 @@
     body.lightbox.immersive .reel { bottom: 0; }
     body.lightbox.immersive .viewbar .immOnly { display: inline-block; }
 
-    /* the input sits in the lower part of the screen and grows while typing */
-    #composer { padding: 6px 10px calc(8px + env(safe-area-inset-bottom)); }
+    /* the note box lies along the foot of the screen, edge to edge, over the page */
+    #composer { left: 0; bottom: 0; width: 100%; transform: translateY(calc(-1 * var(--kb, 0px))); border-width: 1px 0 0; border-radius: 0; box-shadow: none; padding: 6px 10px calc(8px + env(safe-area-inset-bottom)); }
     #input { height: 46px; padding: 8px 18px; border-radius: 0 0 40px 40px; }   /* the lower corners follow the phone's own, which are far rounder than a window's */
     #flyout { gap: 12px; padding: 9px 12px; }
     #flyout .sw { width: 28px; height: 28px; }
@@ -875,7 +944,7 @@
 </head>
 <body>
 <div id="app">
-  <header id="mobileBar"><button id="mFiles" aria-label="Files and outline">☰ Files</button><b><span class="dot"></span><span id="mTitle"></span></b><button id="mTools" hidden aria-pressed="false" aria-label="This PDF's controls: size, night, reader, keep" title="This PDF's controls: size, night, reader, keep"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg></button><button id="mNotes">Notes</button></header>
+  <header id="mobileBar"><button id="mFiles" aria-label="Files and outline">☰ Files</button><b><span class="dot"></span><span id="mTitle"></span></b><button id="mTools" hidden aria-pressed="false" aria-label="This PDF's controls: size, theme, reader, keep" title="This PDF's controls: size, theme, reader, keep"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg></button><button id="mNotes">Notes</button></header>
   <button id="sideEdge" aria-label="Show sidebar" title="Sidebar (hover to peek, click to keep open)">›</button>
   <nav id="side" aria-label="Files and outline">
     <div id="sideHead">
@@ -915,7 +984,7 @@
     <form id="composer">
       <div class="inner">
         <button type="button" id="grip" aria-label="Make the note box taller or shorter" title="Drag up to make the note box taller, or press to switch between small and tall"></button>
-        <div id="ctxRow"><div id="context"></div><button type="submit" id="send" title="Save the note">Save note</button></div>
+        <div id="ctxRow"><button type="button" id="bare" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="out" d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/><path class="in" d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg></button><div id="context"></div><button type="submit" id="send" title="Save the note">Save note</button></div>
         <textarea id="input" placeholder="Write a note or a question…  (Enter to save, Shift+Enter for a new line; // to link to a file, heading or note)"></textarea>
       </div>
     </form>

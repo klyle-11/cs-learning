@@ -8,6 +8,7 @@ const panesEl = $('panes'), treeEl = $('tree'), tocEl = $('toc'), notesEl = $('n
 
 let docs = [], config = { title: '' }, notes = [], pendingQuote = '', pendingHead = null, activeHl = null, editing = false;
 let pendingAt = null;   // where the selection behind pendingQuote begins: { article, node, offset }
+let pendingMg = null;   // the same for words selected on a PDF's page: { of, fields(), clear() } (see drawPdf)
 // Layout: one or two panes, each with its open tabs. Saved per folder.
 // Pane 0 is the main reader; pane 1, when present, sits in the right column above or below the notes.
 let state = { panes: [{ tabs: [], active: null }], active: 0, notesOpen: true, sideOpen: true, notesW: 300, notesH: 40, notesTop: false, opened: [] };
@@ -233,7 +234,7 @@ function frameHere(v, node) {
   v.bookHere = top;
   top.classList.add('hub-here');
 }
-const dressBooks = () => { views.forEach(dressBook); for (const f of document.querySelectorAll('iframe.pdf')) f.paint?.(); };   // a PDF's night follows the theme too
+const dressBooks = () => { views.forEach(dressBook); for (const f of document.querySelectorAll('.viewer .pdf')) f.paint?.(); };   // a PDF's pages follow the theme too
 
 function setTheme(t, keep = true) {
   document.documentElement.dataset.theme = t;
@@ -303,6 +304,15 @@ function setInputH(px) {
   store.set('view', view);
 }
 if (view.inputH) input.style.height = view.inputH + 'px';
+// The note box floats over the foot of the page. How tall it is, with the gap under it, is kept where the styles can
+// use it (--note-room), so what scrolls behind it can be scrolled clear of it.
+new ResizeObserver(() => { const c = $('composer'), h = c.offsetHeight; $('work').style.setProperty('--note-room', (h ? h + parseFloat(getComputedStyle(c).bottom || 0) + 8 : 0) + 'px'); }).observe($('composer'));
+// A phone's keyboard covers the foot of the page without making the page shorter (iOS): the note box is lifted by as much.
+if (window.visualViewport) {
+  const lift = () => $('composer').style.setProperty('--kb', Math.max(0, innerHeight - visualViewport.height - visualViewport.offsetTop) + 'px');
+  visualViewport.addEventListener('resize', lift);
+  visualViewport.addEventListener('scroll', lift);
+}
 const toggleInputH = () => setInputH(input.offsetHeight > 110 ? 46 : innerHeight * 0.25);
 $('grip').addEventListener('pointerdown', (e) => {
   e.preventDefault();
@@ -361,7 +371,57 @@ function setNotesOpen(open) {
   applyLayout();
 }
 // Size and arrange the right column from the saved layout.
+// The bars over the page (the tabs, and a phone's top bar) put away while reading, so the text has the room. The
+// button is at the start of the line over the note box, which stays, so it is always there to bring them back.
+function paintBare() {
+  const on = !!state.bare, b = $('bare');
+  document.body.classList.toggle('bare', on);
+  b.setAttribute('aria-pressed', on);
+  b.title = on ? 'Show the tabs and the top bar again' : 'Put the tabs and the top bar away, for more room to read';
+  b.setAttribute('aria-label', b.title);
+  if (on) paintBareWhere();
+}
+$('bare').onclick = () => { state.bare = !state.bare; save(); paintBare(); };
+// While they are away, two small muted things lie over the page's top left corner: a gear, which brings the bars back
+// and opens the sidebar at its settings; and, for a PDF, the page being read ("page 7 of 120"), which the tab said.
+const bareBar = el('div'), bareGear = el('button', 'ic'), bareWhere = el('small'), bareLess = el('button', '', '−'), bareMore = el('button', '', '+');
+bareBar.id = 'bareBar';
+bareGear.id = 'bareGear';
+bareWhere.id = 'bareWhere';
+bareGear.type = 'button';
+bareGear.title = 'Settings and the sidebar: brings the tabs and the top bar back';
+bareGear.setAttribute('aria-label', bareGear.title);
+bareGear.append($('settingsBtn').querySelector('svg').cloneNode(true));
+// A PDF's smaller and larger, too: on a phone its own bar, which has them, is put away.
+for (const [b, id, title, times] of [[bareLess, 'bareLess', 'Smaller pages', 1 / 1.25], [bareMore, 'bareMore', 'Larger pages', 1.25]]) {
+  b.id = id;
+  b.type = 'button';
+  b.title = title;
+  b.setAttribute('aria-label', title);
+  b.onclick = () => { const z = views[state.active]?.zoom; if (z?.path === state.panes[state.active]?.active) z.by(times); };
+}
+bareBar.append(bareGear, bareLess, bareMore, bareWhere);
+$('work').append(bareBar);
+bareGear.onclick = () => {
+  state.bare = false;
+  paintBare();
+  setSideOpen(true);
+  save();
+  if (phone.matches && !document.body.classList.contains('m-side')) drawer('side');   // on a phone the sidebar is a drawer
+  setSettingsOpen(true);
+};
+// A viewer's own bar (a PDF's, a picture's) stays where it is while the tabs are away: the two go under it, not over it,
+// and the page is not said twice where that bar is saying it.
+function paintBareWhere() {
+  const v = views[state.active], w = v?.where, bar = v?.body?.querySelector('.viewbar'), shown = !!bar?.offsetHeight;
+  bareBar.style.top = (shown ? bar.getBoundingClientRect().bottom - $('work').getBoundingClientRect().top : 0) + 6 + 'px';
+  const open = state.panes[state.active]?.active, said = shown && !!bar.querySelector('.pdfwhere')?.offsetHeight;   // `said`: the PDF's own bar is showing, page, − and + and all
+  bareWhere.textContent = w && w.path === open && !said ? w.text : '';
+  bareLess.hidden = bareMore.hidden = !(v?.zoom?.path === open && isPdf(open || '')) || said;
+}
+addEventListener('resize', paintBareWhere);
 function applyLayout() {
+  paintBare();
   const split = state.panes.length > 1, r = $('right');
   document.body.classList.toggle('no-right', !split && !state.notesOpen);
   r.classList.toggle('no-doc', !split);
@@ -469,8 +529,9 @@ async function sourceOf(folder) {
   }
   let handle = await folderHandles.get(folder);
   if (handle && (await handle.queryPermission({ mode: 'read' })) !== 'granted' && (await handle.requestPermission({ mode: 'read' }).catch(() => 'denied')) !== 'granted') handle = null;
+  const known = !!handle;   // the folder this one was uploaded from: whatever it is called on its disk, it is the one
   if (!handle) { try { handle = await showDirectoryPicker({ mode: 'read' }); } catch { return null; } }
-  return { name: handle.name, handle, files: await filesIn(handle).catch(() => null) };
+  return { name: handle.name, handle, known, files: await filesIn(handle).catch(() => null) };
 }
 async function updateFolder(folder) {
   const src = await sourceOf(folder);   // first, while the press still counts as one: a browser gives leave to read only then
@@ -480,7 +541,7 @@ async function updateFolder(folder) {
   const done = (text) => { line.textContent = text; const ok = el('button', 'main', 'OK'); ok.onclick = closeGate; box.append(ok); ok.focus(); };
   showGate(`Update \u201c${name}\u201d`, (card) => { box = card; card.append(line); });
   if (!src.files) return done('That folder could not be read. It may have been moved or renamed: press "update\u2026" again and choose it.');
-  if (src.name !== name && !(await new Promise((ok) => {
+  if (src.name !== name && !src.known && !(await new Promise((ok) => {
     const go = el('button', 'main', `Update from \u201c${src.name}\u201d`), no = el('button', 'link', 'Cancel');
     line.textContent = `The folder chosen is \u201c${src.name}\u201d, and this one is \u201c${name}\u201d. What is in it would be added here.`;
     go.onclick = () => { go.remove(); no.remove(); ok(true); };
@@ -551,6 +612,31 @@ async function droppedFolders(data) {
   return files;
 }
 
+// A folder goes by a name of its own in the hub, asked for when it is uploaded: the name it has on the disk it
+// came from is only what is offered first. So two folders called "Music", from two drives, can be told apart here,
+// and a folder renamed on its disk since is not held to its old name. Characters no disk takes are left out.
+const hubName = (s) => s.replace(/[\\/:*?"<>|\x00-\x1f]+/g, ' ').replace(/\s+/g, ' ').trim().replace(/^\.+/, '').slice(0, 80).trim();
+const underName = (files, from, to) => (to === from ? files : files.map((f) => (f.rel.split('/')[0] === from ? { ...f, rel: to + f.rel.slice(from.length) } : f)));
+const takenName = (name) => allDocs.some((d) => d.path.toLowerCase().startsWith(name.toLowerCase() + '/'));
+function nameBox(folder, onChange) {
+  const wrap = el('label', 'nameRow', 'Name in the hub '), box = el('input'), says = el('p', 'sub');
+  box.value = folder;
+  box.maxLength = 80;
+  box.autocomplete = 'off';
+  box.spellcheck = false;
+  box.title = 'What this folder is called here. It need not be its name on the disk it came from.';
+  wrap.append(box);
+  const name = () => hubName(box.value) || folder;
+  const paint = () => {
+    says.textContent = takenName(name()) ? `There is a folder \u201c${name()}\u201d here already: these files would be added to it. Give this one another name to keep them apart.` : name() !== folder ? `On its disk it is \u201c${folder}\u201d; here it will be \u201c${name()}\u201d.` : '';
+    says.hidden = !says.textContent;
+    onChange?.(name());
+  };
+  box.addEventListener('input', paint);
+  return { wrap, says, name, paint };
+}
+// The folder chosen is remembered for "update\u2026" under the name it goes by here.
+function pickedAs(from, to) { if (to !== from && picked.has(from)) { picked.set(to, picked.get(from)); picked.delete(from); } }
 // After a folder is picked: say what was found, and ask where it should go.
 function offerUpload(files) {
   const folders = [...new Set(files.map((f) => f.rel.split('/')[0]))];
@@ -572,11 +658,12 @@ function offerUpload(files) {
     if (readme) pick.value = readme.rel;
   }
   const front = () => (pick.value === '-' ? null : { from: ok.find((f) => f.rel === pick.value)?.file || null });
-  const add = el('button', 'main', `Add to this workspace, as the folder “${folder}”`);
-  add.onclick = () => runUpload(ok, null, folder, front(), lock.checked);
+  const add = el('button', 'main', '');
+  const as = nameBox(folder, (n) => { add.textContent = `Add to this workspace, as the folder “${n}”`; });
+  add.onclick = () => { const to = as.name(); pickedAs(folder, to); runUpload(underName(ok, folder, to), null, to, front(), lock.checked); };
   const fresh = el('button', '', 'Open as its own workspace, in place of this one');
   fresh.title = 'Nothing is deleted: the current workspace stays on disk and in the workspace menu';
-  fresh.onclick = () => runUpload(ok, folder, folder, front());
+  fresh.onclick = () => runUpload(ok, as.name(), as.name(), front());
   // A folder added to this workspace can be locked: its password is chosen the first time it is opened.
   const lockWrap = el('label', 'check'), lock = el('input');
   lock.type = 'checkbox';
@@ -584,7 +671,8 @@ function offerUpload(files) {
   lock.onchange = () => { fresh.disabled = lock.checked; fresh.title = lock.checked ? 'A lock is for a folder inside a workspace' : 'Nothing is deleted: the current workspace stays on disk and in the workspace menu'; };
   const cancel = el('button', 'link', 'Cancel');
   cancel.onclick = closeGate;
-  showGate(`Upload “${folder}”`, (card) => card.append(said, pick, lockWrap, add, fresh, anotherFolder(files), cancel), true);
+  showGate(`Upload “${folder}”`, (card) => card.append(said, as.wrap, as.says, pick, lockWrap, add, fresh, anotherFolder(files), cancel), true);
+  as.paint();
   add.focus();
 }
 // "add another folder…": the chooser again, and what it gives joins what is here already.
@@ -600,11 +688,14 @@ function offerUploads(files, folders) {
   const ok = files.filter(({ rel, file }) => !rel.split('/').some((x) => x.startsWith('.') || x === 'node_modules') && file.size <= 50 * 1024 * 1024);
   const said = el('p', '', `${folders.length} folders, ${ok.length} files` + (ok.length < files.length ? ` (${files.length - ok.length} hidden or oversized files left out)` : '') + ':');
   const list = el('div', 'fly');
+  const names = new Map();   // each folder's name in the hub, as typed in its line
   for (const f of folders) {
-    const row = el('div', '', f), out = el('button', 'link', 'leave out');
-    row.append(el('small', '', ` ${ok.filter(({ rel }) => rel.startsWith(f + '/')).length} files `), out);
+    const row = el('div'), out = el('button', 'link', 'leave out'), as = nameBox(f);
+    names.set(f, as);
+    row.append(as.wrap, el('small', '', ` ${ok.filter(({ rel }) => rel.startsWith(f + '/')).length} files `), out, as.says);
     out.onclick = () => offerUpload(files.filter(({ rel }) => rel.split('/')[0] !== f));
     list.append(row);
+    as.paint();
   }
   const frontOfUpload = (f) => {
     const tops = ok.filter(({ rel }) => rel.startsWith(f + '/') && rel.split('/').length === 2 && /\.md$/i.test(rel));
@@ -615,7 +706,12 @@ function offerUploads(files, folders) {
   lock.type = 'checkbox';
   lockWrap.append(lock, ' Lock these folders: ask for a password before showing them');
   const add = el('button', 'main', `Add all ${folders.length} to this workspace`);
-  add.onclick = () => runUpload(ok, null, folders[0], frontOfUpload(folders[0]), lock.checked, folders.slice(1).map((f) => ({ folder: f, front: frontOfUpload(f) })));
+  add.onclick = () => {
+    const fronts = new Map(folders.map((f) => [f, frontOfUpload(f)])), to = (f) => names.get(f).name();
+    let all = ok;
+    for (const f of folders) { all = underName(all, f, to(f)); pickedAs(f, to(f)); }
+    runUpload(all, null, to(folders[0]), fronts.get(folders[0]), lock.checked, folders.slice(1).map((f) => ({ folder: to(f), front: fronts.get(f) })));
+  };
   const cancel = el('button', 'link', 'Cancel');
   cancel.onclick = closeGate;
   showGate(`Upload ${folders.length} folders`, (card) => card.append(said, list, lockWrap, add, anotherFolder(files), cancel), true);
@@ -856,6 +952,15 @@ function field(label, type = 'text') {
   box.type = type;
   box.autocomplete = type === 'password' ? 'current-password' : 'off';
   box.spellcheck = false;
+  // A password on a page with no name beside it: a browser that keeps passwords takes the nearest box of text for
+  // the name, which here is the find box, and fills that in (with whatever was last looked for) whenever the
+  // password is asked for. So the password gets a name of its own to be kept under, out of sight.
+  if (type === 'password') {
+    const who = el('input');
+    who.type = 'text'; who.name = 'username'; who.autocomplete = 'username'; who.value = 'hub';
+    who.tabIndex = -1; who.readOnly = true; who.setAttribute('aria-hidden', 'true'); who.style.display = 'none';
+    wrap.append(who);
+  }
   wrap.append(box);
   return [wrap, box];
 }
@@ -1629,9 +1734,10 @@ let serverDocs = [];
 //
 // There is one password for all of them. The first folder locked chooses it;
 // every folder locked after that is given the same salt and hash, after the
-// password has been typed to show it is known. Typing it opens every folder
-// that has it. (Folders locked before this, each with a password of its own,
-// keep theirs until their lock is removed and set again.)
+// password has been typed to show it is known. Typing it opens the folder it
+// was typed for and no other: each locked folder is opened by itself. (Folders
+// locked before this, each with a password of its own, keep theirs until their
+// lock is removed and set again.)
 //
 // This is a lock on the reader, not on the files: they are stored as they
 // are, and removing the folder and uploading it again takes the lock off.
@@ -1830,8 +1936,8 @@ function lockForm(box, folder, done) {
       try { await saveLocks(next); }
       catch (e) { go.disabled = false; say.textContent = e.offline ? 'The server is not reachable. A folder can only be locked while connected.' : e.message; return; }
     }
-    // The password has been typed: every folder that has it is open.
-    for (const [f, l] of Object.entries(locks())) if (f === folder || l.hash === mine.hash) unlocked.add(f);
+    // The password has been typed for this folder: this one is open. The others stay locked, the same password or not, until each is opened itself.
+    unlocked.add(folder);
     done();
   };
   go.onclick = run;
@@ -1849,6 +1955,29 @@ function showLock(pane, folder) {
   box.append(rm);
   v.bar.style.width = '0%';
   v.body.replaceChildren(box);
+}
+// What can be done with a folder as a whole, under its page (its front page, or the one made for it: a gallery,
+// a music page, a page of cards): bring it up to date, lock it, take it out of the workspace.
+function folderActs(folder) {
+  const rm = el('button', '', 'remove folder…');
+  rm.title = 'Take this folder and everything in it out of the workspace';
+  rm.onclick = () => removeFolder(folder);
+  const up = el('button', '', 'update…');
+  up.title = 'Bring in what is new or changed in this folder on this device since it was uploaded. Only those files are sent.';
+  up.onclick = () => updateFolder(folder);
+  return [up, ...lockButtons(folder), rm];
+}
+// "lock now" once more, under the title of a page of a locked folder that is open: the one among the buttons at the
+// foot of the page is a long way down a full folder. The folder that is locked may be one further out than the page's own.
+function addLockTop(article, folder) {
+  const f = Object.keys(locks()).filter((x) => (folder + '/').startsWith(x + '/') && unlocked.has(x)).sort((a, b) => a.length - b.length)[0];
+  const h1 = article.querySelector('h1');
+  if (!f || !h1) return;
+  const box = el('div', 'lockTop'), b = el('button', '', f === folder ? 'lock now' : `lock \u201c${f.split('/').pop()}\u201d now`);
+  b.title = 'Hide this folder again until its password is typed';
+  b.onclick = () => { unlocked.delete(f); locksChanged(); };
+  box.append(b);
+  h1.after(box);
 }
 // Lock controls on a folder's front page (the folder is open, or not locked).
 function lockButtons(folder) {
@@ -2033,7 +2162,7 @@ async function openSearch(s) {
 }
 // On the main front page, over its title: closed until pressed. Pressing a line opens what was opened from that search; × forgets it.
 function appendSearches(article) {
-  const list = searchesOf();
+  const list = searchesOf().filter((s) => !gateOf(s.open?.path || ''));   // not what was found in a folder that is locked now: its words and the file's name would say what is in there
   if (!list.length) return;
   const det = el('details', 'searches'), sum = el('summary', '', 'Latest searches'), count = el('small', '', ' \u00b7 ' + list.length), rows = el('div', 'listing');
   sum.append(count);
@@ -2097,7 +2226,8 @@ function countKinds() {
   folderBits = new Map();
   folderCount = new Map();
   const books = new Set();
-  for (const d of docs) {
+  // What is in a locked folder is counted too (it is not in `docs`): locked, the folder is still of its kind, and stays under it in the list.
+  for (const d of [...docs, ...allDocs.filter((x) => gateOf(x.path) && !isCover(x.path))]) {
     if (d.gallery || d.front || isFront(d.path)) continue;
     const cut = d.path.search(/\.epub\//i), item = cut >= 0 ? d.path.slice(0, cut + 5) : d.path;
     if (cut < 0 || !books.has(item)) {
@@ -2186,7 +2316,7 @@ function renderTree() {
       const whole = prefix + name;   // the folder this line stands for, however far down what it shows is: what a pin remembers
       // A folder of things to look at, listen to or read (see unitOf) is one line, with nothing to open out:
       // pressing it opens the page that shows what is in it, and that is where it is gone into.
-      const u = finding ? null : unitOf(whole);
+      const u = finding || gateOf(whole + '/') === whole ? null : unitOf(whole);
       if (u) {
         // A lone document that is text is read as it is: no page stands before it. Inside another folder it is the file's own line.
         const text = u.type === 'one' && !!u.path && !isBinary(u.path) && u.page.endsWith('/');
@@ -2202,6 +2332,14 @@ function renderTree() {
         if (inner !== label.split(' / ').pop()) label += ' / ' + inner;
         name += '/' + inner;
         sub = sub.dirs[inner];
+      }
+      // A locked folder stays where it was in the list, as one line that says it is locked: pressing it asks for the password.
+      if (!finding && gateOf(prefix + name + '/') === prefix + name) {
+        const line = leafRow(prefix + name, frontOf(prefix + name), [], label, 'Locked: press to unlock');
+        line.firstChild.classList.add('lockedLine');
+        line.firstChild.append(el('small', '', ' \u00b7 locked'));
+        addPin(parent.appendChild(line).firstChild, whole);
+        continue;
       }
       if (!finding) {
         // A book is one line that opens it: its chapters are in the outline.
@@ -2459,7 +2597,7 @@ function paintQuick(sum) {
   if (!d || !inView(d) || gateOf(d.path) || d.path === sum.dataset.path) return;   // a one-line folder's own page is what its line opens already
   const b = el('button', 'quick', d.front || isFront(d.path) ? 'Front page' : d.title || d.path.split('/').pop());
   b.title = 'Open what was last opened in this folder: ' + d.path;
-  b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); if (isAudio(d.path) && playable(d.path)) playTrack(d.path); else openDoc(d.path); };   // not a press on the folder's line: it stays closed. A track plays, as it does from its own line
+  b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); if (isAudio(d.path) && playable(d.path)) askPlay(d.path); else openDoc(d.path); };   // not a press on the folder's line: it stays closed. A track plays, as it does from its own line
   sum.append(b);
 }
 // A handle to get past an open folder: while a top-level folder (or group)
@@ -2487,7 +2625,7 @@ addEventListener('resize', askPin);
 // Pressing a file's line, in the list or among what was found (see fileRow for why a sound file differs).
 function pressFile(path, e) {
   const mod = e.metaKey || e.ctrlKey || e.altKey;
-  return isAudio(path) && !mod ? (playable(path) ? playTrack(path) : openDoc(path)) : openDoc(path, { side: mod });
+  return isAudio(path) && !mod ? (playable(path) ? askPlay(path) : openDoc(path)) : openDoc(path, { side: mod });
 }
 // The + on a line of the list: opens it in a tab of its own, alongside what is already open. On a folder's line
 // that is the folder's page (its front page, or else the one made for it), and the line neither opens out nor closes for it.
@@ -2866,7 +3004,7 @@ async function showDoc(pane, hash, keepScroll) {
 async function drawDoc(pane, hash, keepScroll) {
   const v = views[pane], path = state.panes[pane].active;
   const y = v.scroller ? v.scroller.scrollTop : 0;
-  Object.assign(v, { heads: [], cur: null, article: null, surface: null, scroller: null, frame: null, dress: null, bookHere: null, place: null });
+  Object.assign(v, { heads: [], cur: null, article: null, surface: null, scroller: null, frame: null, dress: null, bookHere: null, place: null, pdfMarks: null, zoom: null });
   if (!path) { v.body.replaceChildren(el('p', 'empty', 'Nothing open. Pick a file on the left.')); return; }
   if (gateOf(path)) { showLock(pane, gateOf(path)); return; }
 
@@ -3049,7 +3187,7 @@ async function drawDoc(pane, hash, keepScroll) {
   article.replaceChildren(safeHtml(md));
   // The main front page gives up its right-hand corner to the latest notes and
   // highlights. The box sits outside the article, so it is not itself highlighted.
-  if (docOf(path)?.front) { scroller.classList.add('has-latest'); scroller.append(el('aside', 'latest')); }
+  if (docOf(path)?.front) { scroller.classList.add('has-latest'); scroller.append(el('aside', 'latest'), el('aside', 'latest favs')); }
   scroller.append(article);
   v.body.replaceChildren(scroller);
   Object.assign(v, { scroller, article, surface: article });
@@ -3075,6 +3213,7 @@ async function drawDoc(pane, hash, keepScroll) {
   if (isFront(path)) {
     if (folderOf(path)) { folderBody(article, pane, folderOf(path), frontTile(folderOf(path))); addCrumbs(article, pane, folderOf(path), path); }
     else { addLibrary(article, pane); appendBrowse(article, pane, '', frontTile('')); }
+    ensureSlider(article);
   }
   if (isFront(path)) {
     // Editing is a pencil at the end of the description (beside the title, if there is none), not a button of its own.
@@ -3084,18 +3223,11 @@ async function drawDoc(pane, hash, keepScroll) {
     b.setAttribute('aria-label', b.title);
     b.onclick = () => editFront(pane, md, folder);
     // A folder's own front page can also lock the folder, or take it out of the workspace.
-    if (folder) {
-      const rm = el('button', '', 'remove folder…');
-      rm.title = 'Take this folder and everything in it out of the workspace';
-      rm.onclick = () => removeFolder(folder);
-      const up = el('button', '', 'update\u2026');
-      up.title = 'Bring in what is new or changed in this folder on this device since it was uploaded. Only those files are sent.';
-      up.onclick = () => updateFolder(folder);
-      acts.append(up, ...lockButtons(folder), rm);
-    }
+    if (folder) acts.append(...folderActs(folder));
     const h1 = article.querySelector('h1'), after = h1?.nextElementSibling?.classList.contains('tiles') ? h1.nextElementSibling.nextElementSibling : h1?.nextElementSibling, says = after?.tagName === 'P' ? after : null;   // a folder's small tiles sit between the title and the description
     if (says || h1) (says || h1).append(b); else acts.append(b);
     if (acts.children.length) article.append(acts);   // under everything: these are for now and then
+    if (folder) addLockTop(article, folder);
   }
   highlightAll(article, path);
   article.addEventListener('click', (e) => onDocClick(e, pane));
@@ -3158,6 +3290,17 @@ function loadQueue() {
 }
 function toggleQueue(path) {
   queue = queue.includes(path) ? queue.filter((p) => p !== path) : [...queue, path];
+  saveQueue();
+  renderPlayers();
+}
+// Move a line of the queue: one place up or down (-1, 1), or to its top or its bottom. What is playing goes on playing.
+function moveQueue(path, to) {
+  const at = queue.indexOf(path), end = queue.length - 1;
+  const put = to === 'top' ? 0 : to === 'bottom' ? end : Math.min(end, Math.max(0, at + to));
+  if (at < 0 || put === at) return;
+  const list = queue.filter((p) => p !== path);
+  list.splice(put, 0, path);
+  queue = list;
   saveQueue();
   renderPlayers();
 }
@@ -3235,6 +3378,10 @@ const PLAY_ICONS = {
   queue: '<path d="M3 6h12v2H3zM3 11h12v2H3zM3 16h8v2H3zM17 13h2v3h3v2h-3v3h-2v-3h-3v-2h3z"/>',
   queued: '<path d="M3 6h12v2H3zM3 11h12v2H3zM3 16h8v2H3z"/>' + line('M14 17.5l2.5 2.5 5-5'),
   remove: line('M6 6l12 12M18 6L6 18'),
+  up: '<path d="M12 7l7 9H5z"/>',
+  down: '<path d="M12 17l-7-9h14z"/>',
+  top: '<path d="M5 4h14v2.5H5zM12 9l7 9H5z"/>',
+  bottom: '<path d="M5 17.5h14V20H5zM12 15L5 6h14z"/>',
   keep: line('M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19.5h14'),
   kept: line('M5 12.5l4.5 4.5L19 7.5M5 20.5h14'),
   shuffle: line('M3 7h3l9 10h4M3 17h3l3-3.3M12.5 10.3 15 7h4M17 4.5 19.5 7 17 9.5M17 14.5 19.5 17 17 19.5'),
@@ -3296,6 +3443,41 @@ async function playTrack(path, start = true) {
 // What next and previous step through: the queue, or every sound file if nothing is queued.
 const playList = () => (queue.length ? queue : tracks().map((t) => t.path)).filter((p) => docOf(p) && playable(p));
 const playPath = (path) => (isVideo(path) ? playVideo(path) : playTrack(path));
+// A press on a track's line (in the list, the queue, a folder's page) while something is playing asks first: a line
+// is easily pressed by accident, on a phone above all, and what was playing is then lost with its place. Nothing
+// playing, or paused: it plays at once. The player's own buttons (next, previous) and the end of a track never ask.
+const askEl = el('div', 'ask');
+askEl.hidden = true;
+document.body.append(askEl);
+const closeAsk = () => { askEl.hidden = true; askEl.replaceChildren(); };
+askEl.onclick = (e) => { if (e.target === askEl) closeAsk(); };
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && !askEl.hidden) closeAsk(); });
+function askPlay(path) {
+  const now = nowPath(), media = nowEl();
+  if (!now || !docOf(now) || media.paused || media.ended) return playPath(path);
+  const box = el('div'), row = el('div', 'row'), same = now === path;
+  box.setAttribute('role', 'dialog');
+  box.setAttribute('aria-modal', 'true');
+  box.setAttribute('aria-label', same ? 'Start this again?' : 'Play this instead?');
+  const said = el('p', '', 'Playing: ');
+  said.append(el('b', '', showName(now)));
+  const ask = el('p', '', same ? 'Start it again from the beginning?' : 'Play this instead? ');
+  if (!same) ask.append(el('b', '', showName(path)));
+  const stay = el('button', '', 'Keep playing'), go = el('button', 'main', same ? 'Start again' : 'Play instead');
+  stay.onclick = closeAsk;
+  go.onclick = () => { closeAsk(); playPath(path); };
+  row.append(stay);
+  if (!same && !queue.includes(path)) {
+    const later = el('button', '', 'Add to queue');
+    later.onclick = () => { closeAsk(); toggleQueue(path); };
+    row.append(later);
+  }
+  row.append(go);
+  box.append(said, ask, row);
+  askEl.replaceChildren(box);
+  askEl.hidden = false;
+  stay.focus();   // Enter, or a second press in the same spot, changes nothing
+}
 // `auto`: the track ended by itself, so with repeat off the end of the list is the end.
 function stepTrack(dir, auto) {
   const list = playList();
@@ -3377,11 +3559,20 @@ function queueRows(where) {
     row.setAttribute('role', 'button');
     row.append(el('span', '', showName(p)));
     if (where) row.append(isVideo(p) ? el('small', '', 'video') : pathLabel(p.split('/').slice(0, -1).join(' / ') || 'top level'));
+    // Its place in the queue: to the top, one up, one down, to the bottom.
+    const moves = el('div', 'mvs'), first = p === queue[0], last = p === queue[queue.length - 1];
+    for (const [icon, label, to, off] of [['top', 'To the top of the queue', 'top', first], ['up', 'One place up', -1, first], ['down', 'One place down', 1, last], ['bottom', 'To the bottom of the queue', 'bottom', last]]) {
+      const b = iconBtn(icon, label, 'q mv');
+      b.disabled = off;
+      b.onclick = (e) => { e.stopPropagation(); moveQueue(p, to); };
+      moves.append(b);
+    }
+    row.append(moves);
     const out = iconBtn('remove', 'Take out of the queue', 'q');
     out.onclick = (e) => { e.stopPropagation(); toggleQueue(p); };
     if (docOf(p) && canKeep(p)) row.append(keepBtn(p));   // keep a copy of it on this device, or remove the copy
     row.append(out);
-    row.onclick = () => ok && playPath(p);
+    row.onclick = () => ok && askPlay(p);
     rows.push(row);
   }
   return rows;
@@ -3424,7 +3615,7 @@ function renderPlayers() {
       row.append(st, el('span', '', t.path.split('/').pop()));
       if (!grouped) row.append(pathLabel(folder));
       row.append(el('small', '', here ? 'on this device' : ok ? 'server only' : 'not available offline'), queueBtn(t.path));
-      row.onclick = () => ok && playTrack(t.path);
+      row.onclick = () => ok && askPlay(t.path);
       box.append(row);
     }
     if (!tracks().filter(inView).length) box.append(el('p', 'empty', view.onlyKept && tracks().length ? 'No sound files are kept on this device. “Show everything” in the file list brings the rest back.' : 'No sound files in this folder yet.'));
@@ -3638,21 +3829,41 @@ function showMedia(pane, path) {
   const reel = box.querySelector('.reel'), cur = reel?.querySelector('.cur');
   if (cur) { const r = reel.getBoundingClientRect(), c = cur.getBoundingClientRect(); reel.scrollLeft += c.left + c.width / 2 - (r.left + r.width / 2); }
 }
-// A PDF is shown by the browser's own PDF viewer, in a frame. Its pages are
-// fixed drawings, so they cannot take the theme's colours as a book's page
-// does; what can be done is "night": the frame's colours are turned inside
-// out (and the hues turned back), which gives dark pages with light text.
-// Night follows the pane's theme, dark or light, until the button is pressed;
-// after that it stays as chosen, for every PDF on this device.
-// A phone's browser has no PDF viewer for a frame (an iPhone or iPad draws
-// the first page only, as a picture; Android's draws nothing): there the
-// reader draws the pages itself, with PDF.js (see drawPdf). "reader" in the
-// bar switches between the two on any device, and stays as chosen.
+// A PDF's pages are drawn by the reader itself, with PDF.js (see drawPdf):
+// drawn here, words on a page can be selected, highlighted and written about,
+// as in any other document. "reader" in the bar hands the PDF to the browser's
+// own PDF viewer, in a frame, and back; it stays as chosen. In a frame nothing
+// can be highlighted, and a phone's browser has no viewer for one (an iPhone
+// or iPad draws the first page only, as a picture; Android's draws nothing).
+// A PDF's pages are fixed drawings. Drawn here, "theme" in the bar gives them
+// the pane's theme all the same: the paper is recoloured to the theme's paper
+// and the ink to its ink, and the pictures are left as they are (the document
+// engine says where they are). Off, the PDF is as it was made. It is on under
+// a dark theme and off under a light one until the button is pressed; after
+// that it stays as chosen, for every PDF on this device. Until the engine has
+// the file, a dark theme's pages are turned inside out instead, pictures and all.
+// In a frame the pages cannot be recoloured: the button there is "night", which
+// turns the colours inside out, and is kept apart from "theme".
 // Without the server (or for another hub's file, which a frame may not be
 // given), the copy kept on this device is drawn the same way, read from the
 // device a piece at a time: PDF.js itself is among what the service worker
 // keeps (sw.js), so that needs no server either.
-const framesPdf = navigator.pdfViewerEnabled !== false && !/iP(hone|ad|od)|Android/.test(navigator.userAgent) && !(navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+// The document engine (marginalia-engine: Rust as WebAssembly, in a worker of its own) reads a PDF's text with a box
+// for every character, and makes the anchor a highlight is found again by. With it come the selection that is drawn
+// here (double-press a word, drag its two handles), the layer highlights are drawn in, and the recolouring of pages.
+// Fetched the first time a PDF is drawn here; without it a PDF is still drawn, and nothing on it can be selected.
+let mgLib = null;
+const marginalia = () => (mgLib ||= Promise.all(['index', 'selection', 'themes'].map((m) => import(`/vendor/marginalia/${m}.js`))).then((parts) => {
+  const css = el('link');
+  css.rel = 'stylesheet';
+  css.href = '/vendor/marginalia/ui.css';
+  document.head.append(css);
+  return Object.assign({}, ...parts);
+}).catch((e) => { mgLib = null; throw e; }));
+// A PDF's file, for the engine, which reads it in place: the copy kept on this device, or the whole file from the server.
+const pdfBlob = async (path) => (kept.has(path) ? (await idb.get('docs', keyOf(path)))?.blob : null) || call(rawUrl(path)).then((r) => (r.ok ? r.blob() : null));
+// The file's SHA-256 is what the engine knows it by. Working it out reads the whole file, so it is remembered.
+const mgPrints = () => store.get('mgPrints:' + config.root) || {};
 let pdfLib = null;   // PDF.js, fetched from the server the first time a PDF is drawn here
 const pdfjs = () => (pdfLib ||= import('/vendor/pdf.mjs').then((m) => { m.GlobalWorkerOptions.workerSrc = '/vendor/pdf.worker.mjs'; return m; }).catch((e) => { pdfLib = null; throw e; }));
 // The pages of a PDF, drawn by the reader: one under the other, each as wide
@@ -3694,13 +3905,14 @@ async function drawPdf(pane, path, box, bar, copy) {
   const holders = [], jobs = new Map();
   let zoom = 1, line = Promise.resolve();
   const seen = new IntersectionObserver((all) => {
-    if (!scroller.isConnected) { seen.disconnect(); doc.destroy(); return; }   // the pane shows something else now
+    if (!scroller.isConnected) { seen.disconnect(); shut(); doc.destroy(); return; }   // the pane shows something else now
     for (const e of all) { e.target.dataset.far = e.isIntersecting ? '0' : '1'; if (e.isIntersecting) draw(e.target); else drop(e.target); }   // "far" is kept on the page itself, so a drawing that finishes late knows it is no longer wanted
   }, { root: scroller, rootMargin: '150% 0px' });
-  const drop = (h) => { jobs.get(h)?.cancel(); jobs.delete(h); const c = h.firstChild; if (c) { c.width = c.height = 0; c.remove(); } };
+  const canvasOf = (h) => h.querySelector(':scope > canvas');
+  const drop = (h) => { jobs.get(h)?.cancel(); jobs.delete(h); const c = canvasOf(h); if (c) { c.width = c.height = 0; c.remove(); } leave(h); };
   // One page at a time: a phone has little memory for drawing surfaces.
   const draw = (h) => { line = line.then(async () => {
-    if (!h.isConnected || h.firstChild || h.dataset.far === '1') return;
+    if (!h.isConnected || canvasOf(h) || h.dataset.far === '1') return;
     try {
       const page = await doc.getPage(Number(h.dataset.n)), flat = page.getViewport({ scale: 1 });
       h.style.aspectRatio = String(flat.width / flat.height);
@@ -3713,9 +3925,15 @@ async function drawPdf(pane, path, box, bar, copy) {
       jobs.set(h, job);
       await job.promise;
       jobs.delete(h);
-      if (h.dataset.far === '1' || h.firstChild) { canvas.width = canvas.height = 0; return; }
-      h.append(canvas);
+      const theme = mg ? box.theme : null;
+      const done = !!theme && await recolour(canvas, view, Number(h.dataset.n) - 1, theme).then(() => true, () => false);   // not recoloured: the page is turned inside out instead, as before
+      if (h.dataset.far === '1' || canvasOf(h)) { canvas.width = canvas.height = 0; return; }
+      h.classList.toggle('recoloured', done);
+      h.style.background = done ? `rgb(${theme.bg.join(' ')})` : '';
+      h.prepend(canvas);
       page.cleanup();
+      proxies.set(h, page);
+      enter(h);
     } catch { jobs.delete(h); /* let go while it was being drawn, or a page that cannot be read: its place stays blank */ }
   }); };
   for (let n = 1; n <= doc.numPages; n++) {
@@ -3726,12 +3944,202 @@ async function drawPdf(pane, path, box, bar, copy) {
   }
   scroller.append(...holders);
   for (const h of holders) { h.dataset.far = '1'; seen.observe(h); }
+  const redraw = () => { for (const h of holders) if (canvasOf(h)) { drop(h); draw(h); } };
+
+  // ---- words on the pages: selecting, highlighting, notes ----
+  // The engine is given the file when the first pages are already showing; from then on each drawn page has its text and
+  // the box of every character, and so can be selected on. A highlight is a note like any other, with the engine's anchor
+  // in `mg`: where its words are is asked of the engine, which finds them by position, and by the words themselves if the
+  // file has changed. Everything is drawn inside the page's own element, so it scrolls with the page.
+  let mg = null;   // { lib, engine, summary, selection, recolourer }, once the engine has the file
+  const pages = new Map();     // page (from 0) -> as drawn: what the selection and the highlights need of it
+  const proxies = new Map();   // holder -> its PDF.js page
+  const read = new Map();      // page -> its text and boxes, for the last few dozen pages drawn
+  const marks = new Map();     // note id -> { exact, at }: where the engine found its words (`at` null: not found)
+  const viewOf = (h) => { const page = proxies.get(h); return page.getViewport({ scale: h.clientWidth / page.getViewport({ scale: 1 }).width }); };
+  const boxesIn = (view, at) => at.rects.map((r) => {
+    const [ax, ay, bx, by] = view.convertToViewportRectangle([r.x0, r.y0, r.x1, r.y1]);
+    return { left: Math.min(ax, bx), top: Math.min(ay, by), width: Math.abs(bx - ax), height: Math.abs(by - ay) };
+  });
+  // The one box around several, as the flyout wants it: in the window, `from` being the corner they are measured from.
+  const around = (boxes, from = { left: 0, top: 0 }) => {
+    const left = Math.min(...boxes.map((b) => b.left)), top = Math.min(...boxes.map((b) => b.top));
+    return new DOMRect(from.left + left, from.top + top, Math.max(...boxes.map((b) => b.left + b.width)) - left, Math.max(...boxes.map((b) => b.top + b.height)) - top);
+  };
+  const textOf = (unit) => {
+    if (!read.has(unit)) {
+      read.set(unit, Promise.all([mg.engine.text(unit), mg.engine.geometry(unit)]).then(([t, geometry]) => ({ ...t, geometry })).catch((e) => { read.delete(unit); throw e; }));
+      if (read.size > 48) read.delete(read.keys().next().value);
+    }
+    return read.get(unit);
+  };
+  const recolour = async (canvas, view, unit, theme) => {
+    const t = await textOf(unit);
+    await mg.recolourer.apply(canvas, mg.lib.pageJob(theme, { images: t.images, lines: t.lines?.map((l) => l.bbox), ocr: t.ocr, needsOcr: t.needsOcr, pageBox: mg.summary.units[unit].pageBox }, mg.lib.pdfjsToPx(view, 1)));
+  };
+  // A page has been drawn: make it one that can be selected on, and draw its highlights.
+  const enter = async (h) => {
+    if (!mg) return;
+    const unit = Number(h.dataset.n) - 1, canvas = canvasOf(h);
+    let t;
+    try { t = await textOf(unit); } catch { return; }
+    if (!mg || !canvas?.isConnected) return;   // let go while its text was read
+    pages.set(unit, { unit, element: h, viewport: viewOf(h), text: t.text, geometry: t.geometry, overlay: pages.get(unit)?.overlay ?? new mg.lib.OverlayLayer(h) });
+    paintMarks(unit);
+    mg.selection.render();
+  };
+  function leave(h) {
+    const unit = Number(h.dataset.n) - 1, p = pages.get(unit);
+    h.classList.remove('recoloured');
+    h.style.background = '';
+    if (!p) return;
+    p.overlay.el.remove();
+    pages.delete(unit);
+    if (mg?.selection.sel?.unit === unit) mg.selection.clear();
+  }
+  const mine = () => notes.filter((n) => n.doc === path && n.mg?.anchor);
+  const paintMarks = (unit) => {
+    const p = pages.get(unit);
+    if (!p) return;
+    const shapes = [];
+    for (const n of mine()) {
+      const at = marks.get(n.id)?.at;
+      if (at?.unit === unit) shapes.push({ annotation: { id: n.id, kind: 'highlight', color: n.type ? typeOf(n.type).color : '#fbeeb0', note: n.text }, boxes: boxesIn(p.viewport, at) });
+    }
+    p.overlay.set(shapes, activeHl);
+  };
+  const paintAll = () => { for (const unit of pages.keys()) paintMarks(unit); };
+  // Ask the engine where each highlight's words are (once each), then draw them.
+  let placing = Promise.resolve();
+  const placeMarks = () => (placing = placing.then(async () => {
+    if (!mg || !scroller.isConnected) return;
+    const all = mine();
+    for (const id of [...marks.keys()]) if (!all.some((n) => n.id === id)) marks.delete(id);
+    for (const n of all) {
+      const exact = n.mg.anchor.quote?.exact;
+      if (marks.get(n.id)?.exact === exact) continue;
+      let at = null;
+      try { at = await mg.engine.resolve(n.mg.anchor); } catch { /* an anchor the engine cannot read: its words are not found */ }
+      marks.set(n.id, { exact, at });
+      if (at) lost.delete(n.id); else lost.add(n.id);
+    }
+    for (const d of notesEl.querySelectorAll('.note')) d.classList.toggle('lost', lost.has(d.dataset.id));
+    paintAll();
+  }).catch(() => {}));
+  // Bring a highlight into view: a third of the way down the window, and outlined for a moment once its page is drawn.
+  const showMark = async (id) => {
+    await placeMarks();
+    const at = marks.get(id)?.at, h = at && holders[at.unit];
+    if (!h) return;
+    const page = await doc.getPage(at.unit + 1), boxes = boxesIn(page.getViewport({ scale: h.clientWidth / page.getViewport({ scale: 1 }).width }), at);
+    scroller.scrollTop += h.getBoundingClientRect().top + around(boxes).top - scroller.getBoundingClientRect().top - scroller.clientHeight / 3;
+    let tries = 0;
+    const wait = setInterval(() => {
+      const p = pages.get(at.unit);
+      if (p) p.overlay.flash(boxesIn(p.viewport, at));
+      if (p || ++tries > 50 || !scroller.isConnected) clearInterval(wait);
+    }, 100);
+  };
+  v.pdfMarks = { place: placeMarks, paint: paintAll, show: showMark };
+  // The pages' theme was changed (`again`), or the engine has just come: dark pages want their highlights laid over, not multiplied.
+  box.repaint = (again) => {
+    scroller.classList.toggle('mg-dark', !!mg && !!box.theme && mg.lib.isDark(box.theme));
+    if (again && mg) redraw();
+  };
+  // The pages are as wide as the pane: when that changes, what is drawn over them is measured again.
+  const sized = new ResizeObserver(perFrame(() => {
+    if (!mg) return;
+    for (const p of pages.values()) p.viewport = viewOf(p.element);
+    paintAll();
+    mg.selection.render();
+  }));
+  sized.observe(scroller);
+  const shut = () => {
+    sized.disconnect();
+    mg?.selection.destroy();
+    mg?.recolourer.close();
+    mg?.engine.close();
+    if (pendingMg?.of === scroller) pendingMg = null;
+    if (v.pdfMarks?.show === showMark) v.pdfMarks = null;
+    mg = null;
+  };
+  (async () => {
+    let engine;
+    try {
+      const lib = await marginalia(), blob = await pdfBlob(path);
+      if (!blob || !scroller.isConnected) return;
+      engine = new lib.Engine();
+      const prints = mgPrints(), known = prints[path];
+      const summary = await engine.open(blob, known?.size === blob.size ? { fingerprint: known.print } : {});
+      if (!scroller.isConnected) { engine.close(); return; }
+      if (known?.print !== summary.info.fingerprint || known.size !== blob.size) store.set('mgPrints:' + config.root, { ...prints, [path]: { size: blob.size, print: summary.info.fingerprint } });
+      const surface = lib.pdfSurface(() => pages.values());
+      let flyTimer;
+      const selection = new lib.SelectionEngine(scroller, surface, {
+        // Runs at every step of a handle being dragged: the anchor is made only when the highlight or the note is.
+        change: (range) => {
+          clearTimeout(flyTimer);
+          const text = range && pages.get(range.unit)?.text, cut = text ? lib.trimRange(text, range.start, range.end) : null;
+          const quote = cut ? text.slice(cut.start, cut.end).replace(/\s+/g, ' ').trim() : '';
+          if (!quote) {
+            if (pendingMg?.of !== scroller) return;
+            pendingMg = null;
+            pendingQuote = '';
+            hideFlyout();
+          } else {
+            if (pane !== state.active) { state.active = pane; chrome(); }
+            pendingQuote = quote;
+            pendingAt = pendingHead = activeHl = null;
+            pendingMg = {
+              of: scroller, clear: () => selection.clear(),
+              fields: async () => ({ mg: { doc: summary.info.fingerprint, anchor: await engine.createAnchor(range.unit, cut.start, cut.end) }, heading: '', headingText: 'page ' + (range.unit + 1) }),
+            };
+            // The swatches come when the selection has stopped changing, beside it.
+            flyTimer = setTimeout(() => {
+              const b = pendingMg?.of === scroller ? surface.rects(range.unit, cut.start, cut.end) : [];
+              if (b.length) showFlyout(around(b), touch.matches);
+            }, 350);
+          }
+          renderContext();
+          paintAll();
+          laterNotes();
+        },
+        // A press that selected nothing: on a highlight, it is the one being worked on; anywhere else, none is.
+        tap: (x, y) => {
+          for (const p of pages.values()) {
+            const r = p.element.getBoundingClientRect();
+            if (x < r.left || x > r.right || y < r.top || y > r.bottom) continue;
+            const id = p.overlay.hit(x - r.left, y - r.top)[0];
+            if (!id) break;
+            dropPendingMg();
+            selectHighlight(id, around(p.overlay.boxesOf(id), r));
+            return true;
+          }
+          if (activeHl) { activeHl = null; hideFlyout(); renderContext(); renderNotes(false); markActive(); }
+          return false;
+        },
+      });
+      mg = { lib, engine, summary, selection, recolourer: new lib.Recolorer() };
+      scroller.classList.add('mg-selectable');
+      // The engine stopped and started again by itself: it has the file again, and nothing here was kept in it.
+      engine.onRestart = async () => { read.clear(); marks.clear(); await placeMarks(); };
+      engine.onBroken = shut;
+      box.repaint();
+      for (const h of holders) if (canvasOf(h)) { if (box.theme) { drop(h); draw(h); } else enter(h); }
+      placeMarks();
+    } catch (e) {
+      // No engine (a server from before it had one), or a file it cannot read (locked with a password, or damaged): the pages are drawn all the same.
+      engine?.close();
+      console.warn('The document engine did not open ' + path + ': nothing can be selected on its pages.', e?.code || e);
+    }
+  })();
   const tell = perFrame(() => {
     const top = scroller.getBoundingClientRect().top + scroller.clientHeight / 3;
     const at = holders.find((h) => h.getBoundingClientRect().bottom > top) || holders[holders.length - 1];
     where.textContent = `page ${at.dataset.n} of ${doc.numPages}`;
     // On a phone the PDF's own bar is put away, and its tab says the page (see renderTabs).
     v.where = { path, text: where.textContent };
+    paintBareWhere();
     const onTab = state.panes[pane]?.active === path && v.tabsEl.querySelector('.tab.active .tabWhere');
     if (onTab) onTab.textContent = v.where.text;
     v.bar.style.width = (100 * Number(at.dataset.n) / doc.numPages) + '%';
@@ -3750,10 +4158,11 @@ async function drawPdf(pane, path, box, bar, copy) {
     zoom = Math.min(4, Math.max(0.5, z));
     scroller.style.setProperty('--zoom', zoom);
     scroller.scrollTop = mid * scroller.scrollHeight - scroller.clientHeight / 2;
-    for (const h of holders) if (h.firstChild) { drop(h); draw(h); }   // drawn again at the new size
+    redraw();   // drawn again at the new size
   };
   less.onclick = () => setZoom(zoom / 1.25);
   more.onclick = () => setZoom(zoom * 1.25);
+  v.zoom = { path, by: (times) => setZoom(zoom * times) };   // for the small − and + over the page while the bars are away
   bar.firstChild.after(where, less, more);
   const left = placesOf()[path], here = scrollMem.get(pane + ':' + path);
   if (here != null) scroller.scrollTop = here;   // a tab gone back to, the screen as it was
@@ -3770,6 +4179,7 @@ $('mTools').onclick = () => {
   state.pdfTools = !state.pdfTools;
   save();
   for (const box of document.querySelectorAll('.viewer.pdfv')) box.classList.toggle('tools', state.pdfTools);
+  paintBareWhere();
   $('mTools').setAttribute('aria-pressed', state.pdfTools);
 };
 function showPdf(pane, path) {
@@ -3785,24 +4195,28 @@ function showPdf(pane, path) {
   // file) the reader draws the pages itself, from the copy kept on this device, or from the other hub while it answers.
   const here = net.online && !hub.url, copy = !here && (kept.has(path) || (!!hub.url && net.online));
   if (here || copy) {
-    const own = copy || (state.pdfOwn ?? !framesPdf), mine = el('button', '', 'reader');
-    mine.title = 'Draw the pages in the reader itself, not with the browser\'s PDF viewer: for a browser that shows only the first page in here, or none.';
+    const own = copy || (state.pdfOwn ?? true), mine = el('button', '', 'reader');
+    mine.title = 'Draw the pages in the reader itself, where their words can be highlighted and written about. Off: the browser\'s own PDF viewer, in which nothing can be highlighted.';
     mine.setAttribute('aria-pressed', own);
     mine.onclick = () => { state.pdfOwn = !own; save(); showDoc(pane); };
-    const frame = el(own ? 'div' : 'iframe', 'pdf'), night = el('button', '', 'night');   // drawn here, `frame` is only what carries "night"
+    const frame = el(own ? 'div' : 'iframe', 'pdf'), night = el('button', '', own ? 'theme' : 'night');   // drawn here, `frame` is only what carries the pages' theme
     if (!own) { frame.title = path.split('/').pop(); frame.referrerPolicy = 'no-referrer'; }
     const paint = () => {
       const probe = el('span');
       box.append(probe);
-      probe.style.color = 'var(--paper)';
-      const [r, g, b] = getComputedStyle(probe).color.match(/[\d.]+/g).map(Number);
+      // The pane's paper and ink, as the three numbers of each.
+      const rgb = (name) => { probe.style.color = `var(${name})`; return getComputedStyle(probe).color.match(/[\d.]+/g).slice(0, 3).map((n) => Math.round(Number(n))); };
+      const bg = rgb('--paper'), fg = rgb('--ink'), dark = bg[0] * 0.299 + bg[1] * 0.587 + bg[2] * 0.114 < 128;
       probe.remove();
-      const on = state.pdfNight ?? (r * 0.299 + g * 0.587 + b * 0.114 < 128);
-      frame.classList.toggle('night', on);
+      const on = (own ? state.pdfTheme : state.pdfNight) ?? dark;
+      const was = JSON.stringify(frame.theme || null);
+      frame.theme = own && on ? { bg, fg } : null;
+      frame.classList.toggle('night', on && (dark || !own));   // turned inside out: in a frame, and here a dark theme's page that could not be recoloured
       night.setAttribute('aria-pressed', on);
+      if (was !== JSON.stringify(frame.theme)) frame.repaint?.(true);
     };
-    night.title = 'Dark pages with light text. Pictures in the PDF are turned too.';
-    night.onclick = () => { state.pdfNight = !frame.classList.contains('night'); save(); paint(); };
+    night.title = own ? 'The pages in this theme\'s colours: its paper and its ink, with pictures left as they are. Off: the PDF as it was made.' : 'Dark pages with light text. Pictures in the PDF are turned too.';
+    night.onclick = () => { state[own ? 'pdfTheme' : 'pdfNight'] = night.getAttribute('aria-pressed') !== 'true'; save(); paint(); };
     frame.paint = paint;
     open.href = rawUrl(path);
     bar.append(night, keepBtn(path));
@@ -3884,8 +4298,26 @@ function setCardSize(n) {
   if (!(n >= 70 && n <= 420)) return;
   state.cardSize = Math.round(n);
   for (const g of document.querySelectorAll('.thumbs')) g.style.setProperty('--card', state.cardSize + 'px');
+  for (const s of document.querySelectorAll('.cardSize input')) if (s !== document.activeElement) s.value = state.cardSize;   // every slider says the one size
   clearTimeout(cardSaved);
   cardSaved = setTimeout(save, 400);
+}
+// The slider that sets it. One size holds for every page of cards, so every page of cards has the slider: a page
+// that would have none of its own (the front page's folders, a folder's cards) is given one over its first cards
+// (`auto`: it gives way, in the style sheet, while the page shows a slider of its own).
+function sizeSlider(cls = '') {
+  const wide = el('label', 'cardSize' + cls, 'size '), slide = el('input');
+  slide.type = 'range'; slide.min = 70; slide.max = 420; slide.value = cardSize();
+  slide.setAttribute('aria-label', 'Size of the cards');
+  slide.oninput = () => setCardSize(Number(slide.value));
+  wide.append(slide);
+  return wide;
+}
+function ensureSlider(article) {
+  const first = article.querySelector('.thumbs');
+  if (!first || article.querySelector('.cardSize.auto')) return;
+  const box = first.closest('.library');
+  if (box) box.prepend(sizeSlider(' auto')); else first.before(sizeSlider(' auto'));
 }
 // The gallery of a file of links is a page apart; its slider says what it was set to.
 window.addEventListener('message', (e) => {
@@ -4068,7 +4500,7 @@ function oneCard(article, folder) {
   const kind = one.book ? 'docs' : kindOfBits(isAudio(one.path) ? 1 : isVideo(one.path) ? 2 : isImage(one.path) ? 8 : 4);
   const name = one.book ? one.book.split('/').pop().replace(/\.epub$/i, '') : docOf(one.path)?.title || one.path.split('/').pop();
   const card = el('div', 'onecard'), pic = el('div', 'pic'), what = el('div', 'what'), go = el('button', 'main', one.book ? 'Read' : isAudio(one.path) ? 'Play' : 'Open');
-  const open = () => { const p = target(); if (!p) return; if (isAudio(p) && playable(p)) playTrack(p); else openDoc(p); };
+  const open = () => { const p = target(); if (!p) return; if (isAudio(p) && playable(p)) askPlay(p); else openDoc(p); };
   card.tabIndex = 0;
   card.setAttribute('role', 'button');
   card.onclick = open;
@@ -4185,7 +4617,7 @@ function folderCards(pane, kids) {
     }
     const go = (e) => {
       const side = e.metaKey || e.ctrlKey || e.altKey;
-      if (!to) openFolder(kid.path, side); else if (isAudio(to) && playable(to) && !side) playTrack(to); else openDoc(to, { pane, side });
+      if (!to) openFolder(kid.path, side); else if (isAudio(to) && playable(to) && !side) askPlay(to); else openDoc(to, { pane, side });
     };
     t.onclick = go;
     t.onkeydown = (e) => { if (e.key === 'Enter' && e.target === t) go(e); };
@@ -4255,6 +4687,10 @@ function showGallery(pane, path) {
   else if (path.endsWith('/')) folderBody(article, pane, folder, ['one', 'set', 'folder'].includes(kind) ? null : kind);
   else { appendBrowse(article, pane, folder, kind, 'browse:' + path); addCover(article, folder); }
   addCrumbs(article, pane, folder, path);
+  // A folder with no front page has these under the page made for it, as a front page has them (not the inbox, which is the reader's own).
+  if (folder && kind !== 'inbox') { const acts = el('div', 'editFront'); acts.append(...folderActs(folder)); article.append(acts); }
+  ensureSlider(article);
+  if (folder && kind !== 'inbox') addLockTop(article, folder);
   scroller.addEventListener('scroll', () => keepPlace(path, scroller.scrollTop), { passive: true });
   scroller.scrollTop = scrollMem.get(pane + ':' + path) ?? placesOf()[path] ?? 0;
 }
@@ -4265,11 +4701,7 @@ function inboxBody(article, pane, folder) {
   const when = (d) => (d.book ? Math.max(...d.pages.map((p) => p.changed || 0)) : isPending(d.path) ? Number.MAX_VALUE : d.changed || 0);
   const items = asItems(docs.filter((d) => d.path.startsWith(folder + '/') && !isFront(d.path) && inView(d))).sort((a, b) => when(b) - when(a));
   if (!items.length) { article.append(el('p', 'empty', 'Nothing here yet. What is added with “add files” arrives here.')); return; }
-  const wide = el('label', 'cardSize', 'size '), slide = el('input'), grid = el('div', 'thumbs');
-  slide.type = 'range'; slide.min = 70; slide.max = 420; slide.value = cardSize();
-  slide.setAttribute('aria-label', 'Size of the cards');
-  slide.oninput = () => setCardSize(Number(slide.value));
-  wide.append(slide);
+  const wide = sizeSlider(), grid = el('div', 'thumbs');
   grid.style.setProperty('--card', cardSize() + 'px');
   for (const d of items) {
     const p = d.path, booky = !!d.book || isPdf(p), to = d.book ? bookTarget(d) : p, t = el('div', 'thumb ' + (booky ? 'book' : 'unit'));
@@ -4296,7 +4728,7 @@ function inboxBody(article, pane, folder) {
     t.append(el('b', '', d.book ? d.title : isBinary(p) ? showName(p) : d.title || p.split('/').pop()));
     if (booky) t.append(el('em', '', d.book ? 'EPUB' : 'PDF'));
     if (!d.book && !isPending(p)) t.append(keepBtn(p));
-    const go = (e) => { const side = e.metaKey || e.ctrlKey || e.altKey; if (isAudio(to) && playable(to) && !side) playTrack(to); else openDoc(to, { pane, side }); };
+    const go = (e) => { const side = e.metaKey || e.ctrlKey || e.altKey; if (isAudio(to) && playable(to) && !side) askPlay(to); else openDoc(to, { pane, side }); };
     t.onclick = go;
     t.onkeydown = (e) => { if (e.key === 'Enter' && e.target === t) go(e); };
     grid.append(t);
@@ -4335,12 +4767,7 @@ function appendBrowse(article, pane, folder, first = null, key = 'browse:' + fol
       listing.append(mode);
     }
     if (open === 'all' || open === 'media') {
-      const wide = el('label', 'cardSize', 'size '), slide = el('input');
-      slide.type = 'range'; slide.min = 70; slide.max = 420; slide.value = cardSize();
-      slide.setAttribute('aria-label', 'Size of the cards');
-      slide.oninput = () => setCardSize(Number(slide.value));
-      wide.append(slide);
-      listing.append(wide);
+      listing.append(sizeSlider());
     }
     const whereOf = (d) => (folderOf(d.path).slice(folder ? folder.length + 1 : 0) || 'here').replace(/\//g, ' / ');
     const section = (title, items, build) => { if (items.length) { if (title) listing.append(el('h5', '', title)); build(items); } };
@@ -4357,7 +4784,7 @@ function appendBrowse(article, pane, folder, first = null, key = 'browse:' + fol
         if (!grouped && where !== 'here') row.append(pathLabel(where));
         if (kept.has(d.path)) row.append(el('small', '', 'on this device'));
         if (isAudio(d.path) || isVideo(d.path)) row.append(keepBtn(d.path), queueBtn(d.path));   // keep a copy on this device; line it up
-        row.onclick = (e) => (isAudio(d.path) && playable(d.path) && !(e.metaKey || e.ctrlKey || e.altKey) ? playTrack(d.path) : openDoc(d.path, { pane, side: e.metaKey || e.ctrlKey || e.altKey }));
+        row.onclick = (e) => (isAudio(d.path) && playable(d.path) && !(e.metaKey || e.ctrlKey || e.altKey) ? askPlay(d.path) : openDoc(d.path, { pane, side: e.metaKey || e.ctrlKey || e.altKey }));
         listing.append(row);
       }
     };
@@ -4724,6 +5151,8 @@ document.addEventListener('selectionchange', () => {
 
 function renderContext() {
   const c = $('context'), d = docOf(activeDoc());
+  paintFav();
+  paintBareWhere();
   c.textContent = '';
   if (!d) return c.append('Open a document to take notes on it.');
   const hl = hlNote();
@@ -4739,7 +5168,7 @@ function renderContext() {
     const x = el('button', '', '×');
     x.type = 'button';
     x.title = 'Drop the quote';
-    x.onclick = () => { pendingQuote = ''; renderContext(); renderNotes(false); };
+    x.onclick = () => { pendingQuote = ''; dropPendingMg(); renderContext(); renderNotes(false); };
     c.append('On: ', x, el('b', '', '“' + pendingQuote + '”'));
   } else {
     const cur = views[state.active].cur;
@@ -4769,6 +5198,7 @@ $('composer').onsubmit = async (e) => {
   else if (hl) await noteOp({ kind: 'add', note: makeNote({ doc: hl.doc, text, quote: hl.quote, type: hl.type, heading: hl.heading, headingText: hl.headingText, ...(hl.anchor ? { anchor: hl.anchor } : {}) }) });
   else await createNote(text);
   pendingQuote = '';
+  dropPendingMg();
   activeHl = null;
   renderContext();
   await loadNotes();
@@ -4794,8 +5224,9 @@ const REF_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" str
 const refWatch = new MutationObserver(() => paintRefs());   // lists are redrawn while the buttons are showing
 // What an item on the page is, as a label and a target to open: a file, a heading, a note or highlight.
 const encPath = (p) => p.split('/').map(encodeURIComponent).join('/').replace(/\(/g, '%28').replace(/\)/g, '%29');
+const refLabel = (s) => { const t = s.replace(/[\[\]\s]+/g, ' ').trim(); return t.length > 60 ? t.slice(0, 60) + '…' : t; };
 function refParts(node) {
-  const label = (s) => { const t = s.replace(/[\[\]\s]+/g, ' ').trim(); return t.length > 60 ? t.slice(0, 60) + '…' : t; };
+  const label = refLabel;
   if (node.dataset.id) {
     const n = notes.find((x) => x.id === node.dataset.id);
     return n ? { label: label(n.text || n.quote) || 'note', target: `${encPath(n.doc)}#note:${n.id}` } : null;
@@ -4861,9 +5292,15 @@ function endRefs() {
 // beside Files, press "+" on each item wanted (anywhere on the page), give the
 // name, save. A queue of music can be saved as one too. Groups are listed at
 // the top of the file list, closed until opened, and are kept on this device.
+// One group is there for the asking, "#fav": the button over the note box puts what is open in it (or the highlight
+// being worked on), in one press, and takes it out again. It is a group like any other, and nothing is in one group
+// only: what is in #fav can be picked into others later, and stays in both. What is in it is listed on the main
+// front page, under the latest notes.
 let groups = [];
 const pick = { on: false, items: [] };
-const saveGroups = () => store.set('groups:' + config.root, groups);
+const FAV = 'fav';
+const favGroup = () => groups.find((g) => g.tag === FAV);
+const saveGroups = () => { store.set('groups:' + config.root, groups); paintFav(); renderLatest(); };
 function loadGroups() {
   const g = store.get('groups:' + config.root);
   groups = Array.isArray(g) ? g.filter((x) => x && typeof x.tag === 'string' && Array.isArray(x.items)) : [];
@@ -4874,15 +5311,32 @@ pickBar.hidden = true;
 pickName.placeholder = 'name';
 pickName.setAttribute('aria-label', 'Name of the group');
 pickName.maxLength = 40;
-// The names already in use are offered while typing (the browser's own list of suggestions), the most recent first.
-const tagList = el('datalist');
-tagList.id = 'tagList';
-pickName.setAttribute('list', 'tagList');
+// The groups there are already are offered under the name, as marks to press: five, the most recently made or added
+// to first; once something is typed, the five whose names have it in them (those that begin with it first). Pressing
+// one writes its name, so what is picked joins that group. (The reader's own list, a browser's being hard to count on, on a phone least of all.)
 pickName.autocomplete = 'off';
-document.body.append(tagList);
+const pickHints = el('div', 'tags');
+function paintHints() {
+  const typed = pickName.value.replace(/^#+/, '').trim().replace(/\s+/g, '-').toLowerCase();
+  const has = [...recentGroups(), ...(favGroup() ? [] : [{ tag: FAV, items: [] }])].filter((g) => g.tag.toLowerCase().includes(typed));   // #fav is always offered
+  const list = [...has.filter((g) => g.tag.toLowerCase().startsWith(typed)), ...has.filter((g) => !g.tag.toLowerCase().startsWith(typed))].slice(0, 5);
+  pickHints.replaceChildren(...list.map((g) => {
+    const same = g.tag.toLowerCase() === typed, b = el('button', 'tag', '#' + g.tag);
+    b.type = 'button';
+    b.append(el('small', '', ' ' + g.items.length));
+    b.setAttribute('aria-pressed', same);
+    b.title = same ? 'What is picked joins this group' : 'Add to this group: writes its name';
+    b.onclick = () => { pickName.value = g.tag; paintHints(); pickName.focus(); };
+    return b;
+  }));
+  pickHints.hidden = !list.length;
+  const joins = groups.find((g) => g.tag.toLowerCase() === typed);
+  pickSave.textContent = joins ? 'add to it' : 'save';
+}
+pickName.addEventListener('input', paintHints);
 // Most recently made or added to, first. (A group from before this was kept has no time: those follow, the last made first.)
 const recentGroups = () => groups.map((g, i) => [g, i]).sort(([a, i], [b, j]) => (b.ts || 0) - (a.ts || 0) || j - i).map(([g]) => g);
-pickBar.append(pickCount, el('b', '', '#'), pickName, pickSave, pickStop);
+pickBar.append(pickCount, el('b', '', '#'), pickName, pickSave, pickStop, pickHints);
 treeEl.before(pickBar);
 const groupBtn = el('button', 'ic', '#');
 groupBtn.id = 'groupBtn';
@@ -4897,6 +5351,7 @@ function paintPick(b) {
   b.setAttribute('aria-label', b.title);
 }
 function paintPicks() {
+  paintFav();
   pickCount.textContent = pick.items.length ? `${pick.items.length} picked · save as` : 'Press + on what belongs together · save as';
   for (const b of document.querySelectorAll('.pickBtn')) paintPick(b);
 }
@@ -4910,7 +5365,7 @@ function startPick(items = []) {
   pick.items = [...items];
   pickBar.hidden = false;
   pickName.value = '';
-  tagList.replaceChildren(...recentGroups().map((g) => { const o = el('option'); o.value = g.tag; o.label = '#' + g.tag + ' \u00b7 ' + g.items.length; return o; }));
+  paintHints();
   document.body.classList.add('picking');
   groupBtn.setAttribute('aria-pressed', 'true');
   paintRefs();
@@ -4925,6 +5380,7 @@ function endPick() {
   watchItems();
   document.body.classList.remove('picking');
   groupBtn.setAttribute('aria-pressed', 'false');
+  paintFav();
   for (const b of document.querySelectorAll('.pickBtn')) b.remove();
 }
 function savePick() {
@@ -4936,13 +5392,41 @@ function savePick() {
   if (had) { for (const it of pick.items) if (!had.items.some((x) => x.target === it.target)) had.items.push(it); had.ts = Date.now(); }
   else groups.push({ tag, items: pick.items, ts: Date.now() });
   saveGroups();
-  state.groupsOpen = [...new Set([...(state.groupsOpen || []), tag])];   // shown open this once, to see what was made
+  state.groupsOpen = [tag];   // listed this once, to see what was made
   save();
   endPick();
   renderTree();
   for (let i = 0; i < views.length; i++) if (docOf(state.panes[i]?.active)?.front) showDoc(i, null, true);   // the front page lists the groups
 }
 groupBtn.onclick = () => (pick.on ? endPick() : startPick());
+const favBtn = el('button', '', '#' + FAV);
+favBtn.id = 'favBtn';
+favBtn.type = 'button';
+$('send').before(favBtn);
+// What "#fav" is pressed for: the highlight or note being worked on, or else the document that is open.
+function favItem() {
+  const n = hlNote(), path = activeDoc(), d = docOf(path);
+  if (n) return { label: refLabel(n.text || n.quote) || 'note', target: `${encPath(n.doc)}#note:${n.id}` };
+  return d ? { label: refLabel(isMedia(path) ? path.split('/').pop() : d.front ? config.title : d.title), target: encPath(path) } : null;
+}
+function paintFav() {
+  const item = favItem(), inIt = !!item && !!favGroup()?.items.some((x) => x.target === item.target);
+  favBtn.disabled = pick.on ? !pick.items.length : !item;
+  favBtn.setAttribute('aria-pressed', !pick.on && inIt);
+  favBtn.title = pick.on ? 'Put what is picked in #fav' : !item ? 'Open something to put it in #fav' : inIt ? 'In #fav. Press to take it out.' : hlNote() ? 'Put this highlight in #fav' : 'Put what is open in #fav';
+  favBtn.setAttribute('aria-label', favBtn.title);
+}
+favBtn.onclick = () => {
+  if (pick.on) { pickName.value = FAV; savePick(); return; }   // while picking: what is picked goes in
+  const item = favItem(), g = favGroup();
+  if (!item) return;
+  if (g?.items.some((x) => x.target === item.target)) { g.items = g.items.filter((x) => x.target !== item.target); if (!g.items.length) groups = groups.filter((x) => x !== g); }
+  else if (g) { g.items.push(item); g.ts = Date.now(); }
+  else groups.push({ tag: FAV, items: [item], ts: Date.now() });
+  saveGroups();
+  renderTree();
+  for (let i = 0; i < views.length; i++) if (i !== state.active && docOf(state.panes[i]?.active)?.front) showDoc(i, null, true);   // a front page beside this one lists the groups
+};
 pickSave.onclick = savePick;
 pickStop.onclick = endPick;
 pickName.addEventListener('keydown', (e) => { if (e.key === 'Enter') savePick(); if (e.key === 'Escape') endPick(); });
@@ -4979,18 +5463,26 @@ function appendTags(article) {
 }
 // The groups, at the top of the file list.
 function drawGroups(section) {
+  if (!groups.length) return;
+  // Every group is a small mark, #name and how many are in it, one after another on as many lines as they need.
+  // What is in a group is listed only once its mark is pressed, under the marks; pressing it again, or another, puts the list away.
+  const box = section(' group'), bar = el('div', 'tags'), open = state.groupsOpen || [];
+  box.append(bar);
   for (const g of groups) {
-    const det = el('details'), kids = el('div', 'kids'), sum = el('summary', '', '#' + g.tag);
-    sum.append(el('small', '', ' · ' + g.items.length));
-    det.open = (state.groupsOpen || []).includes(g.tag);
-    det.addEventListener('toggle', () => {
-      pinNext();
-      state.groupsOpen = (state.groupsOpen || []).filter((t) => t !== g.tag);
-      if (det.open) state.groupsOpen.push(g.tag);
-      save();
-    });
+    const on = open.includes(g.tag), mark = el('button', 'tag', '#' + g.tag);
+    mark.append(el('small', '', ' ' + g.items.length));
+    mark.setAttribute('aria-expanded', on);
+    mark.title = on ? 'Put the list of what is in this group away' : `List the ${g.items.length} in this group`;
+    mark.onclick = () => { state.groupsOpen = on ? [] : [g.tag]; save(); renderTree(); };
+    bar.append(mark);
+    if (!on) continue;
+    const kids = el('div', 'kids');
     for (const item of g.items) {
-      const row = el('div', 'file'), out = el('button', '', '×');
+      // What is in a locked folder is not named while the folder is locked; it is still in the group.
+      let inFolder = '';
+      try { inFolder = decodeURIComponent(item.target.split('#')[0]); } catch { /* as it is */ }
+      if (inFolder && gateOf(inFolder)) continue;
+      const row = el('div', 'file'), out = el('button', '', '\u00d7');
       row.tabIndex = 0;
       row.setAttribute('role', 'button');
       row.title = item.label;
@@ -5013,8 +5505,7 @@ function drawGroups(section) {
     drop.onclick = () => { if (drop.textContent === 'delete group') return (drop.textContent = 'really delete?'); groups = groups.filter((x) => x !== g); saveGroups(); renderTree(); };
     foot.append(drop);
     kids.append(foot);
-    det.append(sum, kids);
-    section(' group').append(det);
+    box.append(kids);
   }
 }
 
@@ -5068,11 +5559,23 @@ async function openFolder(folder, side) {
 function showNote(id) {
   const n = notes.find((x) => x.id === id);
   if (!n) return;
-  const mark = views[state.active].surface?.querySelector(`mark[data-note="${CSS.escape(id)}"]`);
-  if (mark) flash(mark); else if (n.heading) goTo(state.active, n.heading);
+  seekNote(n);
   if (n.quote) selectHighlight(id); else flash(notesEl.querySelector(`.note[data-id="${CSS.escape(id)}"]`));
 }
 
+// The passage a note is on, brought into view in the open document: its mark, its place on a PDF's page, or its heading.
+function seekNote(n) {
+  const v = views[state.active], mark = v.surface?.querySelector(`mark[data-note="${CSS.escape(n.id)}"]`);
+  if (n.mg && v.pdfMarks) v.pdfMarks.show(n.id);
+  else if (mark) flash(mark);
+  else if (n.heading) goTo(state.active, n.heading);
+}
+// Where the words now selected are, as fields to add to a note: an anchor in a document's text, or the engine's on a
+// PDF's page (with the page as its heading); {} if it cannot be worked out.
+const pendingPlace = async () => (pendingMg ? pendingMg.fields().catch(() => ({})) : pendingAnchor());
+// The selection on a PDF's page is done with (made into a highlight, or let go).
+function dropPendingMg() { const m = pendingMg; pendingMg = null; m?.clear(); }
+const laterNotes = perFrame(() => renderNotes(false));
 // A note or highlight on the current selection (or, with no selection, on the
 // section being read).
 async function createNote(text) {
@@ -5080,7 +5583,7 @@ async function createNote(text) {
   const note = makeNote({
     doc: activeDoc(), text, quote: pendingQuote, type: pendingQuote ? curType().id : '',
     heading: head?.dataset?.slug || '', headingText: head?.textContent || '',
-    ...pendingAnchor(),
+    ...(await pendingPlace()),
   });
   await noteOp({ kind: 'add', note });
   return note;
@@ -5126,6 +5629,7 @@ async function highlightSelection(typeId) {
   store.set('hlType', typeId);
   const n = await createNote('');
   pendingQuote = '';
+  dropPendingMg();
   window.getSelection().removeAllRanges();
   views[state.active].surface?.ownerDocument.getSelection()?.removeAllRanges();
   activeHl = n.id;
@@ -5160,6 +5664,7 @@ function markActive() {
       if (framed) m.style.boxShadow = on ? '0 0 0 2px #8c2f1b' : '';
     }
   }
+  for (const v of views) v.pdfMarks?.paint();
 }
 // Clicking elsewhere in a document drops the flyout and the active highlight.
 document.addEventListener('pointerdown', (e) => {
@@ -5232,9 +5737,8 @@ function renderNotes(rehighlight = true) {
       const q = el('div', 'quote', n.quote.length > 160 ? n.quote.slice(0, 160) + '…' : n.quote);
       if (n.type) q.style.borderLeftColor = typeOf(n.type).color;
       q.onclick = () => {
-        const mark = views[state.active].surface?.querySelector(`mark[data-note="${n.id}"]`);
         drawer(null);
-        if (mark) flash(mark); else goTo(state.active, n.heading);
+        seekNote(n);
         selectHighlight(n.id);
       };
       div.append(q);
@@ -5249,12 +5753,12 @@ function renderNotes(rehighlight = true) {
     if (n.headingText) {
       const where = el('a', '', n.headingText);
       where.href = '#' + n.heading;
-      where.onclick = (e) => { e.preventDefault(); goTo(state.active, n.heading); };
+      where.onclick = (e) => { e.preventDefault(); seekNote(n); };
       meta.append(' · ', where);
     }
     if (pendingQuote) {
       const attach = el('button', '', n.quote ? 'move to selection' : 'attach selection');
-      attach.onclick = async () => { await noteOp({ kind: 'set', id: n.id, fields: { quote: pendingQuote, ...pendingAnchor() } }); pendingQuote = ''; renderContext(); loadNotes(); };
+      attach.onclick = async () => { await noteOp({ kind: 'set', id: n.id, fields: { quote: pendingQuote, ...(await pendingPlace()) } }); pendingQuote = ''; dropPendingMg(); renderContext(); loadNotes(); };
       meta.append(attach);
     }
     const del = el('button', '', 'delete');
@@ -5275,14 +5779,14 @@ function renderNotes(rehighlight = true) {
     }
     notesEl.append(div);
   }
-  if (rehighlight) views.forEach((v, i) => v.surface && highlightAll(v.surface, state.panes[i].active));
+  if (rehighlight) views.forEach((v, i) => (v.surface ? highlightAll(v.surface, state.panes[i].active) : v.pdfMarks?.place()));
   renderLatest();
 }
 // The latest notes and highlights from every document, newest first, beside
 // the main front page. Pressing one opens its document at that passage.
 function renderLatest() {
   const cut = (s, n) => { const t = s.replace(/\[([^\]\n]+)\]\([^)\s]+\)/g, '$1').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n) + '…' : t; };
-  for (const box of document.querySelectorAll('.latest')) {
+  for (const box of document.querySelectorAll('.latest:not(.favs)')) {
     const recent = notes.filter((n) => docOf(n.doc) && !gateOf(n.doc)).sort((x, y) => (y.ts > x.ts ? 1 : y.ts < x.ts ? -1 : 0)).slice(0, 15);
     box.replaceChildren(el('h5', '', 'Latest notes and highlights'));
     if (!recent.length) box.append(el('p', 'empty', 'None yet.'));
@@ -5296,6 +5800,21 @@ function renderLatest() {
       if (n.text) row.append(el('div', 'said', cut(n.text, 120)));
       row.append(el('div', 'meta', new Date(n.ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) + ' · ' + docOf(n.doc).title));
       row.onclick = async () => { await openDoc(n.doc); showNote(n.id); };
+      box.append(row);
+    }
+  }
+  // Under it, what is in #fav, the last added first. Pressing one opens it.
+  for (const box of document.querySelectorAll('.latest.favs')) {
+    box.replaceChildren(el('h5', '', '#fav'));
+    // What is in a locked folder is not named while the folder is locked; it is still in the group.
+    const items = (favGroup()?.items || []).filter((item) => { try { return !gateOf(decodeURIComponent(item.target.split('#')[0])); } catch { return true; } }).reverse();
+    if (!items.length) box.append(el('p', 'empty', 'Nothing yet. “#fav” over the note box adds what is open.'));
+    for (const item of items) {
+      const row = el('div', 'tick');
+      row.tabIndex = 0;
+      row.setAttribute('role', 'button');
+      row.append(el('div', 'said', item.label));
+      row.onclick = (e) => openRef(item.target, e.metaKey || e.ctrlKey || e.altKey);
       box.append(row);
     }
   }
