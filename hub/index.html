@@ -287,6 +287,10 @@
   #tree summary .quick { float: right; max-width: 55%; margin-left: 8px; padding: 0 6px; border: 1px solid var(--rule); background: var(--paper); color: var(--accent); font: 400 12px var(--head); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #tree details[open] > summary .quick { display: none; }
   /* a folder that is one line (nothing but pictures, videos and music): a folder's line without the arrow, as it does not open out */
+  /* the list opened at where you are: what else is in a folder on the way waits behind "Show N more" (see trimTree) */
+  #tree [hidden] { display: none !important; }
+  #tree .moreRow { font-style: italic; font-size: 12.5px; }
+  #tree .moreRow:hover, #tree .moreRow:focus-visible { color: var(--accent); }
   #tree .leaf > summary { list-style: none; }
   #tree .leaf > summary::-webkit-details-marker { display: none; }
   #tree .leaf > summary.active { color: var(--accent); }

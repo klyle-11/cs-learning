@@ -362,7 +362,7 @@ function setSideOpen(open) {
   $('sideToggle').title = open ? 'Tuck the sidebar away; it returns when you hover the left edge' : 'Keep the sidebar open';
   $('sideToggle').setAttribute('aria-label', open ? 'Hide sidebar' : 'Keep sidebar open');
 }
-$('sideToggle').onclick = () => { setSideOpen(!state.sideOpen); save(); };
+$('sideToggle').onclick = () => { setSideOpen(!state.sideOpen); save(); if (state.sideOpen) focusTree(); };
 // Settings (text, connection, this device) stay folded away until asked for.
 function setSettingsOpen(open) {
   $('settings').hidden = !open;
@@ -370,8 +370,8 @@ function setSettingsOpen(open) {
 }
 $('settingsBtn').onclick = () => setSettingsOpen($('settings').hidden);
 $('netBrief').onclick = () => setSettingsOpen(true);
-$('sideEdge').onclick = () => { setSideOpen(true); save(); };
-$('sideEdge').addEventListener('mouseenter', () => document.body.classList.add('side-peek'));
+$('sideEdge').onclick = () => { setSideOpen(true); save(); focusTree(); };
+$('sideEdge').addEventListener('mouseenter', () => { if (!document.body.classList.contains('side-peek')) focusTree(); document.body.classList.add('side-peek'); });
 $('side').addEventListener('mouseleave', () => document.body.classList.remove('side-peek'));
 
 // Lets a touch screen show the pressed look (iOS only does with a touch listener present).
@@ -847,6 +847,7 @@ function drawer(name) {
   const side = name === 'side' && !document.body.classList.contains('m-side');
   if (!side) adding = false;
   document.body.classList.toggle('m-side', side);
+  if (side) focusTree();   // the list opens short, at where you are (see focusTree)
   document.body.classList.toggle('m-right', name === 'right' && !document.body.classList.contains('m-right'));
   document.body.classList.toggle('m-add', adding);
 }
@@ -2592,6 +2593,7 @@ function renderTree() {
   if (loose.length) draw({ dirs: {}, files: loose }, section('', starter.size ? 'Other files' : ''), '');
   treeEl.append(nextPin);
   for (const key of getting.keys()) paintGot(key);
+  trimTree();
   stickFolders();
   treeEl.scrollTop = y;
   pinNext();
@@ -2608,6 +2610,64 @@ function stickFolders() {
   }
 }
 addEventListener('resize', stickFolders);
+// ---- the list, short: only the way to where you are ----
+// Each time the list is opened (the reader starting, the drawer on a phone, the sidebar brought back or peeked at),
+// everything in it is closed but the way down to the folder being read in, and that folder is open with all it holds.
+// In each folder on the way (and the section it is in) only the next step down is shown; the rest of what is in it
+// waits behind "Show N more" at its top, so a long list does not all come at once. Finding is left as it is.
+let treeFocus = null;   // { folder, shown }: the folder being read in when the list was opened, and the folders whose other contents were asked for since
+function focusTree() {
+  const path = activeDoc() || '', book = path.search(/\.epub\//i), at = book < 0 ? path : path.slice(0, book + 5);
+  const folder = at.endsWith('/') ? at.slice(0, -1) : folderOf(at);   // a book's place is the folder it is in; the main front page's, none
+  // The section it is in: the starter material's, or the kind of the folder at the top (a book at the top is listed under
+  // a kind as a folder is). A loose file at the top is in none.
+  const parts = folder ? folder.split('/') : [], top = parts[0] || (book >= 0 ? at : '');
+  const starter = (config.starter || []).map((x) => x.replace(/\/$/, '')).includes(top || at);
+  const sect = starter ? ':starter' : top ? ':cat:' + catOf(top) : null;
+  treeFocus = { folder, shown: new Set() };
+  state.opened = [...(sect ? [sect] : []), ...parts.map((_, i) => parts.slice(0, i + 1).join('/'))];
+  state.groupsOpen = [];
+  save();
+  renderTree();
+  // A section opened above that does not lead there after all (the inbox and a pinned folder have lines of their own): closed again.
+  const marks = focusMarks(treeFocus);
+  for (const det of treeEl.querySelectorAll('details[open]')) if (!marks.some((m) => m === det || det.contains(m))) det.open = false;
+  (marks[0]?.matches('details') ? marks[0].querySelector(':scope > summary') : marks[0])?.scrollIntoView({ block: 'nearest' });
+}
+// What stands for the place in the list: the folder's own line, or else the line of what is open in it (a file, a
+// book, a folder that is one line). It may be there twice, when a folder it is in is pinned.
+function focusMarks(f) {
+  const marks = f.folder ? [...treeEl.querySelectorAll('summary[data-folder]')].filter((x) => x.dataset.folder === f.folder).map((x) => x.parentNode) : [];
+  return marks.length ? marks : [...treeEl.querySelectorAll('.file.active, .leaf > summary.active')].map((x) => (x.matches('summary') ? x.parentNode : x));
+}
+function trimTree() {
+  const f = treeFocus;
+  if (!f || finding) return;
+  const marks = focusMarks(f), keep = new Set();
+  for (const m of marks) for (let n = m; n && n !== treeEl; n = n.parentNode) keep.add(n);
+  for (const m of marks) for (let det = m.parentNode.closest('details'); det && treeEl.contains(det); det = det.parentNode.closest('details')) {
+    const kids = det.querySelector(':scope > .kids'), sum = det.querySelector(':scope > summary');
+    const key = sum.dataset.folder || ':' + sum.dataset.name;
+    if (!det.open || !kids || f.shown.has(key) || kids.querySelector(':scope > .moreRow')) continue;
+    const rest = [...kids.children].filter((c) => !keep.has(c));
+    if (!rest.length) continue;
+    for (const c of rest) c.hidden = true;
+    const name = sum.dataset.name || sum.dataset.folder.split('/').pop(), more = el('div', 'file moreRow');
+    more.append(el('span', 'name', `Show ${rest.length} more`));
+    more.tabIndex = 0;
+    more.setAttribute('role', 'button');
+    more.title = `Everything else in ${name}`;
+    more.onclick = (e) => {
+      e.stopPropagation();
+      f.shown.add(key);
+      for (const c of rest) c.hidden = false;
+      more.remove();
+      stickFolders();
+      pinNext();
+    };
+    kids.prepend(more);
+  }
+}
 // A folder that is one line: it looks like any folder's line, quick open and
 // all, but has nothing to open out to (no arrow). Pressing it opens the
 // folder's page: its front page, or else its gallery or music page.
@@ -6737,6 +6797,7 @@ $('fresh').onclick = () => location.reload();
   const hash = decodeURIComponent(location.hash.slice(1));
   if (want && docOf(want) && want !== activeDoc()) await openDoc(want, { hash });
   else { if (want && hash) goTo(state.active, hash); chrome(); }
+  focusTree();   // the list starts short, at where you are
   renderNet();
   flush(); // anything left waiting from last time
   if (awayFor > AWAY) setTimeout(() => showWhereWas(wasAt), 1200);

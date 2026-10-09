@@ -242,6 +242,7 @@ Not yet checked on real devices: installing the authority on an iPhone and an An
 - [ ] Check every theme's contrast; Eva and Triple-M muted text has not been measured
 - [ ] Screen-reader pass (labels on grips, live region when a note is saved). [x] The saved line is a live region; PDF pages carry their text
 - [ ] Dyslexia-friendly font option; line-by-line reading ruler
+- [x] The file list opens short every time: only the way to the folder being read in, the rest of each folder on the way behind "Show N more" (9 October 2026). Checked in headless Chromium, computer and phone. [ ] On a computer, where the sidebar stays open, it is shortened only when the reader starts and when the sidebar is brought back or peeked at, not each time something else is opened
 - [ ] Session aids: "where I stopped" bookmark per document, optional timer. [x] "Where was I": the last place read and the last note, on the main front page and, coming back after two hours or more, in a card that closes by itself (9 October 2026)
 
 ## The C++ server (branch `c-server`, folder `server-cpp/`)
