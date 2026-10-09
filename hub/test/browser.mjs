@@ -226,13 +226,17 @@ const checks = [
     await until(p, () => document.querySelector('.pane .tab.active')?.textContent.includes('one'));
     check(t, (await tabs()) === '*one|two', 'pressing what is open goes to its tab, and keeps the other');
     await reveal();
+    await p.evaluate(() => document.querySelector('#tree .file[data-path="shelf/notes-a/two.md"] .plus').click());
+    await p.waitForTimeout(600);
+    check(t, (await tabs()) === 'one|*two', 'and so does its + (a document has one tab at most)');
+    await reveal();
     await p.evaluate(() => document.querySelector('#tree .file[data-path="shelf/notes-b/x.md"] .sideBtn').click());
     await until(p, () => document.querySelectorAll('.pane').length === 2);
     await p.evaluate(() => document.querySelector('.pane').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
     await reveal();
     await p.evaluate(() => document.querySelector('#tree .file[data-path="shelf/notes-b/x.md"]').click());
     await p.waitForTimeout(800);
-    check(t, (await tabs()) === '*one|two / *x', `and in the other pane (${await tabs()})`);
+    check(t, (await tabs()) === 'one|*two / *x', `and in the other pane (${await tabs()})`);
   }],
 
   ['book', async (t) => {

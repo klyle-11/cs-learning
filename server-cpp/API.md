@@ -1,6 +1,6 @@
 # Hub HTTP API
 
-The contract between the page (`hub/index.html`) and whichever server is behind it. `server-cpp/hubd` implements it. `test/contract.sh` sends 255 requests and compares the answers with those recorded in `test/expected.txt` (the first 123 date from when `hubd` and the Node server it replaced answered identically). The page, its scripts and the trust routes are public; everything else needs a paired device (see Security).
+The contract between the page (`hub/index.html`) and whichever server is behind it. `server-cpp/hubd` implements it. `test/contract.sh` sends 260 requests and compares the answers with those recorded in `test/expected.txt` (the first 123 date from when `hubd` and the Node server it replaced answered identically). The page, its scripts and the trust routes are public; everything else needs a paired device (see Security).
 
 All JSON bodies are UTF-8. Errors are `{ "error": "message" }` with a 4xx or 5xx status. Paths are relative to the folder being served, use `/`, and may never contain `..`.
 
@@ -66,6 +66,8 @@ An `.epub` file is listed as a folder of its pages, in reading order: each page 
 
 A page of a book also has `bookTitle`, the book's own title, when the book gives one: the reader puts it after the page's name wherever the page is named away from its book.
 
+A file the hub saved under a shorter name (see `POST /api/upload`), and each page of such a book, also has `asked`: the path it was given. Its `title`, where it would be the file's name, is the name it was given. The reader shows folders and books by those names too.
+
 `title` is the first `# Heading` (markdown), `<title>` (HTML), or the file name. Pictures, video, sound and PDFs are listed by their file names. Hidden files, `node_modules`, `notes/`, the server's own folder and anything matching `ignore` are left out.
 
 ## Settings
@@ -121,9 +123,9 @@ A note may also carry `replyTo` (the id of the note it answers: a reply written 
 
 ## Uploads and workspaces
 
-`POST /api/upload?path=<path>` with the file as the raw body → `{ "saved": true, "root": "…" }`, or `{ "skipped": true }` if the file already exists (not overwritten). With `&replace=1` a file that is there is replaced by the body (written beside it first, then put in its place) and the answer has `"replaced": true` as well; a folder of that name is still skipped, and a path with nothing at it is saved as usual.
+`POST /api/upload?path=<path>` with the file as the raw body → `{ "saved": true, "root": "…" }`, or `{ "skipped": true }` if the file already exists (not overwritten). A path too long for the system the hub runs on (on Windows, 259 characters for the whole path, the served folder included; elsewhere 255 bytes for a part) is not refused: the longest part is shortened, as often as it takes, to its beginning, `~`, six hex digits made from its whole name, and its extension (`…and Design, with~3fa21c.epub`). The same name always shortens the same way, so the files of a folder whose name is too long stay together, and a second upload of the same file finds the first. The answer then also has `"path"`, what it was saved as, and `"shortened": true`; the name it was given is kept in `.names.json` at the top of the workspace (hidden: not listed or served). 400 `the name is too long for this system` only if even the shortened path would not fit. With `&replace=1` a file that is there is replaced by the body (written beside it first, then put in its place) and the answer has `"replaced": true` as well; a folder of that name is still skipped, and a path with nothing at it is saved as usual.
 
-`GET /api/files?path=<folder>` → `[{ "path", "size", "changed" }]`: every file under that folder of the workspace (paths from the top of the workspace, sizes in bytes, `changed` in seconds), hidden names and `node_modules` left out. It is what the reader's "update" compares a folder on the device with, so that only what is new or changed is sent. 400 for a path that leaves the workspace; 404 if it is not a folder. 400 for a path with `..`, a hidden part or `node_modules`, or one longer than the system will open (on Windows, 259 characters for the whole path, the served folder included). 413 over the profile's upload limit (200 MB on a computer).
+`GET /api/files?path=<folder>` → `[{ "path", "size", "changed" }]`, with `"asked"`, the path it was given, for a file saved under a shorter name: every file under that folder of the workspace (paths from the top of the workspace, sizes in bytes, `changed` in seconds), hidden names and `node_modules` left out. It is what the reader's "update" compares a folder on the device with, so that only what is new or changed is sent. 400 for a path that leaves the workspace; 404 if it is not a folder. 400 for a path with `..`, a hidden part or `node_modules`, or one longer than the system will open (on Windows, 259 characters for the whole path, the served folder included). 413 over the profile's upload limit (200 MB on a computer).
 
 `GET /api/workspaces` → `[{ "name", "root", "home", "current", "workspace" }]`.
 

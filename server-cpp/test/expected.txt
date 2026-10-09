@@ -1099,6 +1099,16 @@ About this folder.
 200 []
 ## nothing kept aside
 0
+## a long name: a book
+{"ends": "~<hex>.epub", "kept its start": true, "saved": true, "shortened": true, "shorter": true, "skipped": false}
+## the same again
+{"ends": "~<hex>.epub", "kept its start": true, "saved": false, "shortened": true, "shorter": true, "skipped": true}
+## a long folder: a file
+{"ends": "~<hex>/a.md", "kept its start": true, "saved": true, "shortened": true, "shorter": true, "skipped": false}
+## its files together, listed by the names given
+3 files; 1 folder for the two; ['long/<long>.epub', 'long/<long>/a.md', 'long/<long>/b.md']
+## in the list
+[('a', 'long/<long>/a.md'), ('b', 'long/<long>/b.md')]
 ## upload new
 200 {"root": "<root>", "saved": true}
 ## upload again

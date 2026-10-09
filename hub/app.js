@@ -211,7 +211,7 @@ const isBookPage = (path) => /\.epub\//i.test(path);
 // A page of a book, named anywhere but among the book's own pages, says whose it is after its name: "Contents" alone
 // could be any book's. The book goes by its title, else by its file's name.
 const bookOf = (path) => path.slice(0, path.search(/\.epub\//i) + 5);
-const bookName = (path) => docOf(path)?.bookTitle || bookOf(path).split('/').pop().replace(/\.epub$/i, '');
+const bookName = (path) => docOf(path)?.bookTitle || givenName(bookOf(path)).replace(/\.epub$/i, '');
 const withBook = (path, name) => (isBookPage(path) && !name.endsWith(' - ' + bookName(path)) ? name + ' - ' + bookName(path) : name);
 const titleOf = (d) => withBook(d.path, pageTitle(d));
 // The same for what a group (#fav and the rest) holds: it was saved under the page's name alone, or a note's words.
@@ -606,7 +606,7 @@ async function updateFolder(folder) {
     box.append(go, no);
   }))) return closeGate();
   let have;
-  try { have = new Map((await api('/api/files?path=' + encodeURIComponent(folder))).map((f) => [f.path, f])); }
+  try { have = new Map((await api('/api/files?path=' + encodeURIComponent(folder))).map((f) => [f.asked || f.path, f])); }   // a file saved under a shorter name, by the one it was given
   catch (e) { return done(e.offline ? 'The server is not reachable.' : 'The server that is running is older than this: stop it and start it again (npm start), then press "update\u2026" once more.'); }
   // New: not in the copy. Changed: another size, or touched on this device after its copy was made (two seconds' grace: some disks keep time in steps).
   const send = [];
@@ -782,7 +782,7 @@ async function runUpload(files, workspace, folder, front, lock, more = []) {
   const line = el('p');
   let box;
   showGate(more.length ? `Upload ${more.length + 1} folders` : `Upload “${folder}”`, (card) => { box = card; card.append(line); });
-  let saved = 0, skipped = 0, failed = 0, root = '';
+  let saved = 0, skipped = 0, failed = 0, root = '', shortened = 0;
   const whyNot = new Map(); // reason -> how many files
   const notSaved = [];      // the first few files that were tried and refused, by name
   for (const [i, { rel, file }] of files.entries()) {
@@ -794,6 +794,7 @@ async function runUpload(files, workspace, folder, front, lock, more = []) {
       const res = await call('/api/upload' + q, { method: 'POST', body: file });
       const r = await res.json().catch(() => ({}));
       if (r.saved) { saved++; root = r.root; } else if (r.skipped) skipped++; else why = r.error || 'error ' + res.status;
+      if (r.shortened && (r.saved || r.skipped)) shortened++;
       stop = res.status === 401 || res.status === 403 || res.status === 507; // the rest would fail the same way
     } catch {
       // The connection broke on this file. That need not mean the server has
@@ -806,7 +807,8 @@ async function runUpload(files, workspace, folder, front, lock, more = []) {
     if (why) { failed++; whyNot.set(why, (whyNot.get(why) || 0) + 1); if (notSaved.length < 5) notSaved.push(rel.split('/').pop() + ` (${(file.size / 1048576).toFixed(1)} MB)`); }
     if (stop) { const rest = files.length - i - 1; if (rest) { failed += rest; whyNot.set('not tried after that', rest); } break; }
   }
-  line.textContent = `${saved} added` + (skipped ? `, ${skipped} already here and left alone` : '') + '.';
+  line.textContent = `${saved} added` + (skipped ? `, ${skipped} already here and left alone` : '') + '.'
+    + (shortened ? ` ${shortened} had a name too long for the hub's system: ${shortened === 1 ? 'it is' : 'they are'} kept under a shorter one, and listed by the name you gave.` : '');
   if (failed) box.append(el('p', 'say', `${failed} not saved: ` + [...whyNot].map(([w, n]) => `${n} × ${w}`).join('; ') + (notSaved.length ? '. Refused: ' + notSaved.join('; ') : '') + '. Nothing was lost on your computer; upload the folder again to retry (files already here are skipped).'));
   const done = el('button', 'main', 'OK');
   done.onclick = closeGate;
@@ -1509,7 +1511,7 @@ function renderNet() {
     sum.append(finish(ALL, 'finish them all', rest, `Copy the ${rest.length} file${rest.length === 1 ? '' : 's'} still missing from them to this device`));
     det.append(sum);
     for (const u of partly) {
-      const name = u.where.split('/').pop().replace(/\.epub$/i, ''), row = el('div', 'sub');
+      const name = givenName(u.where).replace(/\.epub$/i, ''), row = el('div', 'sub');
       // A book is said by how much of it is here: what it is kept as (cover, contents, chapters, index) is not a count a reader has.
       const part = el('span', '', u.kind === 'book' ? `${name}: ${Math.max(1, Math.round(100 * (u.items.length - u.missing.length) / u.items.length))}% of the book ` : `${name}: ${u.items.length - u.missing.length} of ${u.items.length} ${u.kind} `);
       part.title = u.where;
@@ -1862,6 +1864,9 @@ async function flush() {
         await idb.del('files', keyOf(op.path));
         pendingFiles = pendingFiles.filter((x) => x.path !== op.path);
         sentFile = true;
+        // Kept by the hub under a shorter name (its own was too long for the hub's system): a tab showing it follows.
+        const said = r ? await r.clone().json().catch(() => null) : null;
+        if (said?.path && said.path !== op.path) for (const pane of state.panes) { pane.tabs = pane.tabs.map((t) => (t === op.path ? said.path : t)); if (pane.active === op.path) pane.active = said.path; }
       }
       outbox.shift();
       saveLocal();
@@ -2005,7 +2010,8 @@ const shelfUnder = (f) => { const u = unitOf(f); return u?.type === 'shelf' ? u 
 function lineName(f) {
   let top = f;
   for (let p = folderOf(top); p; p = folderOf(top)) { const t = tally.get(p); if (!t || t.files.length || t.books.size || t.kids.size !== 1) break; top = p; }
-  return f.slice(top.length - top.split('/').pop().length).split('/').filter((n, i, all) => n !== all[i - 1]).join(' / ');
+  const from = f.split('/').length - f.slice(top.length - top.split('/').pop().length).split('/').length;
+  return f.split('/').map((_, i, all) => givenName(all.slice(0, i + 1).join('/'))).slice(from).filter((n, i, all) => n !== all[i - 1]).join(' / ');
 }
 // The page that stands for a folder: its front page, else the one made for it. null for a folder that has neither.
 const pageOf = (folder) => { const page = docOf(frontOf(folder)) ? frontOf(folder) : unitOf(folder)?.page || folder + '/'; return docOf(page) ? page : null; };
@@ -2285,6 +2291,7 @@ async function loadDocs() {
   const waiting = pendingFiles.filter((f) => !serverDocs.some((d) => d.path === f.path))
     .map((f) => ({ path: f.path, group: f.path.split('/').slice(0, -1).join('/'), title: f.path.split('/').pop(), side: false, front: false }));
   allDocs = serverDocs.concat(waiting);
+  learnGivenNames();
   applyLocks();
   renderTree();
   renderNet();
@@ -2587,9 +2594,10 @@ function renderTree() {
       }
       // A folder holding nothing but one folder is that folder's line: the two names on it (once, if they are the
       // same), and what it opens, or opens out to, is what the inner folder holds. So on, as far down as that goes.
-      let label = name;
+      let label = givenName(prefix + name);
       if (!finding && !/\.epub$/i.test(name)) for (let inner; !sub.files.length && ([inner] = Object.keys(sub.dirs)).length === 1 && !/\.epub$/i.test(inner);) {
-        if (inner !== label.split(' / ').pop()) label += ' / ' + inner;
+        const shown = givenName(prefix + name + '/' + inner);
+        if (shown !== label.split(' / ').pop()) label += ' / ' + shown;
         name += '/' + inner;
         sub = sub.dirs[inner];
       }
@@ -2833,7 +2841,7 @@ function asItems(list) {
     if (at < 0) { out.push(d); continue; }
     const book = d.path.slice(0, at + 5);
     let b = seen.get(book);
-    if (!b) { b = { book, path: book, title: book.split('/').pop().replace(/\.epub$/i, ''), pages: [] }; seen.set(book, b); out.push(b); }
+    if (!b) { b = { book, path: book, title: givenName(book).replace(/\.epub$/i, ''), pages: [] }; seen.set(book, b); out.push(b); }
     b.pages.push(d);
   }
   return out;
@@ -2942,7 +2950,7 @@ function bookRow(book, pages) {
   if (inBook(book, activeDoc())) row.classList.add('active');
   const sign = kindIcon('docs');
   coverInto(sign, () => coverUrl(book));
-  row.append(sign, el('span', 'name', book.split('/').pop().replace(/\.epub$/i, '')));
+  row.append(sign, el('span', 'name', givenName(book).replace(/\.epub$/i, '')));
   const n = notes.filter((x) => inBook(book, x.doc)).length;
   if (n) row.append(el('small', '', n));
   row.append(plusBtn(() => bookTarget({ book, pages })));
@@ -3083,19 +3091,21 @@ document.addEventListener('keydown', (e) => { if (e.altKey && e.key === 'ArrowLe
 async function openDoc(path, { pane = state.active, side = false, hash, keep = false, back = false } = {}) {
   if (!docOf(path)) return;
   if (phone.matches) { side = false; keep ||= adding; drawer(null); }   // one document at a time on a phone; after the tab bar's +, in a tab of its own
-  // What is open already is gone to, not opened again in place of the tab being looked at: in whichever pane has it
-  // (on a computer; a phone shows one pane), and for a page of a book, in the tab that book is read in, turned to that
-  // page. Asking for it on the other side, or going back, is taken as asked.
+  // A document is open in one tab at most. What is open already is gone to, however it is asked for (a press, the +
+  // for a tab of its own, "side"), and never opened again in place of another tab: in whichever pane has it (on a
+  // computer; a phone shows one pane). A book is one document: a page of a book that has a tab is turned to in that tab.
+  // Going back is taken as asked, within its own pane.
   let into = -1;   // the tab of the same book, in `pane`, that the page goes into
-  if (!side && !back) {
+  const twice = keep;   // a tab of its own was asked for: the second press of a double click (see below)
+  if (!back) {
     const panes = phone.matches ? [pane] : [pane, ...state.panes.keys()].filter((i, n, all) => all.indexOf(i) === n);
     const has = panes.find((i) => state.panes[i]?.tabs.includes(path));
-    if (has != null) pane = has;
-    else if (!keep && isBookPage(path)) {
+    if (has != null) { pane = has; side = keep = false; }
+    else if (isBookPage(path)) {
       const book = bookOf(path);
       for (const i of panes) {
         const at = state.panes[i]?.tabs.findIndex((t) => inBook(book, t)) ?? -1;
-        if (at >= 0) { pane = i; into = at; break; }
+        if (at >= 0) { pane = i; into = at; side = keep = false; break; }
       }
     }
   }
@@ -3109,7 +3119,7 @@ async function openDoc(path, { pane = state.active, side = false, hash, keep = f
   if (!p.tabs.includes(path)) {
     const at = keep ? -1 : into >= 0 ? into : p.tabs.indexOf(p.active);
     if (at >= 0) { p.bumped = { path: p.tabs[at], by: path, at: Date.now() }; scrollMem.delete(pane + ':' + p.tabs[at]); p.tabs[at] = path; } else p.tabs.push(path);
-  } else if (keep) {
+  } else if (twice) {
     // A double click arrives as click + click: the first click has already
     // taken the place of the tab that was open, so put that one back beside the new one.
     const b = p.bumped;
@@ -3213,7 +3223,7 @@ function tabKeepBtn(path) {
     e.stopPropagation();
     b.disabled = true;
     if (here) { for (const d of pages) await dropCopy(d.path); for (const p of [...kept]) if (inBook(book, p)) await dropCopy(p); }
-    else await keepAll(book.split('/').pop().replace(/\.epub$/i, ''), missing, book);
+    else await keepAll(givenName(book).replace(/\.epub$/i, ''), missing, book);
     views.forEach((_, i) => renderTabs(i));
   };
   return b;
@@ -5204,7 +5214,7 @@ function oneCard(article, folder) {
   const pages = one.book ? docs.filter((d) => inBook(one.book, d.path) && inView(d)) : [];
   const target = () => (one.book ? bookTarget({ book: one.book, pages }) : one.path);
   const kind = one.book ? 'docs' : kindOfBits(isAudio(one.path) ? 1 : isVideo(one.path) ? 2 : isImage(one.path) ? 8 : 4);
-  const name = one.book ? one.book.split('/').pop().replace(/\.epub$/i, '') : docOf(one.path)?.title || one.path.split('/').pop();
+  const name = one.book ? givenName(one.book).replace(/\.epub$/i, '') : docOf(one.path)?.title || one.path.split('/').pop();
   const card = el('div', 'onecard'), pic = el('div', 'pic'), what = el('div', 'what'), go = el('button', 'main', one.book ? 'Read' : isAudio(one.path) ? 'Play' : 'Open');
   const open = () => { const p = target(); if (!p) return; if (isAudio(p) && playable(p)) askPlay(p); else openDoc(p); };
   card.tabIndex = 0;
@@ -5288,7 +5298,19 @@ function saysCount(folder) {
 }
 // A file's name as it is shown: a picture, a video or a sound file goes by its name without the ending (the reader
 // knows what it is, and says so by how it shows it). Anything else keeps its whole name: "notes.md" and "notes.c" are two things.
-const showName = (path) => { const name = path.split('/').pop(); return isMedia(path) ? name.replace(/\.[^.]+$/, '') : name; };
+// What a part of a path was called when it came, where the hub saved it under a shorter name because the whole was too
+// long for its system (`asked` in the list; see fit_path in hub.cpp): the list shows the name given, the path stays short.
+const givenNames = new Map();
+function learnGivenNames() {
+  givenNames.clear();
+  for (const d of allDocs) {
+    if (!d.asked) continue;
+    const a = d.asked.split('/'), s = d.path.split('/');
+    for (let i = 0; i < s.length && i < a.length; i++) if (s[i] !== a[i]) givenNames.set(s.slice(0, i + 1).join('/'), a[i]);
+  }
+}
+const givenName = (path) => givenNames.get(path) || path.split('/').pop();
+const showName = (path) => { const name = givenName(path); return isMedia(path) ? name.replace(/\.[^.]+$/, '') : name; };
 // Folders as cards (a set's page; the library on the front page): for each, a picture from inside it (see
 // folderThumb), its name, and how much it holds. Pressing a card goes into the folder: to its page; or, where the
 // folder is nothing more than one thing and has no front page to say more, straight to the thing; or, for a
@@ -5776,7 +5798,7 @@ function renderOutline() {
   // only repeats the chapter's name is left out).
   if (of && isBookPage(of.path)) {
     const book = of.path.slice(0, of.path.search(/\.epub\//i) + 5);
-    $('tocLabel').textContent = 'Outline · ' + book.split('/').pop().replace(/\.epub$/i, '');
+    $('tocLabel').textContent = 'Outline · ' + givenName(book).replace(/\.epub$/i, '');
     for (const d of docs) {
       if (!inBook(book, d.path) || !inView(d)) continue;
       const a = el('a', 'l1' + (d === of ? ' here' : ''), pageTitle(d));

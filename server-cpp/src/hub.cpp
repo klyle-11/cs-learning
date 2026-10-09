@@ -1408,6 +1408,54 @@ static http::Response session_json(const string &device) {
   return json_response(out.p);
 }
 
+// What a file saved under a shorter name (fit_path) was called when it came: its path as saved -> as asked, kept in
+// .names.json at the top of its workspace (a hidden name: neither listed nor served). The list shows a file by the name
+// it was given, and "update…" on a folder matches its files by it. A plain map of names; cJSON objects, returned owned.
+static cJSON *read_names(const string &base) {
+  string text;
+  cJSON *names = read_file(base + "/.names.json", text) ? cJSON_Parse(text.c_str()) : nullptr;
+  if (cJSON_IsObject(names)) return names;
+  cJSON_Delete(names);
+  return cJSON_CreateObject();
+}
+static void remember_name(const string &base, const string &saved, const string &asked) {
+  Json names(read_names(base));
+  cJSON_DeleteItemFromObjectCaseSensitive(names.p, saved.c_str());
+  cJSON_AddStringToObject(names.p, saved.c_str(), asked.c_str());
+  write_file(base + "/.names.json", dump(names.p, true) + "\n");
+}
+// Shorten a path that is too long for this system to save under `base`, rather than refuse it: the longest part first,
+// to its beginning, "~", six hex digits made from its whole name, and its extension (".epub" stays ".epub"), as many
+// times as it takes. The same name always shortens the same way, so the files of a folder whose name is too long stay
+// together in one folder, and a second upload of a file finds the first. False if even that does not fit.
+static bool fit_path(const string &base, Strings &parts) {
+  const auto too_long = [&]() { return sys::path_too_long(base + "/" + join(parts) + ".00000000.tmp"); };   // with the temporary name's ending
+  const Strings was = parts;
+  std::vector<size_t> keep(parts.size());
+  for (size_t i = 0; i < parts.size(); i++) keep[i] = parts[i].size();
+  for (int round = 0; round < 200 && too_long(); round++) {
+    size_t at = 0;
+    for (size_t i = 1; i < parts.size(); i++) if (parts[i].size() > parts[at].size()) at = i;
+    const string &whole = was[at];
+    const size_t dot = at + 1 == parts.size() ? whole.rfind('.') : string::npos;
+    const string ext = dot != string::npos && dot > 0 && whole.size() - dot <= 10 ? whole.substr(dot) : "";
+    const size_t stem = whole.size() - ext.size();
+    if (keep[at] > stem) keep[at] = stem;
+    if (keep[at] <= 8) return false;   // as short as it goes
+    keep[at] = std::max<size_t>(8, keep[at] - std::max<size_t>(4, keep[at] / 8));
+    size_t cut = keep[at];
+    while (cut > 0 && (static_cast<unsigned char>(whole[cut]) & 0xC0) == 0x80) cut--;   // not in the middle of a letter
+    string start = whole.substr(0, cut);
+    while (!start.empty() && (start.back() == ' ' || start.back() == '.')) start.pop_back();
+    unsigned long long h = 1469598103934665603ULL;
+    for (char ch : whole) h = (h ^ static_cast<unsigned char>(ch)) * 1099511628211ULL;
+    char tag[8];
+    std::snprintf(tag, sizeof tag, "~%06llx", h & 0xFFFFFFULL);
+    parts[at] = start + tag + ext;
+  }
+  return !too_long();
+}
+
 static http::Response answer(http::Request &req) {
   const string &p = req.path, &m = req.method;
 
@@ -1730,6 +1778,24 @@ static http::Response answer(http::Request &req) {
     }
     Json cfg(read_config()), docs(cJSON_CreateArray());
     walk(ROOT, "", list_of(cfg.p, "ignore"), list_of(cfg.p, "side"), docs.p);
+    // A file saved under a shorter name, or a page of such a book, says the path it was given ("asked"), and goes by the
+    // name it was given where it would have gone by its file's name.
+    Json names(read_names(ROOT));
+    if (cJSON_GetArraySize(names.p) > 0) {
+      cJSON *d;
+      cJSON_ArrayForEach(d, docs.p) {
+        const string path = str_of(d, "path");
+        const cJSON *n;
+        cJSON_ArrayForEach(n, names.p) {
+          const string saved = n->string ? n->string : "";
+          if (saved.empty() || !cJSON_IsString(n) || !(path == saved || starts_with(path, saved + "/"))) continue;
+          const string asked = n->valuestring + path.substr(saved.size());
+          cJSON_AddStringToObject(d, "asked", asked.c_str());
+          if (str_of(d, "title") == basename_of(path)) set_str(d, "title", basename_of(asked));
+          break;
+        }
+      }
+    }
     http::Response r = json_response(docs.p);
     if (profile.cache_listing) { std::lock_guard<std::mutex> g(cache_lock); listing_cache = r.body; listing_stamp = stamp; }
     return r;
@@ -1873,8 +1939,10 @@ static http::Response answer(http::Request &req) {
     if (it == req.query.end() || !clean_parts(it->second, parts, true) || parts.empty()) return http::error(400, "bad path");
     string abs = ROOT + "/" + join(parts);
     if (!is_dir(abs) || sys::is_link(abs) || in_page_folder(abs) || !inside(abs)) return http::error(404, "no such folder");
-    Json out(cJSON_CreateArray());
+    Json out(cJSON_CreateArray()), names(read_names(ROOT));
     walk_files(abs, join(parts), out.p);
+    cJSON *f;
+    cJSON_ArrayForEach(f, out.p) { const string asked = str_of(names.p, str_of(f, "path").c_str()); if (!asked.empty()) cJSON_AddStringToObject(f, "asked", asked.c_str()); }
     return json_response(out.p);
   }
 
@@ -2254,6 +2322,8 @@ static http::Response answer(http::Request &req) {
   // open workspace; with it, to a workspace of its own, made on first use.
   // Existing files are never overwritten. The body goes to disk a piece at a
   // time, under a temporary name until it is complete.
+  // A name too long for this system (on Windows, 259 characters for the whole path, the served folder included;
+  // elsewhere, 255 bytes a part) is shortened rather than refused (see fit_path), and the answer says what it was saved as.
   if (p == "/api/upload" && m == "POST") {
     Strings parts;
     auto it = req.query.find("path"), ws = req.query.find("workspace");
@@ -2265,6 +2335,8 @@ static http::Response answer(http::Request &req) {
     }
     if (it == req.query.end() || !clean_parts(it->second, parts, true)) return http::error(400, "bad path");
     if (req.content_length > profile.max_upload) return http::error(413, "body too large");
+    const string asked = join(parts);
+    if (!fit_path(base, parts)) return http::error(400, "the name is too long for this system");
     string abs = base + "/" + join(parts);
     if (!inside(abs, base)) return http::error(400, "bad path");   // not through a link that leads out of the workspace
     if (in_page_folder(abs)) return http::error(400, "bad path");   // the page's own files are not changed through the API
@@ -2274,6 +2346,7 @@ static http::Response answer(http::Request &req) {
     string tmp = abs + "." + secure::random_hex(4) + ".tmp";
     if (sys::path_too_long(tmp)) return refuse(400, "the name is too long for this system");
     Json out(cJSON_CreateObject());
+    if (join(parts) != asked) { cJSON_AddStringToObject(out.p, "path", join(parts).c_str()); cJSON_AddBoolToObject(out.p, "shortened", true); }
     // A file that is here already is left as it is, unless the upload says it is a newer
     // copy of it ("replace=1": an update of a folder that was uploaded before). A folder
     // of that name is never replaced by a file.
@@ -2290,6 +2363,7 @@ static http::Response answer(http::Request &req) {
     if (int bad = req.save_body(tmp, profile.max_upload, profile.piece)) return bad == 507 ? http::error(507, "storage is full") : bad == 500 ? refuse(500, "could not save") : body_error(bad);
     if (!sys::replace(tmp, abs)) { ::unlink(tmp.c_str()); return http::error(500, "could not save"); }
     if (base == ROOT) used_more(static_cast<unsigned long long>(req.content_length) - old_size);   // what it adds; less than nothing if it shrank (the count wraps round and back)
+    if (join(parts) != asked) { std::lock_guard<std::mutex> g(store_lock); remember_name(base, join(parts), asked); }
     touch_tree();
     cJSON_AddBoolToObject(out.p, "saved", true);
     if (replace) cJSON_AddBoolToObject(out.p, "replaced", true);

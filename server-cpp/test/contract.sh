@@ -296,6 +296,31 @@ run() { # run <port> <root> <log>: the request script
   req "nothing removed now"     body "$B/api/removed"
   echo "## nothing kept aside"
   ls -A "$2/.removed" | wc -l | tr -d ' '
+  # A name too long for this system is shortened, not refused: the same way each time, the files of such a folder kept
+  # together, and the name it was given kept for the list and for "update". The shorter name differs from one system to
+  # another (and with the folder served), so what is printed is what holds on all of them.
+  LONGNAME="$("$PY" -c "print('A very long title of a book that goes on and on ' * 6 + '(2017)')")"
+  LONGQ="$("$PY" -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$LONGNAME")"
+  long_said() { "$PY" -c "
+import sys, json, re
+r, asked = json.loads(sys.stdin.read()), sys.argv[1]
+p = r.get('path', '')
+print(json.dumps({'saved': r.get('saved', False), 'skipped': r.get('skipped', False), 'shortened': r.get('shortened', False),
+  'kept its start': p.split('/')[-1].startswith(asked.split('/')[-1][:20]) or p.split('/')[-2].startswith(asked.split('/')[-2][:20]),
+  'ends': re.sub('[0-9a-f]{6}', '<hex>', p[-12:]), 'shorter': len(p) < len(asked)}, sort_keys=True))" "$1"; }
+  echo "## a long name: a book";   curl -s -b "$JAR" -X POST --data-binary 'not really a book' "$B/api/upload?path=long/$LONGQ.epub" | long_said "long/$LONGNAME.epub"
+  echo "## the same again";         curl -s -b "$JAR" -X POST --data-binary 'not really a book' "$B/api/upload?path=long/$LONGQ.epub" | long_said "long/$LONGNAME.epub"
+  echo "## a long folder: a file";  curl -s -b "$JAR" -X POST --data-binary 'one' "$B/api/upload?path=long/$LONGQ/a.md" | long_said "long/$LONGNAME/a.md"
+  curl -s -b "$JAR" -X POST --data-binary 'two' "$B/api/upload?path=long/$LONGQ/b.md" > /dev/null
+  echo "## its files together, listed by the names given"
+  curl -s -b "$JAR" "$B/api/files?path=long" | "$PY" -c "
+import sys, json
+fs = json.load(sys.stdin)
+print(len(fs), 'files;', len({f['path'].rsplit('/', 1)[0] for f in fs if f['path'].endswith('.md')}), 'folder for the two;', sorted(f['asked'].replace(sys.argv[1], '<long>') for f in fs))" "$LONGNAME"
+  echo "## in the list"
+  curl -s -b "$JAR" "$B/api/docs" | "$PY" -c "
+import sys, json
+print(sorted((d['title'].replace(sys.argv[1], '<long>'), d.get('asked', '').replace(sys.argv[1], '<long>')) for d in json.load(sys.stdin) if d['path'].startswith('long/')))" "$LONGNAME"
   req "upload new"            body -X POST --data-binary '# Uploaded' "$B/api/upload?path=up/new%20file.md"
   req "upload again"          body -X POST --data-binary '# Changed' "$B/api/upload?path=up/new%20file.md"
   req "uploaded content"      body "$B/api/doc?path=up/new%20file.md"
