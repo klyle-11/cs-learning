@@ -18,7 +18,7 @@ TODO.md       the plan
 ./start.sh                  # or: cd hub && npm start.   http://localhost:4321, reading data/
 ```
 
-The first run creates `data/` as a copy of `sample/`, fetches the page's three libraries with npm, and builds the server (it needs a C++ compiler and mbedTLS: `brew install mbedtls`). From then on everything you do in the reader lands in `data/` and stays out of git. To start again from the samples, delete `data/`.
+The first run creates `data/` as a copy of `sample/`, fetches the page's libraries with npm, and builds the server (it needs a C++ compiler and mbedTLS: `brew install mbedtls`). From then on everything you do in the reader lands in `data/` and stays out of git. To start again from the samples, delete `data/`.
 
 The server is `server-cpp/hubd`, one program for a computer, a Raspberry Pi and the ESP32 board, with limits chosen to suit each. `./start.sh` runs it for you; to run it by hand: `server-cpp/hubd data --www hub`. For the board see `server-cpp/esp32/`.
 

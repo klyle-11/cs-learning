@@ -11,7 +11,12 @@
 set -u
 cd "$(dirname "$0")/.."
 REPO="$(cd .. && pwd)"
-WORK="$(mktemp -d)"
+# On Windows the scratch folder is made here, under build/, and not in /tmp: "diff" may be the one that came with Git
+# (MSYS2 has none unless diffutils is installed), and that one has a /tmp of its own, so it would not find the answers.
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) mkdir -p build; WORK="$(mktemp -d "$PWD/build/test.XXXXXX")" ;;
+  *) WORK="$(mktemp -d)" ;;
+esac
 CPP_PORT=4412
 # The folder's real path as the server reports it. On Windows that is the
 # Windows form (C:/...), not the shell's own (/tmp/...).
@@ -171,6 +176,7 @@ run() { # run <port> <root> <log>: the request script
   req "vendor marked"         status-only "$B/vendor/marked.js"
   req "vendor highlight"      status-only "$B/vendor/highlight.js"
   echo "## vendor pdf, and its worker"; for f in pdf.mjs pdf.worker.mjs; do curl -s -o /dev/null -D - "$B/vendor/$f" | tr -d '\r' | grep -iE '^(HTTP/|content-type|content-security-policy)' | sed 's/^HTTP\/1.1 \([0-9]*\).*/\1/'; done
+  echo "## vendor document engine: a module, its worker, its WebAssembly, and what is not served"; for f in index.js worker.js recolor-worker.js ui.css wasm/marginalia_wasm_bg.wasm wasm-ocr/marginalia_wasm.js ../package.json Index.js .js; do curl -s -o /dev/null --path-as-is -D - "$B/vendor/marginalia/$f" | tr -d '' | grep -iE '^(HTTP/|content-type|content-security-policy)' | sed 's/^HTTP\/1.1 \([0-9]*\).*/\1/'; done
   req "unknown route"         body "$B/api/nope"
   req "notes empty"           body "$B/api/notes"
   req "note create"           body -X POST "${J[@]}" -d '{"doc":"a/1-doc.md","text":"why \"this\"?\nline two","quote":"Body one.","type":"question","heading":"first","headingText":"First"}' "$B/api/notes"
@@ -186,6 +192,12 @@ run() { # run <port> <root> <log>: the request script
   req "quote without anchor"  body -X PUT "${J[@]}" -d '{"quote":"Body one"}' "$B/api/notes/anchored-1"
   req "anchored note gone"    body -X DELETE "$B/api/notes/anchored-1"
   req "anchored note 2 gone"  body -X DELETE "$B/api/notes/anchored-2"
+  req "highlight on a pdf page" body -X POST "${J[@]}" -d '{"id":"engine-1","ts":"2026-01-02T03:04:05.678Z","doc":"b/paper.pdf","quote":"risks","headingText":"page 1","mg":{"doc":"b34531a9d344f4405422a9f1edb6b33fdc50c69fb28f4c723e8deed368a43674","anchor":{"unit":"p1","unitIndex":0,"quote":{"exact":"risks","prefix":"are ","suffix":" associated"},"position":{"start":10,"end":15},"rects":[{"x0":1.5,"x1":2,"y0":3,"y1":4},{"x0":"no"}],"other":1},"other":2}}' "$B/api/notes"
+  req "engine anchor not usable" body -X POST "${J[@]}" -d '{"id":"engine-2","ts":"2026-01-02T03:04:05.678Z","doc":"b/paper.pdf","quote":"risks","mg":{"doc":"../x","anchor":{"unit":"p1","quote":{"exact":"risks"}}}}' "$B/api/notes"
+  req "engine anchor kept on edit" body -X PUT "${J[@]}" -d '{"type":"question"}' "$B/api/notes/engine-1"
+  req "quote without engine anchor" body -X PUT "${J[@]}" -d '{"quote":"risk"}' "$B/api/notes/engine-1"
+  req "engine note gone"      body -X DELETE "$B/api/notes/engine-1"
+  req "engine note 2 gone"    body -X DELETE "$B/api/notes/engine-2"
   req "blocks of markdown"    body "$B/api/blocks?path=a/blocks.md"
   req "blocks of a page"      body "$B/api/blocks?path=b/blocks.html"
   req "blocks of code"        body "$B/api/blocks?path=code.c"
@@ -261,7 +273,7 @@ run() { # run <port> <root> <log>: the request script
   req "own page posts"          body -X POST "${J[@]}" -H "Origin: $B" -d '{"doc":"a/1-doc.md","text":"from the page itself"}' "$B/api/notes"
   req "other site reads"        body -H 'Origin: http://evil.example' "$B/api/config"
   # A reader loaded from another hub: it must send its token itself.
-  TOKEN=$(awk '$6=="hub_device"{print $7}' "$JAR" | tail -1)
+  TOKEN=$(awk '$6 ~ /^hub_device/{print $7}' "$JAR" | tail -1)
   X=(-H 'Origin: https://other.example:4321')
   cors() { curl -s -o /dev/null -D - "$@" | tr -d '\r' | grep -i -E '^(HTTP|access-control|vary)' | sort; }
   echo "## other hub, cookie only";   curl -s -o /dev/null -w '%{http_code}\n' -b "$JAR" "${X[@]}" "$B/api/hubs"

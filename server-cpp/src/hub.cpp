@@ -693,10 +693,16 @@ static string bearer_of(const http::Request &req) {
 // and being on this machine count for nothing, since any website could cause
 // such a request.
 static thread_local string renew_cookie;   // set when this request's cookie should be sent again with a fresh year
+// The cookie is named for the port (set in main): a browser keeps cookies by host name alone, whatever the port, so two
+// hubs on one machine (the hub and a scratch one) would otherwise take each other's cookie; and a browser will not let
+// a plain-HTTP hub replace a cookie of the same name that an HTTPS one marked Secure, so pairing with it never held.
+// The name from before, "hub_device", is still read, so a device paired then stays paired.
+static string COOKIE = "hub_device";
 static string device_of(const http::Request &req, bool cross) {
   string cookie = bearer_of(req);
   const bool by_cookie = cookie.empty() && !cross;
-  if (by_cookie) cookie = cookie_of(req, "hub_device");
+  if (by_cookie) cookie = cookie_of(req, COOKIE);
+  if (by_cookie && cookie.empty()) cookie = cookie_of(req, "hub_device");
   size_t dot = cookie.find('.');
   if (dot != string::npos) {
     string id = cookie.substr(0, dot), hash = secure::sha256_hex(cookie.substr(dot + 1)), today = now_iso().substr(0, 10);
@@ -748,7 +754,7 @@ static string origin_of(const string &typed) {
   return !host.empty() && host.find('@') == string::npos && plain_origin(out) ? out : "";
 }
 static string device_cookie(const string &value, bool tls, bool clear = false) {
-  return "Set-Cookie: hub_device=" + value + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=" + (clear ? "0" : "31536000") + (tls ? "; Secure" : "") + "\r\n";
+  return "Set-Cookie: " + COOKIE + "=" + value + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=" + (clear ? "0" : "31536000") + (tls ? "; Secure" : "") + "\r\n";
 }
 
 // ---- how much is stored ---------------------------------------------------------------------
@@ -1048,6 +1054,50 @@ static cJSON *clean_anchor(const cJSON *in) {
   return a;
 }
 
+// The same for a highlight on a PDF's page, which the document engine places: { doc, anchor }. `doc` is the file's
+// SHA-256, and `anchor` what the engine made (its API.md, "Anchor"), handed back to it as it is: the known fields
+// only, each within bounds, and nothing of it is read here. nullptr if it is not usable.
+static cJSON *clean_mg(const cJSON *in) {
+  if (!cJSON_IsObject(in)) return nullptr;
+  const string doc = str_of(in, "doc");
+  const cJSON *from = cJSON_GetObjectItemCaseSensitive(in, "anchor"), *quote = cJSON_GetObjectItemCaseSensitive(from, "quote");
+  if (doc.size() != 64 || !std::all_of(doc.begin(), doc.end(), [](unsigned char c) { return std::isxdigit(c); })) return nullptr;
+  const string unit = str_of(from, "unit"), exact = str_of(quote, "exact");
+  if (!cJSON_IsObject(from) || unit.empty() || unit.size() > 200 || exact.empty() || exact.size() > 20000) return nullptr;
+  auto number = [](const cJSON *o, const char *key, cJSON *to) {
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(o, key);
+    const bool ok = cJSON_IsNumber(v) && v->valuedouble > -1e9 && v->valuedouble < 1e9;
+    if (ok) cJSON_AddNumberToObject(to, key, v->valuedouble);
+    return ok;
+  };
+  auto words = [&](const char *key) { const string s = str_of(quote, key); return s.size() <= 2000 ? s : string(); };
+  cJSON *a = cJSON_CreateObject(), *q = cJSON_AddObjectToObject(a, "quote");
+  cJSON_AddStringToObject(a, "unit", unit.c_str());
+  number(from, "unitIndex", a);
+  cJSON_AddStringToObject(q, "exact", exact.c_str());
+  cJSON_AddStringToObject(q, "prefix", words("prefix").c_str());
+  cJSON_AddStringToObject(q, "suffix", words("suffix").c_str());
+  if (const cJSON *at = cJSON_GetObjectItemCaseSensitive(from, "position"); cJSON_IsObject(at)) {
+    cJSON *to = cJSON_CreateObject();
+    if (number(at, "start", to) && number(at, "end", to)) cJSON_AddItemToObject(a, "position", to); else cJSON_Delete(to);
+  }
+  const string cfi = str_of(from, "cfi");
+  if (!cfi.empty() && cfi.size() <= 2000) cJSON_AddStringToObject(a, "cfi", cfi.c_str());
+  // One box for each run of the highlight's words: a long one has a few dozen.
+  if (const cJSON *rects = cJSON_GetObjectItemCaseSensitive(from, "rects"); cJSON_IsArray(rects) && cJSON_GetArraySize(rects) <= 2000) {
+    cJSON *to = cJSON_AddArrayToObject(a, "rects");
+    const cJSON *r;
+    cJSON_ArrayForEach(r, rects) {
+      cJSON *box = cJSON_CreateObject();
+      if (number(r, "x0", box) && number(r, "x1", box) && number(r, "y0", box) && number(r, "y1", box)) cJSON_AddItemToArray(to, box); else cJSON_Delete(box);
+    }
+  }
+  cJSON *mg = cJSON_CreateObject();
+  cJSON_AddStringToObject(mg, "doc", lower(doc).c_str());
+  cJSON_AddItemToObject(mg, "anchor", a);
+  return mg;
+}
+
 // A file that is there but cannot be read as what it should be. Writing would
 // replace everything in it with what little this request knows, so writes are
 // refused until it is repaired by hand.
@@ -1233,6 +1283,23 @@ static http::Response answer(http::Request &req) {
       http::Response r = asset_response(is_file(WWW + "/" + name) ? WWW + "/" + name : WWW + "/" + a.second, "text/javascript");
       // A worker runs under the policy its own file is sent with: the one for data would not let it run at all. It may run itself, and nothing more.
       if (p == "/vendor/pdf.worker.mjs") r.extra += "Content-Security-Policy: default-src 'none'; script-src 'self'\r\n";
+      return r;
+    }
+    // The document engine (marginalia-engine): what reads a PDF's text and where each character is, for selecting and
+    // highlighting on its pages. Many small modules, so they are served by name and not listed: plain names only, a
+    // script, the style sheet or the WebAssembly, from the package's dist folder and its wasm folder and nowhere else.
+    if (starts_with(p, "/vendor/marginalia/")) {
+      const string name = p.substr(19), leaf = starts_with(name, "wasm/") ? name.substr(5) : name;
+      const size_t dot = leaf.rfind('.');
+      const string ext = dot == string::npos ? "" : leaf.substr(dot);
+      const char *type = ext == ".js" ? "text/javascript" : ext == ".css" ? "text/css" : ext == ".wasm" ? "application/wasm" : nullptr;
+      if (!type || dot == 0 || !std::all_of(leaf.begin(), leaf.begin() + static_cast<std::ptrdiff_t>(dot), [](unsigned char c) { return std::islower(c) || std::isdigit(c) || c == '-' || c == '_'; }))
+        return http::error(404, "no such file");
+      http::Response r = asset_response(is_file(WWW + p) ? WWW + p : WWW + "/node_modules/marginalia-engine/dist/" + name, type);
+      // Its workers, like PDF.js's, run under the policy their own file is sent with. The engine's fetches its
+      // WebAssembly from here and compiles it, and may do nothing else; the one that recolours pages only runs.
+      if (name == "worker.js") r.extra += "Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'\r\n";
+      else if (name == "recolor-worker.js") r.extra += "Content-Security-Policy: default-src 'none'; script-src 'self'\r\n";
       return r;
     }
   }
@@ -1768,6 +1835,7 @@ static http::Response answer(http::Request &req) {
     cJSON_AddStringToObject(note, "quote", quote.c_str());
     cJSON_AddStringToObject(note, "type", str_of(body.p, "type").c_str());
     if (cJSON *a = clean_anchor(cJSON_GetObjectItemCaseSensitive(body.p, "anchor"))) cJSON_AddItemToObject(note, "anchor", a);
+    if (cJSON *mg = clean_mg(cJSON_GetObjectItemCaseSensitive(body.p, "mg"))) cJSON_AddItemToObject(note, "mg", mg);
     cJSON_AddStringToObject(note, "text", text.c_str());
     cJSON_AddStringToObject(note, "ts", ts_ok ? own_ts.c_str() : now_iso().c_str());
     cJSON_AddStringToObject(note, "status", text.empty() ? "highlight" : "open");
@@ -1801,6 +1869,9 @@ static http::Response answer(http::Request &req) {
     cJSON *a = clean_anchor(cJSON_GetObjectItemCaseSensitive(body.p, "anchor"));
     if (a || has_str(body.p, "quote")) cJSON_DeleteItemFromObjectCaseSensitive(note, "anchor");
     if (a) cJSON_AddItemToObject(note, "anchor", a);
+    cJSON *mg = clean_mg(cJSON_GetObjectItemCaseSensitive(body.p, "mg"));
+    if (mg || has_str(body.p, "quote")) cJSON_DeleteItemFromObjectCaseSensitive(note, "mg");
+    if (mg) cJSON_AddItemToObject(note, "mg", mg);
     if (str_of(note, "status") == "highlight" && !str_of(note, "text").empty()) set_str(note, "status", "open");
     if (!write_notes(notes.p)) return http::error(500, "could not save");
     return json_response(note);
@@ -2025,6 +2096,7 @@ int main(int argc, char **argv) {
   http::Options opt;
   opt.host = host;
   opt.port = port;
+  COOKIE = "hub_device_" + std::to_string(port);
   opt.tls = tls_on ? &tls : nullptr;
   opt.max_conns = profile.max_conns;
   opt.keepalive_ms = profile.keepalive_ms;

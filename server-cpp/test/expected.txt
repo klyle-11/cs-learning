@@ -216,6 +216,34 @@ Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'
 200
 Content-Type: text/javascript; charset=utf-8
 Content-Security-Policy: default-src 'none'; script-src 'self'
+## vendor document engine: a module, its worker, its WebAssembly, and what is not served
+200
+Content-Type: text/javascript; charset=utf-8
+Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'
+200
+Content-Type: text/javascript; charset=utf-8
+Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'
+200
+Content-Type: text/javascript; charset=utf-8
+Content-Security-Policy: default-src 'none'; script-src 'self'
+200
+Content-Type: text/css; charset=utf-8
+Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'
+200
+Content-Type: application/wasm
+Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'
+404
+Content-Type: application/json; charset=utf-8
+Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'
+404
+Content-Type: application/json; charset=utf-8
+Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'
+404
+Content-Type: application/json; charset=utf-8
+Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'
+404
+Content-Type: application/json; charset=utf-8
+Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'
 ## unknown route
 404 {"error": "not found"}
 ## notes empty
@@ -245,6 +273,18 @@ Content-Security-Policy: default-src 'none'; script-src 'self'
 ## anchored note gone
 200 {"ok": true}
 ## anchored note 2 gone
+200 {"ok": true}
+## highlight on a pdf page
+200 {"doc": "b/paper.pdf", "heading": "", "headingText": "page 1", "id": "<id>", "mg": {"anchor": {"position": {"end": 15, "start": 10}, "quote": {"exact": "risks", "prefix": "are ", "suffix": " associated"}, "rects": [{"x0": 1.5, "x1": 2, "y0": 3, "y1": 4}], "unit": "p1", "unitIndex": 0}, "doc": "b34531a9d344f4405422a9f1edb6b33fdc50c69fb28f4c723e8deed368a43674"}, "quote": "risks", "status": "highlight", "text": "", "ts": "<ts>", "type": ""}
+## engine anchor not usable
+200 {"doc": "b/paper.pdf", "heading": "", "headingText": "", "id": "<id>", "quote": "risks", "status": "highlight", "text": "", "ts": "<ts>", "type": ""}
+## engine anchor kept on edit
+200 {"doc": "b/paper.pdf", "heading": "", "headingText": "page 1", "id": "<id>", "mg": {"anchor": {"position": {"end": 15, "start": 10}, "quote": {"exact": "risks", "prefix": "are ", "suffix": " associated"}, "rects": [{"x0": 1.5, "x1": 2, "y0": 3, "y1": 4}], "unit": "p1", "unitIndex": 0}, "doc": "b34531a9d344f4405422a9f1edb6b33fdc50c69fb28f4c723e8deed368a43674"}, "quote": "risks", "status": "highlight", "text": "", "ts": "<ts>", "type": "question"}
+## quote without engine anchor
+200 {"doc": "b/paper.pdf", "heading": "", "headingText": "page 1", "id": "<id>", "quote": "risk", "status": "highlight", "text": "", "ts": "<ts>", "type": "question"}
+## engine note gone
+200 {"ok": true}
+## engine note 2 gone
 200 {"ok": true}
 ## blocks of markdown
 200 {"blocks": [{"hash": "41649cbdc94a899c", "len": 9, "nth": 0}, {"hash": "62bdc245150fdf6a", "len": 28, "nth": 0}, {"hash": "fec3316c9ad911ce", "len": 7, "nth": 0}, {"hash": "fec3316c9ad911ce", "len": 7, "nth": 1}, {"hash": "faa3398f4335d559", "len": 5, "nth": 0}, {"hash": "08ba8707b55f07d2", "len": 2, "nth": 0}, {"hash": "08ba8607b55f061f", "len": 2, "nth": 0}, {"hash": "08a27f07b54a6859", "len": 2, "nth": 0}, {"hash": "08a27c07b54a6340", "len": 2, "nth": 0}]}

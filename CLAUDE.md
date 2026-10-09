@@ -13,6 +13,7 @@ A self-directed CS learning environment. The user works in small steps, irregula
   - `references.md` — log of everything cited, with links.
   - `discrete-math/sources/` — do not edit.
 - Run with `cd hub && npm start` (or `./start.sh`), then http://localhost:4321. Both run `server-cpp/hubd`; there is no Node server any more.
+- `marginalia-engine-integration/` — the document engine's packages and guides. The reader uses the npm one (`hub/node_modules/marginalia-engine`, served under `/vendor/marginalia/`) for selecting and highlighting on PDF pages; `INTEGRATION-FOR-AGENTS.md` there has the rules for working with it.
 - `REVIEW.md` — findings and their state; `TODO.md` — the plan; `CERTIFICATES.md` — the hub's certificate authority; `server-cpp/API.md` — the contract between page and server. Keep these in step with the code when it changes.
 
 ## Working on the hub's code
@@ -39,6 +40,8 @@ Each entry in `notes/notes.json`:
 ```
 
 A highlight made in the reader may also carry `"anchor": { "block", "nth", "start", "before", "after" }`: where in the document its `quote` is (see `server-cpp/src/anchor.hpp`). Leave it as it is; a note written here (a terminal question) has none.
+
+A highlight on a PDF's page carries `"mg": { "doc", "anchor" }` instead: the file's SHA-256 and the document engine's anchor (`marginalia-engine-integration/API.md`, "Anchor"). Its `headingText` is the page ("page 12") and its `heading` is empty. Leave `mg` exactly as it is: the engine finds the words by it.
 
 `status` is `highlight` for a highlight with no note (nothing to answer — but its type name, e.g. "Unclear" or "Question", says how the user read that passage and is useful context), `open` for a note awaiting a reply, `answered` once replied to. Type names and colours are in `hub.json` under `highlights`.
 

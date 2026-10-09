@@ -40,6 +40,20 @@ Not needed on Windows, and unchanged: the reader itself (`hub/`), which is a web
 
 Windows will ask whether to allow `hubd.exe` through the firewall the first time it listens on the network (`npm run start:network:win`). Allow it for **private** networks only.
 
+That permission belongs to the program at that path: `server-cpp\hubd.exe` keeps it when it is built again, and no other program has it. The copy built apart, `server-cpp\build\hubd-own.exe`, is another program: run on the network (to try a change from a phone while the hub itself stays running), it is not reachable from other devices until it is allowed too. Windows does not always ask. In a PowerShell opened **as administrator**, with the path of this folder on your machine:
+
+```
+New-NetFirewallRule -DisplayName "hubd-own (scratch)" -Direction Inbound -Program "C:\Users\<you>\csprojects\cs-learning\server-cpp\build\hubd-own.exe" -Action Allow -Profile Private
+```
+
+Or allow the ports and not the program, whatever is listening on them (4400 is the hub, 4396 the scratch one):
+
+```
+New-NetFirewallRule -DisplayName "hub ports 4396, 4400" -Direction Inbound -Protocol TCP -LocalPort 4396,4400 -Action Allow -Profile Private
+```
+
+To take either away again: `Remove-NetFirewallRule -DisplayName "<the name above>"`. To see what is allowed: `Get-NetFirewallApplicationFilter | Where-Object Program -like '*hubd*'`. Both rules are for private networks only; the network the machine is on has to be marked private (`Get-NetConnectionProfile`).
+
 ## The same commands on every system
 
 From `hub/`. On Windows add `:win`; on macOS, Linux and Raspberry Pi OS use them as they are.

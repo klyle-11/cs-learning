@@ -65,6 +65,9 @@ card:
 	cp ../hub/node_modules/dompurify/dist/purify.min.js "$(CARD)/hub/www/vendor/purify.js"
 	cp ../hub/node_modules/pdfjs-dist/legacy/build/pdf.min.mjs "$(CARD)/hub/www/vendor/pdf.mjs"
 	cp ../hub/node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs "$(CARD)/hub/www/vendor/pdf.worker.mjs"
+	mkdir -p "$(CARD)/hub/www/vendor/marginalia/wasm"
+	cd ../hub/node_modules/marginalia-engine/dist && cp index.js client.js worker.js selection.js selection-engine.js frame.js geometry.js overlay.js surfaces.js caret.js dom.js themes.js recolor.js recolor-worker.js ui.css "$(CARD)/hub/www/vendor/marginalia/"
+	cp ../hub/node_modules/marginalia-engine/dist/wasm/marginalia_wasm.js ../hub/node_modules/marginalia-engine/dist/wasm/marginalia_wasm_bg.wasm "$(CARD)/hub/www/vendor/marginalia/wasm/"
 	if ls ../hub/js/*.js >/dev/null 2>&1; then mkdir -p "$(CARD)/hub/www/js" && cp ../hub/js/*.js "$(CARD)/hub/www/js/"; fi
 
 clean:
