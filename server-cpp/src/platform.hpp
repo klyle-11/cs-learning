@@ -241,6 +241,29 @@ inline bool real_path(const std::string &path, std::string &out) {
   return true;
 #endif
 }
+// Where something that exists really is, every link and junction on the way followed, with "/" between its parts.
+// real_path does that elsewhere, but on Windows only tidies the path. False if it does not exist, and on the board,
+// whose card has no links.
+inline bool final_path(const std::string &path, std::string &out) {
+#ifdef _WIN32
+  HANDLE h = CreateFileA(path.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+  if (h == INVALID_HANDLE_VALUE) return false;
+  char buf[MAX_PATH * 4];
+  const DWORD n = GetFinalPathNameByHandleA(h, buf, sizeof buf, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+  CloseHandle(h);
+  if (n == 0 || n >= sizeof buf) return false;
+  out.assign(buf, n);
+  if (out.rfind("\\\\?\\UNC\\", 0) == 0) out = "//" + out.substr(8);   // \\?\UNC\server\share
+  else if (out.rfind("\\\\?\\", 0) == 0) out = out.substr(4);          // \\?\C:\...
+  for (char &c : out) if (c == '\\') c = '/';
+  return true;
+#elif defined(ESP_PLATFORM)
+  (void)path; (void)out;
+  return false;
+#else
+  return real_path(path, out);
+#endif
+}
 // Bytes free on the disk that holds `path`; all ones if it cannot be told.
 inline unsigned long long free_bytes(const std::string &path) {
 #ifdef _WIN32

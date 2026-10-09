@@ -22,7 +22,8 @@ Now, in order:
 7. Efficiency for the board and for phones. [x] One list request per burst of changes; "not modified" answers for the page's files; a guarded watcher; the folder walked at most once per interval; looking for an absent server less and less often; headings measured once per frame; the track list no longer rebuilt on play and pause (32, 33, 24, 37, 39). [ ] Compressed files; one shared list for the watcher and the document list; notes per document; files from another hub streamed; large files kept in pieces (33, 24, 36, 34, 35)
 8. Design and flow: [x] find (file names, text in documents, notes); [x] a document reopens where it was left; [x] wide tables as cards on a phone; [x] pressed and hover look; [x] instant start from the kept page, with "a newer version is ready"; [x] a track plays without leaving the page; [x] a switch to show only what is on the device; [x] the hub's own computer uses `http://localhost` with no certificate. [ ] The rest: the "rough edges" table in the review, starting with the note box on a phone, the contents button overlapping "edit front page", and playing a track without leaving the page
 9. [ ] Decide: devices encrypt before upload (the board only holds ciphertext), or the board encrypts the card itself
-10. [ ] Smaller items: pairing from other sites, tokens for other hubs (26, 27). [x] An undo for folder removal (31, 9 October)
+10. [x] Pairing from other sites only from a home network, its wrong tries counted apart (26); an undo for folder removal (31); links that lead out of the workspace refused (14); only the engine's seventeen files served (41) (9 October). [ ] Tokens for other hubs: protection is offered when one is kept, but they never expire (27)
+12. [ ] The trust step (23): [x] said plainly on the page and in the terminal, address and fingerprint printed together (9 October). [ ] A QR code with both; on the board, its screen (an e-ink panel would hold it with the power off: see "Hardware for the board" below)
 11. [x] Data safety (9 October 2026): a page left on one workspace can no longer write into another; earlier versions of `notes.json` are kept beside it; the notes and the outbox survive a full small store
 
 Not yet checked on real devices: installing the authority on an iPhone and an Android phone, and the reader in Safari and Firefox (tested in Chrome only).
@@ -243,6 +244,7 @@ Not yet checked on real devices: installing the authority on an iPhone and an An
 - [ ] Check every theme's contrast; Eva and Triple-M muted text has not been measured
 - [ ] Screen-reader pass (labels on grips, live region when a note is saved). [x] The saved line is a live region; PDF pages carry their text
 - [ ] Dyslexia-friendly font option; line-by-line reading ruler
+- [x] Pressing something that is open already goes to its tab, in either pane (a book's tab is turned to the page), and does not take the place of the tab being looked at (9 October 2026). Checked in headless Chromium, computer and phone
 - [x] The file list opens short every time: only the way to the folder being read in, the rest of each folder on the way behind "Show N more" (9 October 2026). Checked in headless Chromium, computer and phone. [ ] On a computer, where the sidebar stays open, it is shortened only when the reader starts and when the sidebar is brought back or peeked at, not each time something else is opened
 - [ ] Session aids: "where I stopped" bookmark per document, optional timer. [x] "Where was I": the last place read and the last note, on the main front page and, coming back after two hours or more, in a card that closes by itself (9 October 2026)
 
@@ -280,6 +282,14 @@ Still to do:
 - [x] Copy the page and its scripts to the card (`hub/www/`): `make card CARD=/Volumes/…`. [ ] Serve them gzipped
 - [ ] Run the page against `hubd` in a browser for a full session (only the API has been compared so far)
 - [x] `hub/server.js` deleted. The last commit that has it is `d8d878f`, if it is ever needed for comparison
+
+## Hardware for the board (9 October 2026)
+
+The board code (`server-cpp/esp32/`) targets a LilyGO T3 V1.6.1: ESP32-PICO-D4, 4 MB flash, no PSRAM, microSD on SPI. It has not been flashed yet.
+
+- [ ] **ESP32-S3 N16R8** (16 MB flash, 8 MB octal PSRAM): the board to move to. The PSRAM lifts the tightest limits (about 4 TLS connections at once; 1 MB for anything read into memory, such as a book's entry), and 16 MB leaves room for the program and the certificate partition. Needs a build target of its own: flash size 16 MB, PSRAM on (octal), a partition table, and the card's pins. GPIO 35 to 37 are taken by the PSRAM on these modules; most S3 dev boards have no card slot, so a microSD breakout (SPI, 6 wires) goes with it. The S3 can also drive the card in SD mode (SDMMC), faster than SPI. Check a clone's boot log for 16 MB flash and 8 MB PSRAM.
+- [ ] **The card:** 16 or 32 GB microSDHC, FAT32 (the board cannot read exFAT, which cards of 64 GB and more come formatted with). The documents are capped at 3 GB by the `esp32` profile (`hub.cpp`, the profile table), uploads at 4 MB each through the reader; the page's own files take about 8 MB.
+- [ ] **An e-ink display**, two ways. As the hub's screen: its address, a QR code, the authority's fingerprint and the pairing code (review, 23), held with the power off; a small SPI panel (2.9 to 4.2 inch) on the N16R8. As a reader on the board itself: `grounds-cc`'s plan (its REVIEW §12; the engine built for the S3, its own layout and fonts, books only), on the LilyGO T5-4.7 S3 (the same N16R8 module, a 4.7 inch 960×540 touch panel and a card slot); a large project.
 
 ## Idea: a C/C++ document parser for highlight continuity (EPUB and PDF)
 

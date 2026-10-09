@@ -176,7 +176,7 @@ run() { # run <port> <root> <log>: the request script
   req "vendor marked"         status-only "$B/vendor/marked.js"
   req "vendor highlight"      status-only "$B/vendor/highlight.js"
   echo "## vendor pdf, and its worker"; for f in pdf.mjs pdf.worker.mjs; do curl -s -o /dev/null -D - "$B/vendor/$f" | tr -d '\r' | grep -iE '^(HTTP/|content-type|content-security-policy)' | sed 's/^HTTP\/1.1 \([0-9]*\).*/\1/'; done
-  echo "## vendor document engine: a module, its worker, its WebAssembly, and what is not served"; for f in index.js worker.js recolor-worker.js ui.css wasm/marginalia_wasm_bg.wasm wasm-ocr/marginalia_wasm.js ../package.json Index.js .js; do curl -s -o /dev/null --path-as-is -D - "$B/vendor/marginalia/$f" | tr -d '' | grep -iE '^(HTTP/|content-type|content-security-policy)' | sed 's/^HTTP\/1.1 \([0-9]*\).*/\1/'; done
+  echo "## vendor document engine: a module, its worker, its WebAssembly, and what is not served"; for f in index.js worker.js recolor-worker.js ui.css wasm/marginalia_wasm_bg.wasm wasm-ocr/marginalia_wasm.js ../package.json Index.js .js ocr-worker.js node.js direct.js; do curl -s -o /dev/null --path-as-is -D - "$B/vendor/marginalia/$f" | tr -d '' | grep -iE '^(HTTP/|content-type|content-security-policy)' | sed 's/^HTTP\/1.1 \([0-9]*\).*/\1/'; done
   echo "## the engine worker of the reader itself, and the policy it runs under"; curl -s -o /dev/null -D - "$B/js/engine-worker.js" | tr -d '\r' | grep -iE '^(HTTP/|content-type|content-security-policy)' | sed 's/^HTTP\/1.1 \([0-9]*\).*/\1/'
   req "sha256 of a file"      body "$B/api/sha256?path=a/1-doc.md"
   req "sha256 again, kept"    body "$B/api/sha256?path=a/1-doc.md"
@@ -328,8 +328,18 @@ run() { # run <port> <root> <log>: the request script
   echo "## other hub, odd origin";    curl -s -o /dev/null -w '%{http_code}\n' -H 'Origin: null' -H "Authorization: Bearer $TOKEN" "$B/api/hubs"
   echo "## other hub, pair no code";  curl -s -o /dev/null -w '%{http_code}\n' "${X[@]}" -X POST "${J[@]}" -d '{"code":"AAAA-AAAA","name":"x"}' "$B/api/pair"
   CODE=$(curl -s -b "$JAR" -X POST "$B/api/pair/code" | grep -o '[A-Z0-9]\{4\}-[A-Z0-9]\{4\}')
-  T2=$(curl -s "${X[@]}" -X POST "${J[@]}" -d "{\"code\":\"$CODE\",\"name\":\"other reader\"}" "$B/api/pair" | grep -o '"token": *"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/')
+  # Pairing from another site: only from a page on a home network (as another hub is), and its wrong tries are its own.
+  echo "## other hub, pair from a website"; curl -s -w ' %{http_code}\n' "${X[@]}" -X POST "${J[@]}" -d "{\"code\":\"$CODE\",\"name\":\"x\"}" "$B/api/pair"
+  H=(-H 'Origin: https://desk.local:4321')
+  T2=$(curl -s "${H[@]}" -X POST "${J[@]}" -d "{\"code\":\"$CODE\",\"name\":\"other reader\"}" "$B/api/pair" | grep -o '"token": *"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/')
   echo "## other hub, pair with code"; [ -n "$T2" ] && echo "given a token"
+  for o in http://192.168.1.20:4321 'http://[fd00::5]:4321' http://localhost:4321 https://hub.example.com http://8.8.8.8; do echo "## pairing from $o"; curl -s -w ' %{http_code}\n' -H "Origin: $o" -X POST "${J[@]}" -d '{"code":"AAAA-AAAA"}' "$B/api/pair"; done
+  CODE=$(curl -s -b "$JAR" -X POST "$B/api/pair/code" | grep -o '[A-Z0-9]\{4\}-[A-Z0-9]\{4\}')
+  echo "## five wrong codes from another hub's page"; for _ in 1 2 3 4 5; do curl -s -o /dev/null -w '%{http_code} ' "${H[@]}" -X POST "${J[@]}" -d '{"code":"AAAA-AAAA"}' "$B/api/pair"; done; echo
+  echo "## then the right one from there"; curl -s -w ' %{http_code}\n' "${H[@]}" -X POST "${J[@]}" -d "{\"code\":\"$CODE\"}" "$B/api/pair"
+  echo "## the code still works for this hub's own page"; curl -s -o /dev/null -w '%{http_code}\n' -X POST "${J[@]}" -d "{\"code\":\"$CODE\",\"name\":\"own page\"}" "$B/api/pair"
+  OWN=$(curl -s -b "$JAR" "$B/api/devices" | "$PY" -c 'import sys,json; print([d["id"] for d in json.load(sys.stdin) if d["name"]=="own page"][0])' | tr -d '\r')
+  curl -s -o /dev/null -b "$JAR" -X DELETE "$B/api/devices/$OWN"
   echo "## other hub, new token";     curl -s -o /dev/null -w '%{http_code}\n' "${X[@]}" -H "Authorization: Bearer $T2" "$B/api/session"
   req "set hubs"              body -X PUT "${J[@]}" -d '{"hubs":[{"name":"  Desk   top ","url":"https://Desk.local:4321/some/path"},{"name":"dup","url":"https://desk.local:4321"},{"name":"usual port","url":"https://pi.local:443"},{"name":"","url":"https://x.local"},{"name":"bad","url":"ftp://x.local"},{"name":"bad2","url":"not a url"}]}' "$B/api/hubs"
   req "hubs"                  body "$B/api/hubs"

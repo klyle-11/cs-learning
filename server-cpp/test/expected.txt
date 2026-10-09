@@ -244,6 +244,15 @@ Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'
 404
 Content-Type: application/json; charset=utf-8
 Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'
+404
+Content-Type: application/json; charset=utf-8
+Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'
+404
+Content-Type: application/json; charset=utf-8
+Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'
+404
+Content-Type: application/json; charset=utf-8
+Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'
 ## the engine worker of the reader itself, and the policy it runs under
 200
 Content-Type: text/javascript; charset=utf-8
@@ -1133,8 +1142,26 @@ Vary: Origin
 403
 ## other hub, pair no code
 403
+## other hub, pair from a website
+{"error":"pairing from that site is not allowed"} 403
 ## other hub, pair with code
 given a token
+## pairing from http://192.168.1.20:4321
+{"error":"wrong or expired pairing code"} 403
+## pairing from http://[fd00::5]:4321
+{"error":"wrong or expired pairing code"} 403
+## pairing from http://localhost:4321
+{"error":"wrong or expired pairing code"} 403
+## pairing from https://hub.example.com
+{"error":"pairing from that site is not allowed"} 403
+## pairing from http://8.8.8.8
+{"error":"pairing from that site is not allowed"} 403
+## five wrong codes from another hub's page
+403 403 403 403 403 
+## then the right one from there
+{"error":"too many wrong codes from other sites: make a new code"} 403
+## the code still works for this hub's own page
+200
 ## other hub, new token
 200
 ## set hubs

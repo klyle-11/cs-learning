@@ -51,8 +51,10 @@ check: clean hubd
 # Send the recorded requests and compare the answers with test/expected.txt.
 test: hubd
 	./test/contract.sh
+	./test/links.sh
 test-own: build/hubd-own$(EXE)
 	HUBD=build/hubd-own$(EXE) ./test/contract.sh
+	HUBD=build/hubd-own$(EXE) ./test/links.sh
 
 # Put the page on the board's SD card:  make card CARD=/Volumes/NAME
 # Everything lives in CARD/hub: the page in hub/www, your documents beside it.

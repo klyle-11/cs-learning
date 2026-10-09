@@ -458,6 +458,21 @@ static bool has_addresses(const string &abs) {
 }
 // How many items of such a file are read: all of them. Only the microcontroller, with its few hundred KB, stops at 2000.
 static size_t most_links() { return string(profile.name) == "esp32" ? 2000 : static_cast<size_t>(-1); }
+// Whether a path stays inside `top` (the workspace) once every link on the way is followed. A symbolic link put in the
+// workspace by hand (an upload cannot make one) that leads out of it is neither listed, searched, counted nor served,
+// and nothing is written through it; a link to elsewhere in the workspace is followed as before. A path that does not
+// exist yet is judged by the nearest folder above it that does.
+static bool inside(const string &abs, const string &top = ROOT) {
+  string at = abs, real, root;
+  while (!sys::final_path(at, real)) {
+    const string up = dirname_of(at);
+    if (up.empty() || up == at || at.size() <= top.size()) return true;   // nothing there, or no links on this system
+    at = up;
+  }
+  if (!sys::final_path(top, root)) return true;
+  return real == root || starts_with(real, root + "/");
+}
+static bool link_out(const string &abs) { return sys::is_link(abs) && !inside(abs); }
 static void walk(const string &dir, const string &rel, const Strings &ignore, const Strings &side, cJSON *out) {
   DIR *d = ::opendir(dir.c_str());
   if (!d) return;
@@ -467,7 +482,7 @@ static void walk(const string &dir, const string &rel, const Strings &ignore, co
   std::sort(names.begin(), names.end(), natural_less);
   for (const string &name : names) {
     string r = rel.empty() ? name : rel + "/" + name, abs = dir + "/" + name;
-    if (name[0] == '.' || matches(r, ignore)) continue;
+    if (name[0] == '.' || matches(r, ignore) || link_out(abs)) continue;
     if (is_dir(abs)) {
       if (name == "node_modules" || name == "notes" || abs == WWW) continue;
       walk(abs, r, ignore, side, out);
@@ -513,6 +528,7 @@ static void walk_files(const string &dir, const string &rel, cJSON *out) {
   for (const string &name : names) {
     if (name[0] == '.' || name == "node_modules") continue;
     string r = rel + "/" + name, abs = dir + "/" + name;
+    if (link_out(abs)) continue;
     struct stat st;
     if (::stat(abs.c_str(), &st) != 0) continue;
     if (S_ISDIR(st.st_mode)) { if (abs != WWW) walk_files(abs, r, out); continue; }
@@ -660,6 +676,7 @@ static std::vector<Device> devices;
 static string pair_code;                       // the code a new device must type, if one is on offer
 static http::Clock::time_point pair_until;
 static int pair_fails = 0;
+static int pair_fails_away = 0;                 // wrong codes from pages of other sites, counted apart (see /api/pair)
 
 static void load_devices() {
   string text;
@@ -688,7 +705,7 @@ static bool save_devices() {
 static string offer_code(bool announce) {
   pair_code = secure::random_code(8);
   pair_until = http::Clock::now() + std::chrono::minutes(10);
-  pair_fails = 0;
+  pair_fails = pair_fails_away = 0;
   if (announce) {
     std::printf("pairing code: %s-%s  (type it on the device you want to add; good for 10 minutes)\n", pair_code.substr(0, 4).c_str(), pair_code.substr(4).c_str());
     std::fflush(stdout);
@@ -726,6 +743,18 @@ static bool plain_origin(const string &o) {
   // Letters, digits, dots, hyphens, colons and brackets only: the address is
   // written into the page's content policy, where ";" or "," would start a new rule.
   return std::all_of(o.begin() + static_cast<long>(at), o.end(), [](unsigned char c) { return std::isalnum(c) || c == '.' || c == '-' || c == ':' || c == '[' || c == ']'; });
+}
+// Whether a page of another site is one on a home network, as another hub's reader is: its address is `localhost`, a
+// name under `.local`, one of the ranges set aside for private networks (IPv4, or IPv6 fc00::/7 and fe80::/10), or a
+// name this hub answers to. Only such a page may try a pairing code (26): a website out on the internet cannot.
+static bool home_origin(const string &origin) {
+  if (!plain_origin(origin)) return false;
+  string host = lower(origin.substr(origin.find("://") + 3));
+  if (!host.empty() && host[0] == '[') host = host.substr(0, host.find(']') + 1);
+  else host = host.substr(0, host.rfind(':') == string::npos ? host.size() : host.rfind(':'));
+  if (host == "[::1]" || secure::under(host, "localhost") || secure::under(host, "local") || secure::home_address(host)) return true;
+  if (host.size() > 4 && host[0] == '[' && (host[1] == 'f') && (host[2] == 'c' || host[2] == 'd' || (host[2] == 'e' && std::strchr("89ab", host[3])))) return true;
+  return known_host(host);
 }
 static string bearer_of(const http::Request &req) {
   const string &h = req.header("authorization");
@@ -818,6 +847,7 @@ static unsigned long long tree_size(const string &dir) {
     string name = e->d_name;
     if (name == "." || name == "..") continue;
     string abs = dir + "/" + name;
+    if (link_out(abs)) continue;
     struct stat st;
     if (::stat(abs.c_str(), &st) != 0) continue;
     if (S_ISDIR(st.st_mode)) { if (abs != WWW) total += tree_size(abs); }
@@ -916,6 +946,7 @@ static void snapshot(const string &dir, const string &rel, std::map<string, long
     string name = e->d_name;
     if (name[0] == '.' || name == "node_modules" || ends_with(name, ".tmp")) continue;
     string abs = dir + "/" + name, r = rel.empty() ? name : rel + "/" + name;
+    if (link_out(abs)) continue;
     struct stat st;
     if (::stat(abs.c_str(), &st) != 0) continue;
     if (S_ISDIR(st.st_mode)) { if (abs != WWW) snapshot(abs, r, out); }
@@ -1330,7 +1361,7 @@ static void search_tree(const string &dir, const string &rel, const Strings &ign
   for (const string &name : names) {
     if (left <= 0) return;
     string r = rel.empty() ? name : rel + "/" + name, abs = dir + "/" + name;
-    if (name[0] == '.' || matches(r, ignore)) continue;
+    if (name[0] == '.' || matches(r, ignore) || link_out(abs)) continue;
     if (is_dir(abs)) {
       if (name == "node_modules" || name == "notes" || abs == WWW) continue;
       search_tree(abs, r, ignore, needle, out, left);
@@ -1455,16 +1486,17 @@ static http::Response answer(http::Request &req) {
       const string folder = cmap ? "cmaps/" : "standard_fonts/";
       return asset_response(is_file(WWW + p) ? WWW + p : WWW + "/node_modules/pdfjs-dist/" + folder + name, type);
     }
-    // The document engine (marginalia-engine): what reads a PDF's text and where each character is, for selecting and
-    // highlighting on its pages. Many small modules, so they are served by name and not listed: plain names only, a
-    // script, the style sheet or the WebAssembly, from the package's dist folder and its wasm folder and nowhere else.
+    // The document engine (marginalia-engine): what reads the text of a PDF or a book and where each character is, for
+    // selecting and highlighting on its pages. The seventeen files the reader loads, by name, from the package's dist
+    // folder (or beside the page, on the board): the same list sw.js keeps and `make card` copies. The rest of the
+    // package (its OCR, its Node and direct entry points) is not served, nor is whatever a newer version adds.
     if (starts_with(p, "/vendor/marginalia/")) {
-      const string name = p.substr(19), leaf = starts_with(name, "wasm/") ? name.substr(5) : name;
-      const size_t dot = leaf.rfind('.');
-      const string ext = dot == string::npos ? "" : leaf.substr(dot);
-      const char *type = ext == ".js" ? "text/javascript" : ext == ".css" ? "text/css" : ext == ".wasm" ? "application/wasm" : nullptr;
-      if (!type || dot == 0 || !std::all_of(leaf.begin(), leaf.begin() + static_cast<std::ptrdiff_t>(dot), [](unsigned char c) { return std::islower(c) || std::isdigit(c) || c == '-' || c == '_'; }))
-        return http::error(404, "no such file");
+      static const std::set<string> ENGINE_FILES = {
+        "index.js", "client.js", "worker.js", "selection.js", "selection-engine.js", "frame.js", "geometry.js", "overlay.js", "surfaces.js",
+        "caret.js", "dom.js", "themes.js", "recolor.js", "recolor-worker.js", "ui.css", "wasm/marginalia_wasm.js", "wasm/marginalia_wasm_bg.wasm"};
+      const string name = p.substr(19);
+      if (!ENGINE_FILES.count(name)) return http::error(404, "no such file");
+      const char *type = ends_with(name, ".js") ? "text/javascript" : ends_with(name, ".css") ? "text/css" : "application/wasm";
       http::Response r = asset_response(is_file(WWW + p) ? WWW + p : WWW + "/node_modules/marginalia-engine/dist/" + name, type);
       // Its workers, like PDF.js's, run under the policy their own file is sent with. The engine's fetches its
       // WebAssembly from here and compiles it, and may do nothing else; the one that recolours pages only runs.
@@ -1502,11 +1534,17 @@ static http::Response answer(http::Request &req) {
     string code, name = squeeze(str_of(body.p, "name")).substr(0, 60);
     for (char c : str_of(body.p, "code")) if (std::isalnum(static_cast<unsigned char>(c))) code += static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
     if (code.empty()) return http::error(400, "code required");
+    // From a page of another site: only one on a home network, as another hub's reader is (see home_origin).
+    if (cross && !home_origin(req.header("origin"))) return http::error(403, "pairing from that site is not allowed");
     std::lock_guard<std::mutex> g(auth_lock);
     bool on_offer = !pair_code.empty() && http::Clock::now() < pair_until;
+    // Wrong codes from other sites are counted apart: five, and the code is closed to them, but still open to this
+    // hub's own page. So a page elsewhere cannot use up the tries and cancel the code.
+    if (cross && on_offer && pair_fails_away >= 5) return http::error(403, "too many wrong codes from other sites: make a new code");
     if (!on_offer || !secure::same(code, pair_code)) {
       // Five wrong tries and the code is withdrawn, so it cannot be guessed at.
-      if (on_offer && ++pair_fails >= 5) { pair_code.clear(); if (devices.empty()) offer_code(true); }
+      if (on_offer && cross) ++pair_fails_away;
+      else if (on_offer && ++pair_fails >= 5) { pair_code.clear(); if (devices.empty()) offer_code(true); }
       return http::error(403, "wrong or expired pairing code");
     }
     pair_code.clear();
@@ -1589,6 +1627,7 @@ static http::Response answer(http::Request &req) {
     Strings parts;
     if (!clean_parts(p.substr(5), parts, true)) return http::error(404, "not found");   // hidden files are not served, as they are not listed
     string abs = ROOT + "/" + join(parts);
+    if (!inside(abs)) return http::error(404, "not found");
     // A file inside a book: sent whole, from the zip.
     string book, inner;
     if (in_book(parts, book, inner)) {
@@ -1821,7 +1860,7 @@ static http::Response answer(http::Request &req) {
     auto it = req.query.find("path");
     if (it == req.query.end() || !clean_parts(it->second, parts, true) || parts.empty()) return http::error(400, "bad path");
     string abs = ROOT + "/" + join(parts);
-    if (!is_dir(abs) || sys::is_link(abs) || in_page_folder(abs)) return http::error(404, "no such folder");
+    if (!is_dir(abs) || sys::is_link(abs) || in_page_folder(abs) || !inside(abs)) return http::error(404, "no such folder");
     Json out(cJSON_CreateArray());
     walk_files(abs, join(parts), out.p);
     return json_response(out.p);
@@ -1832,7 +1871,7 @@ static http::Response answer(http::Request &req) {
     auto it = req.query.find("path");
     struct stat st;
     if (it == req.query.end() || !clean_parts(it->second, parts, true) || lower(parts[0]) == "notes" ||
-        sys::is_link(ROOT + "/" + join(parts)) || ::stat((ROOT + "/" + join(parts)).c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) return http::error(400, "no such folder");
+        sys::is_link(ROOT + "/" + join(parts)) || !inside(ROOT + "/" + join(parts)) || ::stat((ROOT + "/" + join(parts)).c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) return http::error(400, "no such folder");
     string key = join(parts);
     // Not the page's own folder, nor a folder that holds it.
     if (in_page_folder(ROOT + "/" + key) || starts_with(WWW + "/", ROOT + "/" + key + "/")) return http::error(400, "no such folder");
@@ -1940,7 +1979,7 @@ static http::Response answer(http::Request &req) {
     if (!clean_parts(page ? p.substr(7) : it == req.query.end() ? "" : it->second, parts, true) || !(is_link_file(parts.back()) || is_html(parts.back()))) return http::error(404, "no such file");
     const string abs = ROOT + "/" + join(parts);
     struct stat st;
-    if (::stat(abs.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) return http::error(404, "no such file");
+    if (!inside(abs) || ::stat(abs.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) return http::error(404, "no such file");
     if (static_cast<unsigned long long>(st.st_size) > most_in_memory()) return http::error(413, "too large to read through");
     string text;
     if (!read_file(abs, text)) return http::error(404, "no such file");
@@ -2001,7 +2040,7 @@ static http::Response answer(http::Request &req) {
   if (p == "/api/blocks" && m == "GET") {
     Strings parts;
     auto it = req.query.find("path");
-    if (it == req.query.end() || !clean_parts(it->second, parts, true) || !readable(parts.back())) return http::error(404, "no such doc");
+    if (it == req.query.end() || !clean_parts(it->second, parts, true) || !readable(parts.back()) || !inside(ROOT + "/" + join(parts))) return http::error(404, "no such doc");
     const string abs = ROOT + "/" + join(parts);
     string text, book, inner;
     if (in_book(parts, book, inner)) {
@@ -2031,7 +2070,7 @@ static http::Response answer(http::Request &req) {
   if (p == "/api/sha256" && m == "GET") {
     Strings parts;
     auto it = req.query.find("path");
-    if (it == req.query.end() || !clean_parts(it->second, parts, true)) return http::error(404, "no such file");
+    if (it == req.query.end() || !clean_parts(it->second, parts, true) || !inside(ROOT + "/" + join(parts))) return http::error(404, "no such file");
     const string abs = ROOT + "/" + join(parts);
     struct stat st;
     if (::stat(abs.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) return http::error(404, "no such file");
@@ -2048,7 +2087,7 @@ static http::Response answer(http::Request &req) {
   if (p == "/api/doc") {
     Strings parts;
     auto it = req.query.find("path");
-    if (it == req.query.end() || !clean_parts(it->second, parts, true) || !readable(parts.back())) return http::error(404, "no such doc");
+    if (it == req.query.end() || !clean_parts(it->second, parts, true) || !readable(parts.back()) || !inside(ROOT + "/" + join(parts))) return http::error(404, "no such doc");
     string book, inner;
     if (in_book(parts, book, inner)) {
       http::Response page;
@@ -2072,7 +2111,7 @@ static http::Response answer(http::Request &req) {
     string dir = ROOT, folder = str_of(body.p, "folder");
     if (!folder.empty()) {
       Strings parts;
-      if (!clean_parts(folder, parts, true) || !is_dir(ROOT + "/" + join(parts))) return http::error(400, "no such folder");
+      if (!clean_parts(folder, parts, true) || !is_dir(ROOT + "/" + join(parts)) || !inside(ROOT + "/" + join(parts))) return http::error(400, "no such folder");
       dir = ROOT + "/" + join(parts);
       if (in_page_folder(dir)) return http::error(400, "no such folder");
     }
@@ -2215,6 +2254,7 @@ static http::Response answer(http::Request &req) {
     if (it == req.query.end() || !clean_parts(it->second, parts, true)) return http::error(400, "bad path");
     if (req.content_length > profile.max_upload) return http::error(413, "body too large");
     string abs = base + "/" + join(parts);
+    if (!inside(abs, base)) return http::error(400, "bad path");   // not through a link that leads out of the workspace
     if (in_page_folder(abs)) return http::error(400, "bad path");   // the page's own files are not changed through the API
     // A refusal after this point reads the body first: answered while the file
     // is still being sent, the browser sees a broken connection and no answer.
@@ -2264,6 +2304,9 @@ static http::Response route(http::Request &req) {
     size_t at = csp.find("connect-src 'self'");
     if (at != string::npos) csp.insert(at + 18, also);
     r.extra += csp;
+    // The other hubs are part of what the page is: a device that kept the page before one was added is told it has
+    // changed (its tag differs), as when the page's own file changes, and so does not keep a policy that leaves it out.
+    if (!also.empty() && !r.etag.empty()) r.etag.insert(r.etag.size() - 1, "-" + workspace_id(also));
   }
   else if (r.extra.find("Content-Security-Policy") == string::npos && r.type != "application/pdf") r.extra += CSP_DATA;
   r.extra += COMMON_HEADERS;
@@ -2357,7 +2400,20 @@ int main(int argc, char **argv) {
       for (const string &n : certs.left_out) std::printf(" %s", n.c_str());
       std::printf("\n  For a name of your own, pass it with --allow-host and make a new authority with --new-authority.\n");
     }
-    std::printf("To trust this hub on a device, install its authority once: %s\n  (or open http://<this address>:%d/ on the device and follow the steps)\n  fingerprint (SHA-256) %s\n", certs.ca_path.c_str(), port, certs.ca_fingerprint.c_str());
+    // Where to go to trust it, and the fingerprint to check there, together (23). The trust page comes over a connection
+    // that is not encrypted yet, so what it shows can be swapped on the way; what is printed here cannot.
+    std::printf("To trust this hub on another device (once for each device):\n");
+    if (!loopback(host)) {
+      Strings at;
+      for (const string &n : names) if (n != "localhost" && n != "127.0.0.1" && n != "hub.local" && (secure::home_address(n) || ends_with(n, ".local"))) at.push_back(n);
+      for (size_t i = 0; i < at.size() && i < 4; i++) std::printf("  %s http://%s:%d/trust\n", i ? "or  " : "open", at[i].c_str(), port);
+    } else {
+      std::printf("  (this hub answers this machine only: start it with --host 0.0.0.0 for other devices)\n");
+    }
+    std::printf("  and check that the page shows this fingerprint, the one printed here (SHA-256):\n    %s\n"
+                "  If it does not, do not install it: someone on the network may be in between.\n"
+                "  Without the network at all: copy %s to the device (AirDrop, a cable, a USB stick) and install it from there.\n",
+                certs.ca_fingerprint.c_str(), certs.ca_path.c_str());
     if (make_cert) return 0;
     if (!tls.load(certs.cert_path, certs.key_path, err)) { std::fprintf(stderr, "TLS: %s\n", err.c_str()); return 1; }
     tls_on = true;

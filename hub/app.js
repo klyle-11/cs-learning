@@ -1039,6 +1039,17 @@ function askUnlock() {
   }));
 }
 
+// Paired with another hub: this device now keeps a key to it, which anything that can read this browser's storage
+// could take and use from anywhere that hub is reached. Protection encrypts it, with everything else kept here.
+function keyKept() {
+  showGate(`Paired with “${hub.name}”`, (card) => {
+    const yes = el('button', 'main', 'Protect…'), no = el('button', 'link', 'Not now');
+    card.append(el('p', '', `This device now keeps a key to “${hub.name}”. Like everything the reader keeps here, it is stored readable, so anything that can read this browser's storage could take it and use it wherever “${hub.name}” can be reached.`),
+      el('p', 'sub', '“Protect…” encrypts it, and the copies and notes kept here, with a passphrase. It can be done later from the settings, under This device.'), yes, no);
+    yes.onclick = () => askNewPassphrase(() => location.reload());
+    no.onclick = () => location.reload();
+  }, false);
+}
 // The server does not know this device. Ask for the code it is offering.
 let pairing = false;
 function askToPair() {
@@ -1059,10 +1070,18 @@ function askToPair() {
         const r = await fetch(hub.url + '/api/pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: code.value, name: name.value }) });
         if (r.ok) {
           // Another hub hands this device its token to keep; this hub's own page gets a cookie.
-          if (hub.url) { store.set('hub:tokens', { ...(store.get('hub:tokens') || {}), [hub.url]: (await r.json()).token }); await local.whenSaved(); }
+          if (hub.url) {
+            store.set('hub:tokens', { ...(store.get('hub:tokens') || {}), [hub.url]: (await r.json()).token });
+            await local.whenSaved();
+            // That key is kept in this browser's storage, readable unless protection is on (review, 27): say so now.
+            if (local.mode === 'plain' && local.canProtect) return keyKept();
+          }
           return location.reload();
         }
-        msg.textContent = r.status === 403 ? 'That code is wrong, already used, or older than ten minutes. Ask for a new one.' : 'The server did not accept that (' + r.status + ').';
+        const why = (await r.json().catch(() => null))?.error || '';
+        msg.textContent = r.status === 403 && /site/.test(why) ? `“${hub.name}” takes pairing only from a reader on the home network, and this one was loaded from ${location.host}. Open the reader from a hub at a .local name or a home address, or pair on “${hub.name}” itself.`
+          : r.status === 403 && /other sites/.test(why) ? 'Too many wrong codes were tried for this one from other hubs. Make a new code on that hub, under “devices…”.'
+          : r.status === 403 ? 'That code is wrong, already used, or older than ten minutes. Ask for a new one.' : 'The server did not accept that (' + r.status + ').';
       } catch { msg.textContent = hub.url ? `“${hub.name}” did not answer. It may be off, or this device may not trust its certificate yet (open ${hub.url}/trust on this device).` : 'The server is not reachable.'; }
       go.disabled = false;
     };
@@ -1101,6 +1120,10 @@ async function saveHubs(next) {
   if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || 'This hub answered ' + r.status);
   hubs = await r.json();
   store.set('hub:list', hubs);
+  // The page kept on this device allows connections to the hubs it was sent with: let it go, so the next load is the
+  // page as the server sends it now, allowed to reach the new list (a kept page would be one load late, and the
+  // pairing with a hub just added would be refused).
+  if ('caches' in self) for (const k of await caches.keys().catch(() => [])) await (await caches.open(k)).delete('/').catch(() => {});
 }
 function renderHubs() {
   // In the sidebar: which hub to look at. Shown once there is more than one.
@@ -1301,7 +1324,7 @@ function renderPrivacy() {
   }
   // What is stored here, and whether it is readable.
   const copies = line('Copies here', local.mode === 'plain' ? 'not encrypted ' : local.mode === 'open' ? 'encrypted, unlocked ' : 'encrypted, locked ');
-  if (local.mode === 'plain' && local.canProtect) copies.append(link('protect…', askNewPassphrase, 'Encrypt what is kept on this device with a passphrase'));
+  if (local.mode === 'plain' && local.canProtect) copies.append(link('protect…', () => askNewPassphrase(), 'Encrypt what is kept on this device with a passphrase'));
   else if (local.mode === 'plain') copies.title = 'Encrypting them needs an HTTPS connection.';
   else if (local.mode === 'open') copies.append(link('lock', () => local.lock()), ' ', link('turn off', turnOffProtection));
   else copies.append(link('unlock', () => location.reload()));
@@ -1350,7 +1373,7 @@ function showDevices() {
     await draw();
   }, true);
 }
-function askNewPassphrase() {
+function askNewPassphrase(then) {
   showGate('Protect the copies on this device', (card) => {
     const [w1, p1] = field('Passphrase', 'password'), [w2, p2] = field('The same again', 'password'), msg = el('p', 'say'), go = el('button', 'main', 'Encrypt');
     p1.autocomplete = p2.autocomplete = 'new-password';
@@ -1362,6 +1385,7 @@ function askNewPassphrase() {
       await local.protect(p1.value);
       closeGate();
       renderPrivacy();
+      then?.();
     };
     go.onclick = tryIt;
     onEnter(p2, tryIt);
@@ -3046,6 +3070,22 @@ document.addEventListener('keydown', (e) => { if (e.altKey && e.key === 'ArrowLe
 async function openDoc(path, { pane = state.active, side = false, hash, keep = false, back = false } = {}) {
   if (!docOf(path)) return;
   if (phone.matches) { side = false; keep ||= adding; drawer(null); }   // one document at a time on a phone; after the tab bar's +, in a tab of its own
+  // What is open already is gone to, not opened again in place of the tab being looked at: in whichever pane has it
+  // (on a computer; a phone shows one pane), and for a page of a book, in the tab that book is read in, turned to that
+  // page. Asking for it on the other side, or going back, is taken as asked.
+  let into = -1;   // the tab of the same book, in `pane`, that the page goes into
+  if (!side && !back) {
+    const panes = phone.matches ? [pane] : [pane, ...state.panes.keys()].filter((i, n, all) => all.indexOf(i) === n);
+    const has = panes.find((i) => state.panes[i]?.tabs.includes(path));
+    if (has != null) pane = has;
+    else if (!keep && isBookPage(path)) {
+      const book = bookOf(path);
+      for (const i of panes) {
+        const at = state.panes[i]?.tabs.findIndex((t) => inBook(book, t)) ?? -1;
+        if (at >= 0) { pane = i; into = at; break; }
+      }
+    }
+  }
   let rebuilt = false;
   if (side) {
     if (state.panes.length < 2) { state.panes.push({ tabs: [], active: null }); rebuilt = true; pane = 1; }
@@ -3054,8 +3094,8 @@ async function openDoc(path, { pane = state.active, side = false, hash, keep = f
   const p = state.panes[pane];
   remember(pane);
   if (!p.tabs.includes(path)) {
-    const at = keep ? -1 : p.tabs.indexOf(p.active);
-    if (at >= 0) { p.bumped = { path: p.active, by: path, at: Date.now() }; scrollMem.delete(pane + ':' + p.active); p.tabs[at] = path; } else p.tabs.push(path);
+    const at = keep ? -1 : into >= 0 ? into : p.tabs.indexOf(p.active);
+    if (at >= 0) { p.bumped = { path: p.tabs[at], by: path, at: Date.now() }; scrollMem.delete(pane + ':' + p.tabs[at]); p.tabs[at] = path; } else p.tabs.push(path);
   } else if (keep) {
     // A double click arrives as click + click: the first click has already
     // taken the place of the tab that was open, so put that one back beside the new one.
