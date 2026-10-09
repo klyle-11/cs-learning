@@ -205,6 +205,16 @@ inline bool replace(const std::string &tmp, const std::string &path) {
   return ::rename(tmp.c_str(), path.c_str()) == 0;
 #endif
 }
+// Move a folder or a file to a new name on the same disk, in one step, never onto something that is there already.
+inline bool move(const std::string &from, const std::string &to) {
+#ifdef _WIN32
+  return MoveFileExA(from.c_str(), to.c_str(), 0) != 0;   // without MOVEFILE_REPLACE_EXISTING: refused if `to` exists
+#else
+  struct stat st;
+  if (::lstat(to.c_str(), &st) == 0) return false;   // rename() would put a folder in place of an empty one
+  return ::rename(from.c_str(), to.c_str()) == 0;
+#endif
+}
 // Readable and writable by the owner only (0600, 0700). Windows keeps files
 // under the user's profile private to that user already.
 inline void owner_only(const std::string &path, int mode) {

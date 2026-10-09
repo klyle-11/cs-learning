@@ -1,6 +1,6 @@
 # Hub HTTP API
 
-The contract between the page (`hub/index.html`) and whichever server is behind it. `server-cpp/hubd` implements it. `test/contract.sh` sends 220 requests and compares the answers with those recorded in `test/expected.txt` (the first 123 date from when `hubd` and the Node server it replaced answered identically). The page, its scripts and the trust routes are public; everything else needs a paired device (see Security).
+The contract between the page (`hub/index.html`) and whichever server is behind it. `server-cpp/hubd` implements it. `test/contract.sh` sends 245 requests and compares the answers with those recorded in `test/expected.txt` (the first 123 date from when `hubd` and the Node server it replaced answered identically). The page, its scripts and the trust routes are public; everything else needs a paired device (see Security).
 
 All JSON bodies are UTF-8. Errors are `{ "error": "message" }` with a 4xx or 5xx status. Paths are relative to the folder being served, use `/`, and may never contain `..`.
 
@@ -74,10 +74,10 @@ A page of a book also has `bookTitle`, the book's own title, when the book gives
 ```json
 { "title": "…", "side": ["references.md"], "ignore": ["CLAUDE.md"],
   "highlights": [{ "id": "important", "name": "Important", "color": "#fbeeb0" }],
-  "front": "FRONTPAGE.md", "root": "/absolute/folder" }
+  "front": "FRONTPAGE.md", "root": "/absolute/folder", "workspace": "30a2ef1aca04838b" }
 ```
 
-`front` is `null` when there is no `FRONTPAGE.md`. When there is one, `title` is its first heading.
+`front` is `null` when there is no `FRONTPAGE.md`. When there is one, `title` is its first heading. `workspace` names the workspace that is open: 16 hex digits, a hash of its folder (see "Which workspace a page shows").
 
 `PUT /api/config` with any of `{ "title": "…", "highlights": [...] }` → the new config. A title is trimmed and its whitespace collapsed; with a front page it rewrites that file's heading, otherwise it is stored in `hub.json`. Highlight types without an `id` or a `#rrggbb` colour are dropped; an empty name becomes `Untitled`.
 
@@ -87,13 +87,19 @@ A page of a book also has `bookTitle`, the book's own title, when the book gives
 
 `PUT /api/config` also takes `"locks"`: `{ "some/folder": { "salt": "…", "hash": "…" }, "other": {} }`, the folders the reader asks a password for. The whole set is replaced. `salt` and `hash` are base64 (up to 64 and 128 characters); an entry without both is kept as `{}`, a lock whose password is still to be chosen. Folder names that try to leave the workspace are dropped. The server only stores these: the reader does the asking, and the files are stored as they are.
 
-`DELETE /api/folder?path=some/folder` → `{ "removed": "some/folder" }`. Deletes the folder and everything in it, and any lock on it or inside it. 400 if it is not a folder in the workspace, tries to leave it, or is `notes`.
+`DELETE /api/folder?path=some/folder` → `{ "removed": "some/folder", "undo": "…" }`. Takes the folder out of the workspace, and any lock on it or inside it, for every device. It is not deleted: it is moved into `.removed/` in the workspace (a hidden name, so it is not listed, watched or served), where it is kept until it is put back or let go. 400 if it is not a folder in the workspace, tries to leave it, or is `notes`. If it cannot be moved (another disk), it is deleted as before, and the answer has no `undo`.
+
+`GET /api/removed` → `[{ "undo", "from", "at", "size", "locked" }]`: what was removed and is still kept, oldest first. `locked` says it had a lock, so the reader does not name it. A folder is let go (deleted) seven days after it was removed, and sooner, oldest first, when something being saved (a note, an upload) would not otherwise fit in the storage limit or on the disk.
+
+`POST /api/folder/restore` with `{ "undo": "…" }` → `{ "restored": "some/folder" }`: puts it back where it was, with the locks it had (a lock set on that path since is kept). 404 `nothing removed by that name`; 409 `something by that name is there now`.
+
+`DELETE /api/removed?undo=…` → `{ "undo", "letGo": true }`: lets one go now, for good. 404 as above.
 
 `PUT /api/front` with `{ "markdown": "…" }` → the new config. Writes `FRONTPAGE.md`. 400 without `markdown`. With `"folder": "some/folder"` it writes that folder's own `FRONTPAGE.md` instead; 400 if the folder does not exist or the path tries to leave the workspace.
 
 ## Notes and highlights
 
-Stored in `notes/notes.json`.
+Stored in `notes/notes.json`. Before each write, what the file held is kept beside it under hidden names: `notes/.notes.prev.json` (the version just before) and `notes/.notes.<day>.json` (the first version of each of the last seven days). `hub.json` likewise keeps `.hub.prev.json`. None of them is listed or served; to undo a change that went wrong, copy one back.
 
 ```json
 { "id": "…", "doc": "a/1-doc.md", "heading": "slug", "headingText": "Heading",
@@ -118,13 +124,15 @@ A note may also carry `replyTo` (the id of the note it answers: a reply written 
 
 `GET /api/files?path=<folder>` → `[{ "path", "size", "changed" }]`: every file under that folder of the workspace (paths from the top of the workspace, sizes in bytes, `changed` in seconds), hidden names and `node_modules` left out. It is what the reader's "update" compares a folder on the device with, so that only what is new or changed is sent. 400 for a path that leaves the workspace; 404 if it is not a folder. 400 for a path with `..`, a hidden part or `node_modules`, or one longer than the system will open (on Windows, 259 characters for the whole path, the served folder included). 413 over the profile's upload limit (200 MB on a computer).
 
-`GET /api/workspaces` → `[{ "name", "root", "home", "current" }]`.
+`GET /api/workspaces` → `[{ "name", "root", "home", "current", "workspace" }]`.
 
 The first entry is "home", the folder the server was started on; the rest are folders in the workspaces folder, in name order ignoring case.
 
 `POST /api/upload?path=<path>&workspace=<name>` puts the file in a workspace of its own instead, made on first use; `root` in the answer is that workspace's folder. The name is reduced to letters, digits, `_`, spaces, dots and hyphens, without leading or trailing dots or spaces; 400 if nothing is left. Storage is measured for that workspace's folder.
 
-`POST /api/workspace` with `{ "root": "…" }` opens that workspace in place of the one that is open, for every device, and answers with the list. 404 `no such workspace` unless `root` is one of the listed ones. The choice is remembered for the next start.
+`POST /api/workspace` with `{ "root": "…" }` opens that workspace in place of the one that is open, for every device, and answers with the list. 404 `no such workspace` unless `root` is one of the listed ones. The choice is remembered for the next start. Every open page is told on the live-reload line: `data: {"workspace": "<the one now open>"}`.
+
+**Which workspace a page shows.** The page sends `X-Hub-Workspace: <workspace>` (from `GET /api/config`) with every request. If another workspace has been opened since, the request is refused before anything is read or written: 412 `another workspace has been opened on this hub`, with `X-Hub-Workspace: <the one now open>`. So a page left showing one workspace cannot write a note, a front page or a removal into the other. `/api/workspaces`, `/api/workspace` and `/api/events` are exempt, and a request without the header (an older page, a script) is served as before.
 
 The workspaces folder is `workspaces/` beside the page, or what `--workspaces` names. When the page lives inside the folder being served, as on the board, there is none: uploads with `workspace` get 501.
 
@@ -177,7 +185,7 @@ Both servers apply the same rules, in this order, to every request.
 
 **3. No other website.** A request with an `Origin` that is not this server, or with `Sec-Fetch-Site` other than `same-origin` or `none`, gets 403 `requests from other sites are not allowed`. This covers reading as well as writing. The page and its scripts are exempt (they hold nothing private).
 
-The one exception is a reader that was loaded from another hub and is paired with this one. Such a request is let through when it carries `Authorization: Bearer <id>.<token>`, the token this hub gave that device; a cookie counts for nothing on it, and neither does coming from this machine, because a browser would attach those for any website. `POST /api/pair` is let through as well (the code is the proof), and so is the browser's preflight: `OPTIONS` with `Access-Control-Request-Method` is answered 204 with `Access-Control-Allow-Methods: GET, POST, PUT, DELETE` and `Access-Control-Allow-Headers: Authorization, Content-Type, Range`. Answers to such requests carry `Access-Control-Allow-Origin: <that origin>` and `Vary: Origin`. The `Origin` must be a plain `http(s)://host[:port]`.
+The one exception is a reader that was loaded from another hub and is paired with this one. Such a request is let through when it carries `Authorization: Bearer <id>.<token>`, the token this hub gave that device; a cookie counts for nothing on it, and neither does coming from this machine, because a browser would attach those for any website. `POST /api/pair` is let through as well (the code is the proof), and so is the browser's preflight: `OPTIONS` with `Access-Control-Request-Method` is answered 204 with `Access-Control-Allow-Methods: GET, POST, PUT, DELETE` and `Access-Control-Allow-Headers: Authorization, Content-Type, Range, X-Hub-Workspace`. Answers to such requests carry `Access-Control-Allow-Origin: <that origin>`, `Access-Control-Expose-Headers: X-Hub-Workspace` and `Vary: Origin`. The `Origin` must be a plain `http(s)://host[:port]`.
 
 **4. Paired devices only.** Everything except the page, its scripts, the three trust routes and `POST /api/pair` needs the token of a paired device, sent as the cookie `hub_device_<port>=<id>.<token>` (`HttpOnly`, `SameSite=Strict`, `Secure` over HTTPS). The port is in the name because a browser keeps cookies by host name whatever the port: two hubs on one machine would take each other's cookie, and a plain-HTTP one cannot replace a `Secure` cookie of the same name. The name from before, `hub_device`, is still read when the new one is absent, so a device paired then stays paired; it gets the new name when its cookie is next renewed. A reader loaded from another hub sends the same token as `Authorization: Bearer <id>.<token>` instead (see 3); when it pairs, the answer to `POST /api/pair` carries `"token": "<id>.<token>"` in its body and no cookie. Without a token: 401 `pairing required`. The server stores only a SHA-256 hash of each token, in `devices.json` in the state folder. Requests from this machine itself (127.0.0.1) count as the device `local` and need no token, unless the server was started with `--pair-local` (`HUB_PAIR_LOCAL=1`).
 

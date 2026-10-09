@@ -41,6 +41,15 @@ static string WORKSPACES;              // where uploads opened as workspaces of 
 static std::mutex root_lock;
 static string open_root;               // the workspace that is open: HOME_DIR, or a folder in WORKSPACES
 static string root_now() { std::lock_guard<std::mutex> g(root_lock); return open_root; }
+// What a page calls the workspace it shows (`workspace` in /api/config, sent back as X-Hub-Workspace): a hash of its
+// folder, so the folder's name, in whatever letters, never has to travel in a header.
+static string workspace_id(const string &root) {
+  unsigned long long h = 1469598103934665603ULL;
+  for (char ch : root) h = (h ^ static_cast<unsigned char>(ch)) * 1099511628211ULL;
+  char out[17];
+  std::snprintf(out, sizeof out, "%016llx", h);
+  return out;
+}
 static string WWW;                     // where index.html and the vendor scripts live
 static string STATE;                   // certificates and the list of paired devices: never inside ROOT
 static const char *FRONT = "FRONTPAGE.md";
@@ -321,6 +330,7 @@ static cJSON *read_config() {
   }
   cJSON_DeleteItemFromObjectCaseSensitive(cfg, "front");
   cJSON_DeleteItemFromObjectCaseSensitive(cfg, "root");
+  cJSON_DeleteItemFromObjectCaseSensitive(cfg, "workspace");
   string md, title;
   if (read_file(ROOT + "/" + FRONT, md)) {
     cJSON_AddStringToObject(cfg, "front", FRONT);
@@ -329,6 +339,7 @@ static cJSON *read_config() {
     cJSON_AddNullToObject(cfg, "front");
   }
   cJSON_AddStringToObject(cfg, "root", ROOT.c_str());
+  cJSON_AddStringToObject(cfg, "workspace", workspace_id(ROOT).c_str());
   return cfg;
 }
 
@@ -521,7 +532,39 @@ static cJSON *read_notes() {
   if (!cJSON_IsArray(notes)) { cJSON_Delete(notes); notes = cJSON_CreateArray(); }
   return notes;
 }
-static bool write_notes(const cJSON *notes) { return write_file(ROOT + "/notes/notes.json", dump(notes, true) + "\n"); }
+// Before the notes or the settings are written, what the file held is kept beside it, under a hidden name the list,
+// the watcher and /raw/ all leave alone: the version just before this write (".notes.prev.json"), and for the notes,
+// the first version of each of the last seven days (".notes.2026-10-09.json"). A change that went wrong (a tool
+// writing into the file, a hand edit, a device sending something odd) is undone by copying one of them back.
+static string now_iso();
+static void keep_earlier(const string &file, const string &name, bool daily) {
+  string was;
+  if (!read_file(file, was)) return;
+  const string dir = dirname_of(file);
+  write_file(dir + "/." + name + ".prev.json", was);
+  if (!daily) return;
+  const string day = now_iso().substr(0, 10), copy = dir + "/." + name + "." + day + ".json";
+  if (is_file(copy)) return;
+  write_file(copy, was);
+  Strings days;
+  if (DIR *d = ::opendir(dir.c_str())) {
+    while (dirent *e = ::readdir(d)) {
+      const string n = e->d_name;
+      if (n.size() == name.size() + 17 && starts_with(n, "." + name + ".") && ends_with(n, ".json") && std::isdigit(static_cast<unsigned char>(n[name.size() + 2]))) days.push_back(n);
+    }
+    ::closedir(d);
+  }
+  std::sort(days.begin(), days.end());
+  for (size_t i = 0; i + 7 < days.size(); i++) ::unlink((dir + "/" + days[i]).c_str());
+}
+static bool write_notes(const cJSON *notes) {
+  keep_earlier(ROOT + "/notes/notes.json", "notes", true);
+  return write_file(ROOT + "/notes/notes.json", dump(notes, true) + "\n");
+}
+static bool write_settings(const cJSON *settings) {
+  keep_earlier(ROOT + "/hub.json", "hub", false);
+  return write_file(ROOT + "/hub.json", dump(settings, true) + "\n");
+}
 
 static string new_id() {
   static const char digits[] = "0123456789abcdefghijklmnopqrstuvwxyz";
@@ -796,9 +839,60 @@ static unsigned long long free_bytes() {
   return sys::free_bytes(ROOT);
 }
 // Whether `more` bytes may be added: under the quota, and leaving the disk 16 MB to breathe.
+// ---- removed folders ------------------------------------------------------------------------
+// A folder taken out of the workspace is moved, not deleted: into .removed/ in the workspace, a hidden name, so it is
+// neither listed, watched nor served. Each is .removed/<undo>/<its name>, beside .removed/<undo>.json, which says where
+// it was, when it was removed, and the locks it had. It can be put back (POST /api/folder/restore) until it is let go:
+// seven days after it was removed, or sooner, oldest first, when something being saved needs its room (room_for).
+static const string REMOVED = ".removed";
+static std::mutex removed_lock;   // taken after store_lock where both are
+struct Removed { string undo, from, at; unsigned long long size; bool locked; };
+static bool undo_ok(const string &undo) {
+  return !undo.empty() && undo.size() <= 40 && std::all_of(undo.begin(), undo.end(), [](unsigned char c) { return std::isdigit(c) || std::islower(c); });
+}
+static std::vector<Removed> removed_list(const string &root) {
+  std::vector<Removed> out;
+  const string dir = root + "/" + REMOVED;
+  if (DIR *d = ::opendir(dir.c_str())) {
+    while (dirent *e = ::readdir(d)) {
+      const string n = e->d_name;
+      if (!ends_with(n, ".json") || !undo_ok(n.substr(0, n.size() - 5))) continue;
+      string text;
+      if (!read_file(dir + "/" + n, text)) continue;
+      Json info(cJSON_Parse(text.c_str()));
+      const string undo = n.substr(0, n.size() - 5);
+      const cJSON *locks = cJSON_GetObjectItemCaseSensitive(info.p, "locks");
+      out.push_back({undo, str_of(info.p, "from"), str_of(info.p, "at"), tree_size(dir + "/" + undo), cJSON_IsObject(locks) && cJSON_GetArraySize(locks) > 0});
+    }
+    ::closedir(d);
+  }
+  std::sort(out.begin(), out.end(), [](const Removed &a, const Removed &b) { return a.at < b.at; });   // oldest first
+  return out;
+}
+static void let_go(const string &root, const string &undo) {
+  remove_tree(root + "/" + REMOVED + "/" + undo);
+  ::unlink((root + "/" + REMOVED + "/" + undo + ".json").c_str());
+  std::lock_guard<std::mutex> g(usage_lock);
+  usage_known = false;
+}
+// Those removed more than seven days ago. Their time is the server's own, written as it removed them.
+static void let_go_old(const string &root) {
+  const std::time_t week_ago = std::time(nullptr) - 7 * 24 * 3600;
+  std::tm tm{};
+  sys::utc(week_ago, tm);
+  char cut[40];
+  std::snprintf(cut, sizeof cut, "%04d-%02d-%02dT%02d:%02d:%02d", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+  for (const Removed &r : removed_list(root)) if (r.at < cut) let_go(root, r.undo);
+}
 static bool room_for(unsigned long long more) {
-  if (free_bytes() < more + (16ULL << 20)) return false;
-  return quota_bytes == 0 || used_bytes() + more <= quota_bytes;
+  for (;;) {
+    if (free_bytes() >= more + (16ULL << 20) && (quota_bytes == 0 || used_bytes() + more <= quota_bytes)) return true;
+    // Not enough: what was removed longest ago is let go, one at a time, until there is, or nothing removed is left.
+    std::lock_guard<std::mutex> g(removed_lock);
+    const std::vector<Removed> list = removed_list(ROOT);
+    if (list.empty()) return false;
+    let_go(ROOT, list.front().undo);
+  }
 }
 // The same for a folder other than the open workspace, measured as it is now.
 static bool room_in(const string &dir, unsigned long long more) {
@@ -1027,6 +1121,7 @@ static http::Response workspaces_response() {
     cJSON_AddStringToObject(o, "root", w.root.c_str());
     cJSON_AddBoolToObject(o, "home", w.home);
     cJSON_AddBoolToObject(o, "current", w.root == ROOT);
+    cJSON_AddStringToObject(o, "workspace", workspace_id(w.root).c_str());
     cJSON_AddItemToArray(list.p, o);
   }
   return json_response(list.p);
@@ -1037,6 +1132,10 @@ static void open_workspace(const Workspace &w) {
   ROOT = w.root;
   { std::lock_guard<std::mutex> g(usage_lock); usage_known = false; }
   if (!WORKSPACES.empty()) { make_dirs(WORKSPACES); write_file(WORKSPACES + "/.current", w.home ? "" : w.name); }
+  // Every open page is told at once: one still showing the workspace before goes no further with it (see answer).
+  Json msg(cJSON_CreateObject());
+  cJSON_AddStringToObject(msg.p, "workspace", workspace_id(w.root).c_str());
+  tell_clients("data: " + dump(msg.p) + "\n\n");
 }
 
 // A highlight's anchor as it will be stored: the known fields only, each
@@ -1390,7 +1489,7 @@ static http::Response answer(http::Request &req) {
       http::Response r;
       r.status = 204;
       r.type = "text/plain";
-      r.extra = "Access-Control-Allow-Methods: GET, POST, PUT, DELETE\r\nAccess-Control-Allow-Headers: Authorization, Content-Type, Range\r\nAccess-Control-Max-Age: 600\r\n";
+      r.extra = "Access-Control-Allow-Methods: GET, POST, PUT, DELETE\r\nAccess-Control-Allow-Headers: Authorization, Content-Type, Range, X-Hub-Workspace\r\nAccess-Control-Max-Age: 600\r\n";
       return r;
     }
   }
@@ -1431,6 +1530,16 @@ static http::Response answer(http::Request &req) {
 
   const string device = device_of(req, cross);
   if (device.empty()) return http::error(401, "pairing required");
+
+  // A page names the workspace it shows. A request from a page still showing one that is no longer open is refused
+  // (412, with the one that is), so it can neither read from the open one nor write into it: a note, a front page, a
+  // folder removed. Choosing a workspace and the live line are the exceptions. A request that names none (an older
+  // page, a script) is served as before.
+  if (const string ws = req.header("x-hub-workspace"); !ws.empty() && ws != workspace_id(ROOT) && p != "/api/workspace" && p != "/api/workspaces" && p != "/api/events") {
+    http::Response r = http::error(412, "another workspace has been opened on this hub");
+    r.extra += "X-Hub-Workspace: " + workspace_id(ROOT) + "\r\n";
+    return r;
+  }
 
   if (p == "/api/session" && m == "GET") return session_json(device);
   if (p == "/api/pair/code" && m == "POST") {
@@ -1699,7 +1808,7 @@ static http::Response answer(http::Request &req) {
       cJSON_DeleteItemFromObjectCaseSensitive(file.p, "look");
       cJSON_AddItemToObject(file.p, "look", clean);
     }
-    if (!write_file(ROOT + "/hub.json", dump(file.p, true) + "\n")) return http::error(500, "could not save");
+    if (!write_settings(file.p)) return http::error(500, "could not save");
     touch_tree();
     Json cfg(read_config());
     return json_response(cfg.p);
@@ -1728,19 +1837,98 @@ static http::Response answer(http::Request &req) {
     // Not the page's own folder, nor a folder that holds it.
     if (in_page_folder(ROOT + "/" + key) || starts_with(WWW + "/", ROOT + "/" + key + "/")) return http::error(400, "no such folder");
     std::lock_guard<std::mutex> g(store_lock);
-    if (!remove_tree(ROOT + "/" + key)) return http::error(500, "could not remove");
+    std::lock_guard<std::mutex> rl(removed_lock);
+    let_go_old(ROOT);
+    // Moved into .removed/, so it can be put back. Where it cannot be moved (another disk), it is deleted, as before.
+    const string undo = new_id(), into = ROOT + "/" + REMOVED + "/" + undo;
+    make_dirs(into);
+    const bool kept = sys::move(ROOT + "/" + key, into + "/" + parts.back());
+    if (!kept) { remove_tree(into); if (!remove_tree(ROOT + "/" + key)) return http::error(500, "could not remove"); }
     touch_tree();
+    Json taken(cJSON_CreateObject());   // the locks it had, put back with it
     Json file(read_settings_file());
     cJSON *locks = cJSON_GetObjectItemCaseSensitive(file.p, "locks");
     if (cJSON_IsObject(locks) && !damaged(ROOT + "/hub.json", false)) {
       Strings gone;
       const cJSON *l;
       cJSON_ArrayForEach(l, locks) { string k = l->string ? l->string : ""; if (k == key || k.compare(0, key.size() + 1, key + "/") == 0) gone.push_back(k); }
-      for (const string &k : gone) cJSON_DeleteItemFromObjectCaseSensitive(locks, k.c_str());
-      if (!write_file(ROOT + "/hub.json", dump(file.p, true) + "\n")) return http::error(500, "could not save");
+      for (const string &k : gone) cJSON_AddItemToObject(taken.p, k.c_str(), cJSON_DetachItemFromObjectCaseSensitive(locks, k.c_str()));
+      if (!gone.empty() && !write_settings(file.p)) return http::error(500, "could not save");
     }
     Json out(cJSON_CreateObject());
     cJSON_AddStringToObject(out.p, "removed", key.c_str());
+    if (kept) {
+      Json info(cJSON_CreateObject());
+      cJSON_AddStringToObject(info.p, "from", key.c_str());
+      cJSON_AddStringToObject(info.p, "at", now_iso().c_str());
+      cJSON_AddItemToObject(info.p, "locks", cJSON_Duplicate(taken.p, true));
+      write_file(into + ".json", dump(info.p, true) + "\n");
+      cJSON_AddStringToObject(out.p, "undo", undo.c_str());
+    }
+    return json_response(out.p);
+  }
+
+  // Removed folders: what can still be put back, oldest first.
+  if (p == "/api/removed" && m == "GET") {
+    std::lock_guard<std::mutex> rl(removed_lock);
+    let_go_old(ROOT);
+    Json list(cJSON_CreateArray());
+    for (const Removed &r : removed_list(ROOT)) {
+      cJSON *o = cJSON_CreateObject();
+      cJSON_AddStringToObject(o, "undo", r.undo.c_str());
+      cJSON_AddStringToObject(o, "from", r.from.c_str());
+      cJSON_AddStringToObject(o, "at", r.at.c_str());
+      cJSON_AddNumberToObject(o, "size", static_cast<double>(r.size));
+      cJSON_AddBoolToObject(o, "locked", r.locked);   // the reader does not name a locked folder
+      cJSON_AddItemToArray(list.p, o);
+    }
+    return json_response(list.p);
+  }
+  // Let one go now, for good.
+  if (p == "/api/removed" && m == "DELETE") {
+    auto it = req.query.find("undo");
+    if (it == req.query.end() || !undo_ok(it->second)) return http::error(404, "nothing removed by that name");
+    std::lock_guard<std::mutex> rl(removed_lock);
+    if (!is_file(ROOT + "/" + REMOVED + "/" + it->second + ".json")) return http::error(404, "nothing removed by that name");
+    let_go(ROOT, it->second);
+    touch_tree();
+    Json out(cJSON_CreateObject());
+    cJSON_AddStringToObject(out.p, "undo", it->second.c_str());
+    cJSON_AddBoolToObject(out.p, "letGo", true);
+    return json_response(out.p);
+  }
+  // Put a removed folder back where it was, with its locks.
+  if (p == "/api/folder/restore" && m == "POST") {
+    string text;
+    if (int bad = json_body(req, text)) return body_error(bad);
+    Json body(cJSON_Parse(text.c_str()));
+    const string undo = str_of(body.p, "undo");
+    if (!undo_ok(undo)) return http::error(404, "nothing removed by that name");
+    std::lock_guard<std::mutex> g(store_lock);
+    std::lock_guard<std::mutex> rl(removed_lock);
+    const string held = ROOT + "/" + REMOVED + "/" + undo;
+    string about;
+    if (!read_file(held + ".json", about)) return http::error(404, "nothing removed by that name");
+    Json info(cJSON_Parse(about.c_str()));
+    Strings parts;
+    if (!clean_parts(str_of(info.p, "from"), parts, true) || lower(parts[0]) == "notes") return http::error(404, "nothing removed by that name");
+    const string key = join(parts), back = ROOT + "/" + key;
+    if (is_dir(back) || is_file(back)) return http::error(409, "something by that name is there now");
+    make_dirs(dirname_of(back));
+    if (!sys::move(held + "/" + parts.back(), back)) return http::error(500, "could not put it back");
+    let_go(ROOT, undo);
+    const cJSON *locks = cJSON_GetObjectItemCaseSensitive(info.p, "locks");
+    if (cJSON_IsObject(locks) && cJSON_GetArraySize(locks) > 0 && !damaged(ROOT + "/hub.json", false)) {
+      Json file(read_settings_file());
+      cJSON *now = cJSON_GetObjectItemCaseSensitive(file.p, "locks");
+      if (!cJSON_IsObject(now)) { cJSON_DeleteItemFromObjectCaseSensitive(file.p, "locks"); now = cJSON_AddObjectToObject(file.p, "locks"); }
+      const cJSON *l;
+      cJSON_ArrayForEach(l, locks) if (l->string && !cJSON_GetObjectItemCaseSensitive(now, l->string)) cJSON_AddItemToObject(now, l->string, cJSON_Duplicate(l, true));
+      if (!write_settings(file.p)) return http::error(500, "could not save");
+    }
+    touch_tree();
+    Json out(cJSON_CreateObject());
+    cJSON_AddStringToObject(out.p, "restored", key.c_str());
     return json_response(out.p);
   }
 
@@ -2080,7 +2268,7 @@ static http::Response route(http::Request &req) {
   else if (r.extra.find("Content-Security-Policy") == string::npos && r.type != "application/pdf") r.extra += CSP_DATA;
   r.extra += COMMON_HEADERS;
   // A reader loaded from another hub may read the answer (see cross_site, above).
-  if (cross_site(req) && plain_origin(req.header("origin"))) r.extra += "Access-Control-Allow-Origin: " + req.header("origin") + "\r\nVary: Origin\r\n";
+  if (cross_site(req) && plain_origin(req.header("origin"))) r.extra += "Access-Control-Allow-Origin: " + req.header("origin") + "\r\nAccess-Control-Expose-Headers: X-Hub-Workspace\r\nVary: Origin\r\n";
   // A page file the browser already has: say so, and send nothing. Done last,
   // so the answer carries the same headers the file itself would (a browser
   // applies them to the copy it holds).

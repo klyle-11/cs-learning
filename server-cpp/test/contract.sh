@@ -94,7 +94,7 @@ status, root = sys.argv[1], sys.argv[2]
 raw = sys.stdin.read()
 def scrub(v):
     if isinstance(v, dict):
-        return {k: ("<" + k + ">" if k in ("id", "ts", "code", "created", "seen", "used", "free", "changed") else scrub(x)) for k, x in v.items()}
+        return {k: ("<" + k + ">" if k in ("id", "ts", "code", "created", "seen", "used", "free", "changed", "workspace", "undo", "at") else scrub(x)) for k, x in v.items()}
     if isinstance(v, list): return [scrub(x) for x in v]
     if isinstance(v, str): return v.replace(root, "<root>")
     return v
@@ -274,6 +274,27 @@ run() { # run <port> <root> <log>: the request script
   req "remove notes folder"   body -X DELETE "$B/api/folder?path=notes"
   req "remove notes folder, other case" body -X DELETE "$B/api/folder?path=Notes"
   req "remove a file"         body -X DELETE "$B/api/folder?path=code.c"
+  # A removed folder is kept aside, hidden, and can be put back with its locks; or let go for good.
+  req "removed, listed"         body "$B/api/removed"
+  UNDO="$(curl -s -b "$JAR" "$B/api/removed" | "$PY" -c 'import sys,json; print(json.load(sys.stdin)[0]["undo"])' | tr -d '\r')"
+  echo "## removed folder kept aside"
+  (cd "$2" && find .removed -type f | sed "s|$UNDO|<undo>|" | sort)
+  req "kept aside, not served"  body "$B/raw/.removed/$UNDO/gone/FRONTPAGE.md"
+  mkdir -p "$2/gone"
+  req "put back, name taken"    body -X POST "${J[@]}" -d "{\"undo\":\"$UNDO\"}" "$B/api/folder/restore"
+  rmdir "$2/gone"
+  req "put back, bad name"      body -X POST "${J[@]}" -d '{"undo":"../../x"}' "$B/api/folder/restore"
+  req "put back"                body -X POST "${J[@]}" -d "{\"undo\":\"$UNDO\"}" "$B/api/folder/restore"
+  req "put back again"          body -X POST "${J[@]}" -d "{\"undo\":\"$UNDO\"}" "$B/api/folder/restore"
+  req "locks put back"          body "$B/api/config"
+  req "its file is back"        body "$B/api/doc?path=gone/deep/x.md"
+  req "remove it again"         body -X DELETE "$B/api/folder?path=gone"
+  UNDO="$(curl -s -b "$JAR" "$B/api/removed" | "$PY" -c 'import sys,json; print(json.load(sys.stdin)[0]["undo"])' | tr -d '\r')"
+  req "let go now"              body -X DELETE "$B/api/removed?undo=$UNDO"
+  req "let go again"            body -X DELETE "$B/api/removed?undo=$UNDO"
+  req "nothing removed now"     body "$B/api/removed"
+  echo "## nothing kept aside"
+  ls -A "$2/.removed" | wc -l | tr -d ' '
   req "upload new"            body -X POST --data-binary '# Uploaded' "$B/api/upload?path=up/new%20file.md"
   req "upload again"          body -X POST --data-binary '# Changed' "$B/api/upload?path=up/new%20file.md"
   req "uploaded content"      body "$B/api/doc?path=up/new%20file.md"
@@ -344,6 +365,15 @@ run() { # run <port> <root> <log>: the request script
   req "settings from a damaged file" body "$B/api/config"
   req "settings onto a damaged file" body -X PUT "${J[@]}" -d '{"locks":{}}' "$B/api/config"
   cp "$WORK/hub.keep" "$R/hub.json"
+  # What notes.json and hub.json held before each write is kept beside them, hidden: the version before, and one a day.
+  cp "$R/notes/notes.json" "$WORK/notes.before"
+  req "a note, to be kept before"  status-only -X POST "${J[@]}" -d '{"doc":"a/1-doc.md","text":"kept before"}' "$B/api/notes"
+  echo "## the copy before is the version before"
+  if cmp -s "$WORK/notes.before" "$R/notes/.notes.prev.json"; then echo same; else echo different; fi
+  echo "## earlier copies kept"
+  (cd "$R" && ls -a notes . | grep -E '^\.(notes|hub)\.' | sed -E 's/[0-9]{4}-[0-9]{2}-[0-9]{2}/<day>/' | sort)
+  req "an earlier copy is not served" body "$B/raw/notes/.notes.prev.json"
+  req "nor listed"                body "$B/api/files?path=notes"
   # Workspaces: an upload that becomes a workspace of its own, switching to it and back.
   req "upload to own workspace"   body -X POST --data-binary $'# In Own\n\nBody.\n' "$B/api/upload?path=doc.md&workspace=My%20Space"
   req "own workspace, odd name"   body -X POST --data-binary 'x' "$B/api/upload?path=a/b.md&workspace=..%2F..%2Fescape%3F"
@@ -354,12 +384,22 @@ run() { # run <port> <root> <log>: the request script
   req "switch to missing"         body -X POST "${J[@]}" -d '{"root":"/nowhere"}' "$B/api/workspace"
   req "switch with no root"       body -X POST "${J[@]}" -d '{}' "$B/api/workspace"
   WSROOT="$(curl -s -b "$JAR" "$B/api/workspaces" | "$PY" -c 'import sys,json; print([w["root"] for w in json.load(sys.stdin) if w["name"]=="My Space"][0])' | tr -d '\r')"
+  HOMEWS="$(curl -s -b "$JAR" "$B/api/config" | "$PY" -c 'import sys,json; print(json.load(sys.stdin)["workspace"])' | tr -d '\r')"
   req "switch to own"             body -X POST "${J[@]}" -d "{\"root\":\"$WSROOT\"}" "$B/api/workspace"
+  OWNWS="$(curl -s -b "$JAR" "$B/api/config" | "$PY" -c 'import sys,json; print(json.load(sys.stdin)["workspace"])' | tr -d '\r')"
+  # A page left showing home, after own was opened: refused, and told which is open. Reading included.
+  req "stale page: a note"        body -X POST "${J[@]}" -H "X-Hub-Workspace: $HOMEWS" -d '{"doc":"doc.md","text":"meant for home"}' "$B/api/notes"
+  req "stale page: the config"    body -H "X-Hub-Workspace: $HOMEWS" "$B/api/config"
+  req "stale page: a file"        body -H "X-Hub-Workspace: $HOMEWS" "$B/raw/doc.md"
+  echo "## stale page: told the open one"
+  curl -s -m 5 -b "$JAR" -D - -o /dev/null -H "X-Hub-Workspace: $HOMEWS" "$B/api/notes" | tr -d '\r' | grep -i '^x-hub-workspace:' | awk -v own="$OWNWS" '{print ($2 == own) ? "the open one" : "another: " $2}'
+  req "stale page: workspaces"    status-only -H "X-Hub-Workspace: $HOMEWS" "$B/api/workspaces"
+  req "current page: a note"      body -X POST "${J[@]}" -H "X-Hub-Workspace: $OWNWS" -d '{"doc":"doc.md","text":"meant for own"}' "$B/api/notes"
   req "config in own"             body "$B/api/config"
   req "docs in own"               body "$B/api/docs"
   req "note in own"               body -X POST "${J[@]}" -d '{"doc":"doc.md","text":"in the other workspace"}' "$B/api/notes"
   req "notes in own"              body "$B/api/notes"
-  req "switch home"               body -X POST "${J[@]}" -d "{\"root\":\"$R\"}" "$B/api/workspace"
+  req "switch home"               body -X POST "${J[@]}" -H "X-Hub-Workspace: $HOMEWS" -d "{\"root\":\"$R\"}" "$B/api/workspace"   # from a stale page too
   req "notes at home"             status-only "$B/api/notes"
   req "config at home"            body "$B/api/config"
   ID="$(curl -s -b "$JAR" "$B/api/devices" | "$PY" -c 'import sys,json; print(json.load(sys.stdin)[0]["id"])' | tr -d '\r')"

@@ -22,7 +22,8 @@ Now, in order:
 7. Efficiency for the board and for phones. [x] One list request per burst of changes; "not modified" answers for the page's files; a guarded watcher; the folder walked at most once per interval; looking for an absent server less and less often; headings measured once per frame; the track list no longer rebuilt on play and pause (32, 33, 24, 37, 39). [ ] Compressed files; one shared list for the watcher and the document list; notes per document; files from another hub streamed; large files kept in pieces (33, 24, 36, 34, 35)
 8. Design and flow: [x] find (file names, text in documents, notes); [x] a document reopens where it was left; [x] wide tables as cards on a phone; [x] pressed and hover look; [x] instant start from the kept page, with "a newer version is ready"; [x] a track plays without leaving the page; [x] a switch to show only what is on the device; [x] the hub's own computer uses `http://localhost` with no certificate. [ ] The rest: the "rough edges" table in the review, starting with the note box on a phone, the contents button overlapping "edit front page", and playing a track without leaving the page
 9. [ ] Decide: devices encrypt before upload (the board only holds ciphertext), or the board encrypts the card itself
-10. [ ] Smaller items: pairing from other sites, tokens for other hubs, an undo for folder removal (26, 27, 31)
+10. [ ] Smaller items: pairing from other sites, tokens for other hubs (26, 27). [x] An undo for folder removal (31, 9 October)
+11. [x] Data safety (9 October 2026): a page left on one workspace can no longer write into another; earlier versions of `notes.json` are kept beside it; the notes and the outbox survive a full small store
 
 Not yet checked on real devices: installing the authority on an iPhone and an Android phone, and the reader in Safari and Firefox (tested in Chrome only).
 
@@ -132,7 +133,7 @@ Not yet checked on real devices: installing the authority on an iPhone and an An
 - [x] One line beside the note box says whether everything is saved: "saved", "saving…", "3 to send", "2 not saved", and "offline since …" (review, 52)
 - [x] Replies to notes: "reply" on a note, the reply shown under it (`replyTo`) (9 October 2026)
 - [ ] Editing the front page, settings and folder uploads are refused while offline (with a message), not queued
-- [x] Remove a folder from the server from inside the reader (on its front page). [ ] Single files still cannot be removed; removal has no undo (review, 31)
+- [x] Remove a folder from the server from inside the reader (on its front page). [x] It is kept aside for seven days and can be put back ("removed folders…"; review, 31). [ ] Single files still cannot be removed
 - [ ] The C++ server has not been run with the page for a full session
 
 **3. HTTPS and opening with no board at all (once the ESP32 build exists)**

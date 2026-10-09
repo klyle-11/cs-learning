@@ -222,6 +222,8 @@
   #toc { flex: 0 1 auto; max-height: 45%; }
   #fresh { flex: none; display: block; margin: 0 10px 6px 0; padding: 4px 8px; text-align: left; border-color: var(--accent); color: var(--accent); font-size: 12.5px; }
   #fresh[hidden] { display: none; }
+  #moved { flex: none; display: block; margin: 0 10px 6px 0; padding: 4px 8px; text-align: left; border-color: var(--accent); color: var(--accent); font-size: 12.5px; }
+  #moved[hidden] { display: none; }
   .file.playing .name::before { content: '♪ '; color: var(--accent2); }
   #keptOnly { flex: none; display: block; margin: 0 10px 6px 0; padding: 3px 8px; text-align: left; background: var(--shade); font-size: 12.5px; }
   #keptOnly[hidden] { display: none; }
@@ -1108,6 +1110,7 @@
     <select id="workspace" title="Workspace" hidden></select>
     <span id="treeTools"><button id="addBtn" class="ic" aria-label="Add files" title="Add files from this device. If the server is out of reach they are held here and sent later."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></button><button id="uploadBtn" class="ic" aria-label="Upload a folder" title="Bring a folder from your computer into the hub. For several at once, drop them here on the sidebar, or press “add another folder…” after choosing the first."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h6l2 2h10v11H3z"/><path d="M12 17v-6M9.5 13.5L12 11l2.5 2.5"/></svg></button></span><input id="fileInput" type="file" multiple hidden><input id="folderInput" type="file" webkitdirectory multiple hidden>
     <button id="fresh" hidden title="The reader itself has changed since this page was kept on this device">A newer version of the reader is ready. Reload</button>
+    <button id="moved" hidden title="The hub has another workspace open now"></button>
     <button id="keptOnly" hidden title="The lists are showing only what is kept on this device. Press to show everything."></button>
     <div id="pickNote" role="status">Choose what to open in a new tab. It opens beside what is already open.</div>
     <div id="findWrap"><input id="find" type="search" placeholder="Find a file, or words in files and notes" aria-label="Find a file, or words in files and notes" autocomplete="off" spellcheck="false"><button id="findClear" class="ic" type="button" hidden aria-label="Clear what is being looked for" title="Clear (Escape)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>

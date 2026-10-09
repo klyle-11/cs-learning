@@ -306,6 +306,7 @@ inline const char *reason(int status) {
     case 403: return "Forbidden";
     case 404: return "Not Found";
     case 408: return "Request Timeout";
+    case 412: return "Precondition Failed";
     case 413: return "Payload Too Large";
     case 416: return "Range Not Satisfiable";
     case 429: return "Too Many Requests";

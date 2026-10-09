@@ -56,9 +56,13 @@ async function call(url, opts = {}) {
   const wait = opts.wait || (opts.body instanceof Blob ? 30000 + opts.body.size / 20 : net.online ? 8000 : 4000);
   const timer = setTimeout(() => ctl.abort(), wait);
   try {
-    const r = await fetch(hub.url + url, { ...opts, headers: hub.url ? { ...opts.headers, Authorization: 'Bearer ' + hubToken(hub.url) } : opts.headers, signal: ctl.signal });
+    // Each request names the workspace this page shows: the hub refuses one from a page left showing a workspace that is
+    // no longer open (412), so nothing here is read from, or written into, the one that is (see workspaceMoved).
+    const headers = { ...opts.headers, ...(config.workspace ? { 'X-Hub-Workspace': config.workspace } : {}), ...(hub.url ? { Authorization: 'Bearer ' + hubToken(hub.url) } : {}) };
+    const r = await fetch(hub.url + url, { ...opts, headers, signal: ctl.signal });
     clearTimeout(timer);
     setOnline(true);
+    if (r.status === 412 && r.headers.get('X-Hub-Workspace')) workspaceMoved();
     // 401: this device is not (or no longer) paired with the server.
     if (r.status === 401 && !opts.quiet) askToPair();
     return r;
@@ -502,6 +506,19 @@ async function loadConfig() {
 $('hubHome').onclick = (e) => { if (config.front) openDoc(config.front, { side: e.metaKey || e.ctrlKey || e.altKey }); };
 
 // ---- workspaces and folder upload ---------------------------------------------
+// Open another workspace on the hub. From then on this page names that one (see call), until it loads again.
+async function openWorkspace(root) {
+  const list = await api('/api/workspace', 'POST', { root });
+  config.workspace = list.find((w) => w.current)?.workspace || config.workspace;
+}
+// Another workspace was opened on the hub (from another device, another tab, or this one): this page still shows the
+// one before, and the hub refuses what it asks. What waits to be sent is kept for when that one is open again.
+function workspaceMoved() {
+  const b = $('moved');
+  if (!b.hidden) return;
+  b.textContent = `Another workspace was opened on the hub. This page still shows “${config.title}”; nothing done here goes into the other one, and what waits to be sent is kept for when “${config.title}” is open again. Show the open one`;
+  b.hidden = false;
+}
 async function loadWorkspaces() {
   let list;
   try { list = await api('/api/workspaces'); } catch { return; }
@@ -509,7 +526,7 @@ async function loadWorkspaces() {
   sel.innerHTML = '';
   for (const w of list) sel.append(new Option((w.home ? '' : '↳ ') + w.name, w.root, w.current, w.current));
   sel.hidden = list.length < 2;
-  sel.onchange = async () => { await api('/api/workspace', 'POST', { root: sel.value }); location.href = '/'; };
+  sel.onchange = async () => { await openWorkspace(sel.value); location.href = '/'; };
 }
 // ---- a folder on this device, and its copy in the workspace ----
 // An uploaded folder is a copy: the server watches the copy, not the folder it came from. "update…" on the
@@ -785,7 +802,7 @@ async function runUpload(files, workspace, folder, front, lock, more = []) {
   // folder's name as its title. Never replaces one that is already there.
   const frontText = async (front, folder) => (front.from ? await front.from.text() : `# ${folder}\n\nWhat this folder is for. Press the pencil to change this.\n`);
   if (workspace && root) {
-    await api('/api/workspace', 'POST', { root });
+    await openWorkspace(root);
     if (front && !(await api('/api/config')).front) await api('/api/front', 'PUT', { markdown: await frontText(front, folder) });
     location.href = '/';
   } else {
@@ -1477,7 +1494,10 @@ function renderNet() {
   const space = el('button', '', 'space on this device…');
   space.title = 'How much each kept copy takes on this device, and remove copies to free the space (they stay on the server)';
   space.onclick = showSpace;
-  box.append(el('div', 'sub', '● on this device   ○ server only   ↑ waiting to be sent'), everything, ' ', space);
+  const removed = el('button', '', 'removed folders…');
+  removed.title = 'Folders removed from this workspace in the last seven days: put one back, or let it go for good';
+  removed.onclick = showRemoved;
+  box.append(el('div', 'sub', '● on this device   ○ server only   ↑ waiting to be sent'), everything, ' ', space, ' ', removed);
   if (net.said) box.append(el('div', 'say', net.said));
   if (local.full) box.append(el('div', 'say', 'This browser\'s storage for the reader is full. Notes waiting to be sent, and the layout, may not survive closing it: connect to the server so they can be sent, or remove some kept copies.'));
   // With the settings folded away, anything that needs attention still shows, in one line.
@@ -1797,6 +1817,7 @@ async function flush() {
         const why = (await r.json().catch(() => null))?.error || 'error ' + r.status;
         // Deleting or editing something that is already gone has nothing left to do.
         const moot = r.status === 404 && op.kind !== 'add' && op.kind !== 'file';
+        if (r.status === 412) { stuck = `Another workspace is open on the hub: ${opLabel(op)} is kept here, and sent when this one is open again.`; break; }
         if (!FINAL.has(r.status)) { stuck = `The server would not take ${opLabel(op)} (${why}). It is kept here and will be tried again.`; break; }
         if (!moot) { refused.push({ what: opLabel(op), why, ts: Date.now() }); store.set('refused:' + config.root, refused); }
       }
@@ -2144,12 +2165,13 @@ function removeFolder(folder) {
   const inside = allDocs.filter((d) => d.path.startsWith(folder + '/')).length;
   showGate(`Remove “${folder.split('/').pop()}”?`, (card) => {
     const say = el('p', 'say'), go = el('button', 'main', 'Remove the folder'), no = el('button', 'link', 'Cancel');
-    card.append(el('p', '', `The folder and the ${inside} file${inside === 1 ? '' : 's'} in it are deleted from this workspace, on the server and for every device. This cannot be undone here.`),
+    card.append(el('p', '', `The folder and the ${inside} file${inside === 1 ? '' : 's'} in it are taken out of this workspace, on the server and for every device. The hub keeps it aside for seven days (less if the room is needed for something new), and it can be put back from the settings, under “removed folders…”.`),
       el('p', 'sub', 'Files on your own computer are not touched: a folder you uploaded can be uploaded again.'), go, no, say);
     no.onclick = closeGate;
     go.onclick = async () => {
       go.disabled = true;
-      try { await api('/api/folder?path=' + encodeURIComponent(folder), 'DELETE'); }
+      let done;
+      try { done = await api('/api/folder?path=' + encodeURIComponent(folder), 'DELETE'); }
       catch (e) { go.disabled = false; say.textContent = e.offline ? 'The server is not reachable. A folder can only be removed while connected.' : e.message; return; }
       for (const d of allDocs) if (d.path.startsWith(folder + '/') && kept.has(d.path)) await dropCopy(d.path);
       queue = queue.filter((p) => !p.startsWith(folder + '/'));
@@ -2158,8 +2180,66 @@ function removeFolder(folder) {
       await loadConfig();
       await loadDocs();
       await locksChanged();
+      if (done?.undo) showGate(`“${folder.split('/').pop()}” was removed`, (card) => {
+        const back = el('button', '', 'Put it back'), ok = el('button', 'main', 'OK'), why = el('p', 'say');
+        card.append(el('p', 'sub', 'Kept aside on the hub for seven days; “removed folders…” in the settings puts it back later too.'), ok, back, why);
+        ok.onclick = closeGate;
+        back.onclick = async () => {
+          back.disabled = true;
+          try { await putBack(done.undo); closeGate(); if (docOf(frontOf(folder))) openDoc(frontOf(folder)); }
+          catch (e) { back.disabled = false; why.textContent = e.message; }
+        };
+        ok.focus();
+      }, true);
     };
   }, true);
+}
+// A removed folder, put back where it was, with its lock (see /api/folder/restore).
+async function putBack(undo) {
+  const done = await api('/api/folder/restore', 'POST', { undo });
+  await loadConfig();
+  await loadDocs();
+  await locksChanged();
+  return done.restored;
+}
+// Folders removed from this workspace that the hub still keeps aside, newest first: each can be put back, or let go
+// for good now (to free the room at once). A folder that was locked is not named.
+async function showRemoved() {
+  let list = null, why = '';
+  const size = (n) => (n < 1 << 20 ? Math.max(1, Math.round(n / 1024)) + ' KB' : mb(n));
+  const fill = (card) => {
+    card.append(el('p', 'sub', 'A folder removed from this workspace is kept aside on the hub for seven days, or less when the room is needed for something new. Put back, it is where it was, with its lock; notes on it were never removed.'));
+    if (why) return card.append(el('p', 'say', why));
+    if (!list) return card.append(el('p', 'sub', 'Asking the hub…'));
+    if (!list.length) return card.append(el('p', '', 'Nothing removed is kept now.'));
+    for (const r of [...list].reverse()) {
+      const row = el('div', 'dev space'), name = el('span', '', r.locked ? 'A locked folder' : r.from.split('/').pop());
+      if (!r.locked) name.title = r.from;
+      const back = el('button', '', 'put back'), drop = el('button', '', 'let go');
+      back.title = 'Put it back where it was';
+      drop.title = 'Delete it for good now, to free its room on the hub';
+      back.onclick = async () => {
+        back.disabled = drop.disabled = true;
+        try { await putBack(r.undo); list = list.filter((x) => x !== r); }
+        catch (e) { why = e.message; }
+        redraw();
+      };
+      drop.onclick = async () => {
+        if (drop.dataset.sure !== '1') { drop.dataset.sure = '1'; drop.textContent = 'delete for good?'; drop.classList.add('sure'); return; }
+        back.disabled = drop.disabled = true;
+        try { await api('/api/removed?undo=' + encodeURIComponent(r.undo), 'DELETE'); list = list.filter((x) => x !== r); }
+        catch (e) { why = e.message; }
+        redraw();
+      };
+      const parent = r.locked ? '' : r.from.split('/').slice(0, -1).join(' / ');
+      row.append(name, el('small', '', (parent ? parent + ' · ' : '') + ago(Date.parse(r.at))), el('small', 'size', size(r.size)), back, drop);
+      card.append(row);
+    }
+  };
+  const redraw = () => showGate('Removed folders', fill, true);
+  redraw();
+  try { list = await api('/api/removed'); } catch (e) { why = e.offline ? 'The hub is not reachable: removed folders can be seen and put back only while it is.' : e.message; }
+  if (!gate.hidden && gate.querySelector('h2')?.textContent === 'Removed folders') redraw();
 }
 async function loadDocs() {
   try { serverDocs = await api('/api/docs'); store.set('docs:' + config.root, serverDocs); }
@@ -6704,7 +6784,9 @@ function listen() {
 // answered with one refresh, not one each.
 let changed = new Set(), changedSince = 0, changeTimer = 0;
 function onFileChange(e) {
-  changed.add(JSON.parse(e.data).file);
+  const said = JSON.parse(e.data);
+  if (said.workspace) { if (said.workspace !== config.workspace) workspaceMoved(); return; }
+  changed.add(said.file);
   if (!changedSince) changedSince = Date.now();
   clearTimeout(changeTimer);
   changeTimer = setTimeout(applyChanges, Date.now() - changedSince > 2000 ? 0 : 400);   // a long burst still refreshes every two seconds
@@ -6736,10 +6818,12 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.addEventListener('message', (e) => { if (e.data?.type === 'page-updated') $('fresh').hidden = false; });
 }
 $('fresh').onclick = () => location.reload();
+$('moved').onclick = () => { location.href = '/'; };
 
 (async function init() {
   // Private copies first: if they are encrypted, ask for the passphrase.
   if (local.start() === 'locked') await askUnlock();
+  else await local.load();
   // Which hub to look at: this one, or the other one this device was pointed at last.
   hubs = store.get('hub:list') || [];
   hub = hubs.find((h) => h.url === store.get('hub:at')) || HOME;
