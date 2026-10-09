@@ -150,7 +150,7 @@ function pushLook() {
   lookTimer = setTimeout(() => {
     if (!net.online || hub.url) return;
     const look = { theme: document.documentElement.dataset.theme, font: document.documentElement.dataset.font, themeOne: oneTheme,
-      themeSide: $('themeSide').value, themeRight: $('themeRight').value, fs: view.fs, roomy: view.roomy, focus: view.focus, scrollTurn: view.scrollTurn };
+      themeSide: $('themeSide').value, themeRight: $('themeRight').value, fs: view.fs, roomy: view.roomy, focus: view.focus, scrollTurn: view.scrollTurn, soft: view.soft };
     api('/api/config', 'PUT', { look }).catch(() => {});
   }, 1200);
 }
@@ -167,7 +167,7 @@ function adoptLook() {
     }
     if (fresh.view) {
       if (look.fs >= 14 && look.fs <= 28) view.fs = Math.round(look.fs);
-      for (const k of ['roomy', 'focus', 'scrollTurn']) if (typeof look[k] === 'boolean') view[k] = look[k];
+      for (const k of ['roomy', 'focus', 'scrollTurn', 'soft']) if (typeof look[k] === 'boolean') view[k] = look[k];
       applyView();
     }
   }
@@ -285,10 +285,13 @@ $('themeOne').onclick = () => { oneTheme = !oneTheme; store.set('themeOne', oneT
 applyPaneThemes();
 
 // Reading aids: text size, roomier spacing, and a focus mode that fades
-// everything except the block being read.
-const view = { fs: 18, roomy: false, focus: false, scrollTurn: true, ...(store.get('view') || {}) };
+// everything except the block being read. And the reader's edges: square, or soft (rounded, and shaded where parts
+// meet instead of lined), with any theme.
+const view = { fs: 18, roomy: false, focus: false, scrollTurn: true, soft: false, ...(store.get('view') || {}) };
 function applyView() {
   document.documentElement.style.setProperty('--fs', view.fs + 'px');
+  document.documentElement.dataset.edges = view.soft ? 'soft' : 'square';
+  $('softToggle').setAttribute('aria-pressed', view.soft);
   document.body.classList.toggle('roomy', view.roomy);
   document.body.classList.toggle('focus', view.focus);
   $('roomyToggle').setAttribute('aria-pressed', view.roomy);
@@ -302,6 +305,7 @@ function applyView() {
   pushLook();
 }
 $('roomyToggle').onclick = () => { view.roomy = !view.roomy; applyView(); };
+$('softToggle').onclick = () => { view.soft = !view.soft; applyView(); };
 $('focusToggle').onclick = () => { view.focus = !view.focus; applyView(); };
 $('turnToggle').onclick = () => { view.scrollTurn = !view.scrollTurn; applyView(); };
 $('smaller').onclick = () => { view.fs = Math.max(14, view.fs - 1); applyView(); };
@@ -397,7 +401,7 @@ function paintBare() {
 $('bare').onclick = () => { state.bare = !state.bare; save(); paintBare(); };
 // While they are away, two small muted things lie over the page's top left corner: a gear, which brings the bars back
 // and opens the sidebar at its settings; and, for a PDF, the page being read ("page 7 of 120"), which the tab said.
-const bareBar = el('div'), bareGear = el('button', 'ic'), bareWhere = el('small'), bareLess = el('button', '', '−'), bareMore = el('button', '', '+');
+const bareBar = el('div'), bareGear = el('button', 'ic'), bareTools = el('button', 'ic'), bareWhere = el('small'), bareLess = el('button', '', '−'), bareMore = el('button', '', '+');
 bareBar.id = 'bareBar';
 bareGear.id = 'bareGear';
 bareWhere.id = 'bareWhere';
@@ -405,6 +409,14 @@ bareGear.type = 'button';
 bareGear.title = 'Settings and the sidebar: brings the tabs and the top bar back';
 bareGear.setAttribute('aria-label', bareGear.title);
 bareGear.append($('settingsBtn').querySelector('svg').cloneNode(true));
+// On a phone, a PDF's own bar (its name, smaller and larger, night, reader, keep) comes out with the sliders button in
+// the top bar; with that bar away, the same button is here (see togglePdfTools).
+bareTools.id = 'bareTools';
+bareTools.type = 'button';
+bareTools.title = $('mTools').title;
+bareTools.setAttribute('aria-label', bareTools.title);
+bareTools.append($('mTools').querySelector('svg').cloneNode(true));
+bareTools.onclick = () => togglePdfTools();
 // A PDF's smaller and larger, too: on a phone its own bar, which has them, is put away.
 for (const [b, id, title, times] of [[bareLess, 'bareLess', 'Smaller pages', 1 / 1.25], [bareMore, 'bareMore', 'Larger pages', 1.25]]) {
   b.id = id;
@@ -413,7 +425,7 @@ for (const [b, id, title, times] of [[bareLess, 'bareLess', 'Smaller pages', 1 /
   b.setAttribute('aria-label', title);
   b.onclick = () => { const z = views[state.active]?.zoom; if (z?.path === state.panes[state.active]?.active) z.by(times); };
 }
-bareBar.append(bareGear, bareLess, bareMore, bareWhere);
+bareBar.append(bareGear, bareTools, bareLess, bareMore, bareWhere);
 $('work').append(bareBar);
 bareGear.onclick = () => {
   state.bare = false;
@@ -431,6 +443,8 @@ function paintBareWhere() {
   const open = state.panes[state.active]?.active, said = shown && !!bar.querySelector('.pdfwhere')?.offsetHeight;   // `said`: the PDF's own bar is showing, page, − and + and all
   bareWhere.textContent = w && w.path === open && !said ? w.text : '';
   bareLess.hidden = bareMore.hidden = !(v?.zoom?.path === open && isPdf(open || '')) || said;
+  bareTools.hidden = !isPdf(open || '');
+  bareTools.setAttribute('aria-pressed', !!state.pdfTools);
 }
 addEventListener('resize', paintBareWhere);
 function applyLayout() {
@@ -1156,6 +1170,79 @@ async function showKept() {
   }, true);
 }
 
+// How much each copy kept on this device takes, largest first, with a way to remove it from the device. A copy
+// removed here is only the device's: the file stays on the server, and can be kept again. A book counts as one, all
+// its pages and pictures together; so does each other file, the pictures and styles kept beside a page included
+// as files of their own. Copies from other hubs and workspaces are listed too, under their own heading. Files added
+// here and not yet sent are not copies, and are not listed: removing one would lose it.
+async function showSpace() {
+  const items = new Map();   // root + '|' + book or path -> { id, root, from, label, where, folder, keys, size }
+  let measuring = true, total = 0, used = null;
+  const size = (n) => (n < 1 << 20 ? Math.max(1, Math.round(n / 1024)) + ' KB' : mb(n));
+  const fill = (card) => {
+    if (used) card.append(el('p', 'sub', `The reader uses about ${mb(used.usage)} of this device${used.quota ? ` (it may use up to ${mb(used.quota)})` : ''}: the copies below, and the reader itself.`));
+    if (measuring) { card.append(el('p', 'sub', 'Measuring…')); return; }
+    if (!items.size) { card.append(el('p', '', 'Nothing is kept on this device.')); return; }
+    card.append(el('p', '', `Copies kept here: ${size(total)} in all. Removing one frees its space here; it stays on the server.`));
+    const groups = new Map();
+    for (const it of [...items.values()].sort((a, b) => b.size - a.size)) {
+      if (!groups.has(it.from)) groups.set(it.from, []);
+      groups.get(it.from).push(it);
+    }
+    for (const [from, list] of groups) {
+      card.append(el('h5', '', from));
+      for (const it of list) {
+        const row = el('div', 'dev space'), name = el('span', '', it.label), amount = el('small', 'size', it.size ? size(it.size) : '—');
+        name.title = it.where;
+        const drop = el('button', '', 'remove');
+        drop.title = 'Remove this copy from the device. It stays on the server.';
+        drop.onclick = async () => {
+          if (drop.dataset.sure !== '1') { drop.dataset.sure = '1'; drop.textContent = 'remove from device?'; drop.classList.add('sure'); return; }
+          drop.disabled = true;
+          // As dropCopy does, for every page of a book at once, and the lists drawn again once.
+          for (const key of it.keys) {
+            await idb.del('docs', key);
+            if (it.root !== config.root) continue;
+            const path = key.slice(key.indexOf('|') + 1);
+            kept.delete(path);
+            if (blobUrls.has(path)) { URL.revokeObjectURL(blobUrls.get(path)); blobUrls.delete(path); }
+          }
+          if (it.root === config.root) { renderTree(); renderNet(); renderPlayers(); }
+          items.delete(it.id);
+          total -= it.size;
+          if (navigator.storage?.estimate) used = await navigator.storage.estimate().catch(() => used);
+          redraw();
+        };
+        row.append(name, el('small', '', it.folder), amount, drop);
+        card.append(row);
+      }
+    }
+  };
+  const redraw = () => showGate('Space on this device', fill, true);
+  redraw();
+  if (navigator.storage?.estimate) used = await navigator.storage.estimate().catch(() => null);
+  for (const key of (await idb.keys('docs')) || []) {
+    const bar = key.indexOf('|');
+    if (bar < 0) continue;
+    const root = key.slice(0, bar), path = key.slice(bar + 1), m = /^(https?:\/\/\S+) (.*)$/.exec(root);
+    if (root === config.root && gateOf(path)) continue;   // in a locked folder: not named until it is opened
+    const url = m ? m[1] : '', folder = (m ? m[2] : root).split('/').filter(Boolean).pop() || '';
+    const from = (url ? hubs.find((h) => h.url === url)?.name || new URL(url).host : 'This hub') + ' · ' + folder + (root === config.root ? ' (viewing)' : '');
+    const book = isBookPage(path) ? bookOf(path) : null, id = root + '|' + (book || path);
+    const where = book || path, parts = where.split('/');
+    if (!items.has(id)) {
+      const label = book ? (root === config.root && docOf(path)?.bookTitle) || parts.pop().replace(/\.epub$/i, '') : parts.pop();
+      items.set(id, { id, root, from, label, where, folder: (book ? book.split('/') : path.split('/')).slice(0, -1).join(' / '), keys: [], size: 0 });
+    }
+    const it = items.get(id), bytes = await idb.size('docs', key);
+    it.keys.push(key);
+    it.size += bytes;
+    total += bytes;
+  }
+  measuring = false;
+  if (!gate.hidden && gate.querySelector('h2')?.textContent === 'Space on this device') redraw();
+}
+
 // ---- privacy: connection, this device, copies kept here ----------------------------
 let session = null;
 // What is stored on this device (the page itself, the copies, the notes still
@@ -1371,7 +1458,10 @@ function renderNet() {
   const everything = el('button', '', 'everything on this device…');
   everything.title = 'What is kept here from every hub and workspace';
   everything.onclick = showKept;
-  box.append(el('div', 'sub', '● on this device   ○ server only   ↑ waiting to be sent'), everything);
+  const space = el('button', '', 'space on this device…');
+  space.title = 'How much each kept copy takes on this device, and remove copies to free the space (they stay on the server)';
+  space.onclick = showSpace;
+  box.append(el('div', 'sub', '● on this device   ○ server only   ↑ waiting to be sent'), everything, ' ', space);
   if (net.said) box.append(el('div', 'say', net.said));
   if (local.full) box.append(el('div', 'say', 'This browser\'s storage for the reader is full. Notes waiting to be sent, and the layout, may not survive closing it: connect to the server so they can be sent, or remove some kept copies.'));
   // With the settings folded away, anything that needs attention still shows, in one line.
@@ -2588,9 +2678,10 @@ const bookStarts = () => store.get('bookStarts:' + config.root) || {};   // book
 function bookStart(pages) {
   const named = (test) => pages.find((d) => test.test(d.path.split('/').pop().replace(/\.x?html?$/i, '')));
   const found = pages.length ? bookStarts()[pages[0].path.slice(0, pages[0].path.search(/\.epub\//i) + 5)] : '';
-  // The engine has read this book: its contents if it has them in front, else where its text begins.
+  // The engine has read this book: at the start of its front matter (its cover, title page, contents and the like,
+  // which the engine tells apart), else at its first page, where its text begins.
   const roles = pages.length ? bookFronts()[bookOf(pages[0].path)]?.roles : null;
-  if (roles) return pages.find((d) => roles[d.path] === 'toc') || pages.find((d) => !roles[d.path]) || pages[0];
+  if (roles) return pages.find((d) => roles[d.path]) || pages[0];
   return pages.find((d) => /^\s*(table\s+of\s+)?contents\s*$/i.test(d.title || '')) || named(/^(toc|contents|table[-_ ]?of[-_ ]?contents)$/i)
     || (found && pages.find((d) => d.path === found)) || named(/^nav$/i) || pages[0];
 }
@@ -4446,13 +4537,15 @@ async function drawPdf(pane, path, box, bar, copy) {
 // On a phone a PDF's bar (its name, smaller and larger, night, reader, keep) is put away, so the page has the room:
 // the button in the top bar brings it out and puts it back, and the page being read is said on the PDF's tab.
 // Kept with the layout.
-$('mTools').onclick = () => {
+// With the top bar away (the bars put away for reading), the same button sits with the muted ones at the top left.
+function togglePdfTools() {
   state.pdfTools = !state.pdfTools;
   save();
   for (const box of document.querySelectorAll('.viewer.pdfv')) box.classList.toggle('tools', state.pdfTools);
   paintBareWhere();
   $('mTools').setAttribute('aria-pressed', state.pdfTools);
-};
+}
+$('mTools').onclick = togglePdfTools;
 function showPdf(pane, path) {
   const v = views[pane], box = el('div', 'viewer pdfv' + (state.pdfTools ? ' tools' : '')), bar = el('div', 'viewbar');
   bar.append(el('span', '', path.split('/').pop()));

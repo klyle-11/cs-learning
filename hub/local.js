@@ -121,7 +121,29 @@ export const idb = {
     if (mode === 'plain') return db.keys(name);
     return mode === 'open' ? index(name) : [];
   },
+  // How many bytes a record takes on this device: its file, or its text as UTF-8; encrypted, what is stored, which
+  // is measured without decrypting it. 0 if there is none (or the store is locked).
+  async size(name, key) {
+    if (mode === 'plain') {
+      const r = await db.get(name, key);
+      return !r ? 0 : r.blob ? r.blob.size : typeof r.text === 'string' ? utf8Length(r.text) : 0;
+    }
+    if (mode !== 'open') return 0;
+    const r = await db.get(name, await vault.name(name + '|' + key));
+    return r?.data?.byteLength || 0;
+  },
 };
+function utf8Length(s) {
+  let n = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c < 0x80) n += 1;
+    else if (c < 0x800) n += 2;
+    else if (c >= 0xd800 && c <= 0xdbff) { n += 4; i++; }   // a pair of surrogates is one character of four bytes
+    else n += 3;
+  }
+  return n;
+}
 
 const privateKeys = () => Object.keys(localStorage).filter((k) => !PLAIN.has(k) && k !== VAULT_META);
 
