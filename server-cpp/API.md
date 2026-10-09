@@ -13,6 +13,7 @@ All JSON bodies are UTF-8. Errors are `{ "error": "message" }` with a 4xx or 5xx
 | `GET /js/<name>.js` | a module of the page's (`hub/js/`): `<name>` is lowercase letters, digits and hyphens only; 404 for anything else, or a name that is not there |
 | `GET /sw.js`, `/manifest.webmanifest`, `/icon-192.png`, `/icon-512.png`, `/apple-touch-icon.png` | the service worker, manifest and icons: they let the page be installed and opened without the server |
 | `GET /vendor/marked.js`, `/vendor/highlight.js`, `/vendor/purify.js` | the three libraries the page loads |
+| `GET /vendor/marginalia/<file>` | the document engine (`marginalia-engine`, from `hub/node_modules/marginalia-engine/dist/`, or from `hub/vendor/marginalia/` if copied there): `index.js`, `client.js`, `worker.js`, `wasm/marginalia_wasm.js`, `wasm/marginalia_wasm_bg.wasm` (`application/wasm`), `selection.js`, `selection-engine.js`, `frame.js`, `geometry.js`, `overlay.js`, `surfaces.js`, `caret.js`, `dom.js`, `themes.js`, `recolor.js`, `recolor-worker.js`, `ui.css`. No other file of the package is served. `worker.js` is sent with `default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'` (it runs the WebAssembly, which it fetches from here) and `recolor-worker.js` with `default-src 'none'; script-src 'self'` |
 | `GET /raw/<path>` | the file as it is on disk, with a content type from its extension. 404 if missing |
 | `GET /api/doc?path=<path>` | the text of a markdown, HTML or source file. 404 if missing or not a readable type |
 | `GET /api/blocks?path=<path>` | `{ "blocks": [{ "hash", "nth", "len" }] }`: the document as a row of blocks (paragraph, heading, list item, table cell, block of code), in order. `hash` is FNV-1a (64 bits, 16 hex digits) of the block's text with everything but letters and digits removed and ASCII letters lowered; `nth` counts earlier blocks with the same hash; `len` is the folded text's length in bytes. Blocks with no letters or digits are left out. A source file is one block. 404 as for `/api/doc`; 413 for a file too large to hold in memory (16 MB on a computer, 1 MB on the board). See `src/anchor.hpp` |
@@ -58,6 +59,8 @@ An `.epub` file is listed as a folder of its pages, in reading order: each page 
 
 `changed` is when the file was last changed, in seconds since 1970 (the pages of a book have none): the reader lists the added folders with the one most recently added to first.
 
+A page of a book also has `bookTitle`, the book's own title, when the book gives one: the reader puts it after the page's name wherever the page is named away from its book.
+
 `title` is the first `# Heading` (markdown), `<title>` (HTML), or the file name. Pictures, video, sound and PDFs are listed by their file names. Hidden files, `node_modules`, `notes/`, the server's own folder and anything matching `ignore` are left out.
 
 ## Settings
@@ -100,6 +103,8 @@ Stored in `notes/notes.json`.
 | `POST /api/notes` | body needs `doc` and one of `text`, `quote`. Returns the new note. `status` is `open` with text, `highlight` without. An `anchor` object is kept if its `block` is hex (at most 32 digits): `{ block, nth, start, before, after }`, numbers floored and not negative, `before` and `after` at most 200 bytes; other keys in it are dropped, and an anchor that is not usable is left off |
 | `PUT /api/notes/<id>` | updates any of `text`, `quote`, `heading`, `headingText`, `type`, `anchor`; other keys are ignored. A new `quote` sent without an `anchor` removes the old anchor, which was for the old quote. A highlight that gains text becomes `open`. 404 for an unknown id |
 | `DELETE /api/notes/<id>` | `{ "ok": true }`, or 404 |
+
+A note may also carry `mg`: `{ "doc", "anchor" }`, where the document engine found a highlight on a PDF or a page of a book. `doc` is the file's SHA-256 (64 lowercase hex digits); `anchor` is the engine's own, kept exactly as sent (it must be an object with a string `unit` and an object `quote`, and at most 64 KB as JSON). Anything else in `mg` is dropped, and an `mg` that does not fit this is left off. `POST` and `PUT` take it as they take `anchor`: on `PUT`, a new `quote` sent without an `mg` removes the old one.
 
 ## Uploads and workspaces
 

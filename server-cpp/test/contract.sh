@@ -171,6 +171,7 @@ run() { # run <port> <root> <log>: the request script
   req "vendor marked"         status-only "$B/vendor/marked.js"
   req "vendor highlight"      status-only "$B/vendor/highlight.js"
   echo "## vendor pdf, and its worker"; for f in pdf.mjs pdf.worker.mjs; do curl -s -o /dev/null -D - "$B/vendor/$f" | tr -d '\r' | grep -iE '^(HTTP/|content-type|content-security-policy)' | sed 's/^HTTP\/1.1 \([0-9]*\).*/\1/'; done
+  echo "## vendor marginalia: the engine's files, its workers' policies, and nothing else of the package"; for f in index.js worker.js recolor-worker.js ui.css wasm/marginalia_wasm_bg.wasm node.js ../package.json wasm-ocr/marginalia_wasm.js; do echo "$f"; curl -s -o /dev/null -D - --path-as-is "$B/vendor/marginalia/$f" | tr -d '\r' | grep -iE '^(HTTP/|content-type|content-security-policy)' | sed 's/^HTTP\/1.1 \([0-9]*\).*/\1/'; done
   req "unknown route"         body "$B/api/nope"
   req "notes empty"           body "$B/api/notes"
   req "note create"           body -X POST "${J[@]}" -d '{"doc":"a/1-doc.md","text":"why \"this\"?\nline two","quote":"Body one.","type":"question","heading":"first","headingText":"First"}' "$B/api/notes"
@@ -184,6 +185,12 @@ run() { # run <port> <root> <log>: the request script
   req "anchor not hex"        body -X POST "${J[@]}" -d '{"id":"anchored-2","ts":"2026-01-02T03:04:05.678Z","doc":"a/1-doc.md","quote":"one","anchor":{"block":"../x","start":-3}}' "$B/api/notes"
   req "anchor replaced"       body -X PUT "${J[@]}" -d '{"quote":"Body","anchor":{"block":"abc","start":0}}' "$B/api/notes/anchored-1"
   req "quote without anchor"  body -X PUT "${J[@]}" -d '{"quote":"Body one"}' "$B/api/notes/anchored-1"
+  req "highlight with engine anchor" body -X POST "${J[@]}" -d '{"id":"engine-1","ts":"2026-01-02T03:04:05.678Z","doc":"b/clip.mp4","quote":"brown","mg":{"doc":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","anchor":{"unit":"p0","unitIndex":0,"quote":{"exact":"brown","prefix":"quick ","suffix":" fox"},"position":{"start":4,"end":9},"rects":[{"x0":1.5,"y0":2,"x1":3,"y1":4.25}]},"extra":"dropped"}}' "$B/api/notes"
+  req "engine anchor: not a fingerprint" body -X POST "${J[@]}" -d '{"id":"engine-2","ts":"2026-01-02T03:04:05.678Z","doc":"b/clip.mp4","quote":"brown","mg":{"doc":"../x","anchor":{"unit":"p0","quote":{"exact":"brown"}}}}' "$B/api/notes"
+  req "engine anchor: no quote in it" body -X PUT "${J[@]}" -d '{"mg":{"doc":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","anchor":{"unit":"p0"}}}' "$B/api/notes/engine-1"
+  req "engine anchor goes with its quote" body -X PUT "${J[@]}" -d '{"quote":"quick"}' "$B/api/notes/engine-1"
+  req "engine notes gone"     body -X DELETE "$B/api/notes/engine-1"
+  req "engine notes 2 gone"   body -X DELETE "$B/api/notes/engine-2"
   req "anchored note gone"    body -X DELETE "$B/api/notes/anchored-1"
   req "anchored note 2 gone"  body -X DELETE "$B/api/notes/anchored-2"
   req "blocks of markdown"    body "$B/api/blocks?path=a/blocks.md"

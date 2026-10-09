@@ -200,7 +200,7 @@ static const char *mime_of(const string &name) {
       {".xhtml", "application/xhtml+xml"}, {".otf", "font/otf"}, {".ttf", "font/ttf"}, {".woff", "font/woff"},
       {".mjs", "text/javascript"}, {".json", "application/json"}, {".svg", "image/svg+xml"}, {".png", "image/png"},
       {".jpg", "image/jpeg"}, {".jpeg", "image/jpeg"}, {".gif", "image/gif"}, {".webp", "image/webp"},
-      {".pdf", "application/pdf"}, {".woff2", "font/woff2"}, {".mp4", "video/mp4"}, {".m4v", "video/mp4"},
+      {".pdf", "application/pdf"}, {".wasm", "application/wasm"}, {".woff2", "font/woff2"}, {".mp4", "video/mp4"}, {".m4v", "video/mp4"},
       {".mov", "video/quicktime"}, {".webm", "video/webm"}, {".ogv", "video/ogg"}, {".mp3", "audio/mpeg"},
       {".m4a", "audio/mp4"}, {".wav", "audio/wav"}, {".ogg", "audio/ogg"}};
   string ext = lower(ext_of(name));
@@ -425,6 +425,7 @@ static void list_book(const string &abs, const string &rel, bool side, cJSON *ou
     cJSON_AddStringToObject(doc, "path", path.c_str());
     cJSON_AddStringToObject(doc, "group", rel.c_str());
     cJSON_AddStringToObject(doc, "title", c.title.c_str());
+    if (!book.title.empty()) cJSON_AddStringToObject(doc, "bookTitle", book.title.c_str());   // whose page it is, for wherever the page is named away from its book
     cJSON_AddBoolToObject(doc, "side", side);
     cJSON_AddBoolToObject(doc, "front", false);
     cJSON_AddItemToArray(out, doc);
@@ -978,6 +979,12 @@ static const std::pair<const char *, const char *> ASSETS[] = {
     // PDF.js, which draws a PDF's pages where the browser has no viewer for a frame (a phone). Asked for only when such a PDF is opened.
     {"/vendor/pdf.mjs", "node_modules/pdfjs-dist/legacy/build/pdf.min.mjs"},
     {"/vendor/pdf.worker.mjs", "node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs"}};
+// The document engine (marginalia-engine), under /vendor/marginalia/: what the page loads of it and nothing else of
+// its package. Asked for only when a PDF is drawn. Its two workers are sent with a policy of their own (see below).
+static const char *ENGINE_FILES[] = {
+    "index.js", "client.js", "worker.js", "wasm/marginalia_wasm.js", "wasm/marginalia_wasm_bg.wasm", "selection.js",
+    "selection-engine.js", "frame.js", "geometry.js", "overlay.js", "surfaces.js", "caret.js", "dom.js", "themes.js",
+    "recolor.js", "recolor-worker.js", "ui.css"};
 
 // ---- workspaces ----------------------------------------------------------------------------
 // The folder the server was started on is "home". A folder uploaded "as its
@@ -1046,6 +1053,26 @@ static cJSON *clean_anchor(const cJSON *in) {
   cJSON_AddStringToObject(a, "before", words("before").c_str());
   cJSON_AddStringToObject(a, "after", words("after").c_str());
   return a;
+}
+
+// Where the document engine found a highlight (a PDF's): `doc`, the file's SHA-256, and `anchor`, which the engine made
+// and reads back. The anchor is kept as it came, since the engine places a highlight by every part of it, but it must
+// look like one (a unit and a quote) and be no longer than a long passage with its boxes needs. nullptr otherwise.
+static const size_t MAX_MG_ANCHOR = 64u << 10;
+static cJSON *clean_mg(const cJSON *in) {
+  if (!cJSON_IsObject(in)) return nullptr;
+  const string doc = str_of(in, "doc");
+  const cJSON *anchor = cJSON_GetObjectItemCaseSensitive(in, "anchor");
+  if (doc.size() != 64 || !std::all_of(doc.begin(), doc.end(), [](unsigned char c) { return std::isdigit(c) || (c >= 'a' && c <= 'f'); })) return nullptr;
+  if (!cJSON_IsObject(anchor) || !cJSON_IsString(cJSON_GetObjectItemCaseSensitive(anchor, "unit")) || !cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(anchor, "quote"))) return nullptr;
+  char *flat = cJSON_PrintUnformatted(anchor);
+  const bool fits = flat && std::strlen(flat) <= MAX_MG_ANCHOR;
+  cJSON_free(flat);
+  if (!fits) return nullptr;
+  cJSON *mg = cJSON_CreateObject();
+  cJSON_AddStringToObject(mg, "doc", doc.c_str());
+  cJSON_AddItemToObject(mg, "anchor", cJSON_Duplicate(anchor, 1));
+  return mg;
 }
 
 // A file that is there but cannot be read as what it should be. Writing would
@@ -1234,6 +1261,19 @@ static http::Response answer(http::Request &req) {
       // A worker runs under the policy its own file is sent with: the one for data would not let it run at all. It may run itself, and nothing more.
       if (p == "/vendor/pdf.worker.mjs") r.extra += "Content-Security-Policy: default-src 'none'; script-src 'self'\r\n";
       return r;
+    }
+    if (starts_with(p, "/vendor/marginalia/")) {
+      string name = p.substr(19);
+      for (const char *f : ENGINE_FILES) {
+        if (name != f) continue;
+        // Beside the page (copied there for the board), or as npm unpacked the package.
+        string beside = WWW + "/vendor/marginalia/" + name;
+        http::Response r = asset_response(is_file(beside) ? beside : WWW + "/node_modules/marginalia-engine/dist/" + name, mime_of(name));
+        // The engine's worker runs itself and its WebAssembly, which it fetches from here; the recolouring worker runs itself only.
+        if (name == "worker.js") r.extra += "Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'\r\n";
+        if (name == "recolor-worker.js") r.extra += "Content-Security-Policy: default-src 'none'; script-src 'self'\r\n";
+        return r;
+      }
     }
   }
 
@@ -1768,6 +1808,7 @@ static http::Response answer(http::Request &req) {
     cJSON_AddStringToObject(note, "quote", quote.c_str());
     cJSON_AddStringToObject(note, "type", str_of(body.p, "type").c_str());
     if (cJSON *a = clean_anchor(cJSON_GetObjectItemCaseSensitive(body.p, "anchor"))) cJSON_AddItemToObject(note, "anchor", a);
+    if (cJSON *found = clean_mg(cJSON_GetObjectItemCaseSensitive(body.p, "mg"))) cJSON_AddItemToObject(note, "mg", found);
     cJSON_AddStringToObject(note, "text", text.c_str());
     cJSON_AddStringToObject(note, "ts", ts_ok ? own_ts.c_str() : now_iso().c_str());
     cJSON_AddStringToObject(note, "status", text.empty() ? "highlight" : "open");
@@ -1801,6 +1842,9 @@ static http::Response answer(http::Request &req) {
     cJSON *a = clean_anchor(cJSON_GetObjectItemCaseSensitive(body.p, "anchor"));
     if (a || has_str(body.p, "quote")) cJSON_DeleteItemFromObjectCaseSensitive(note, "anchor");
     if (a) cJSON_AddItemToObject(note, "anchor", a);
+    cJSON *found = clean_mg(cJSON_GetObjectItemCaseSensitive(body.p, "mg"));
+    if (found || has_str(body.p, "quote")) cJSON_DeleteItemFromObjectCaseSensitive(note, "mg");
+    if (found) cJSON_AddItemToObject(note, "mg", found);
     if (str_of(note, "status") == "highlight" && !str_of(note, "text").empty()) set_str(note, "status", "open");
     if (!write_notes(notes.p)) return http::error(500, "could not save");
     return json_response(note);

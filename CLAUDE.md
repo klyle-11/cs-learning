@@ -38,7 +38,7 @@ Each entry in `notes/notes.json`:
   "text": "what the user wrote, empty for a bare highlight", "ts": "ISO time", "status": "open" }
 ```
 
-A highlight made in the reader may also carry `"anchor": { "block", "nth", "start", "before", "after" }`: where in the document its `quote` is (see `server-cpp/src/anchor.hpp`). Leave it as it is; a note written here (a terminal question) has none.
+A highlight made in the reader may also carry `"anchor": { "block", "nth", "start", "before", "after" }`: where in the document its `quote` is (see `server-cpp/src/anchor.hpp`). Leave it as it is; a note written here (a terminal question) has none. One made on a PDF or on a page of a book may carry `"mg": { "doc", "anchor" }` as well: the file's SHA-256 and the document engine's own anchor. Leave that as it is too.
 
 `status` is `highlight` for a highlight with no note (nothing to answer — but its type name, e.g. "Unclear" or "Question", says how the user read that passage and is useful context), `open` for a note awaiting a reply, `answered` once replied to. Type names and colours are in `hub.json` under `highlights`.
 

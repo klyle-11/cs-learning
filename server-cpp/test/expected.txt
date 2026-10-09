@@ -98,7 +98,7 @@ Body one.
 ## config
 200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#fbeeb0", "id": "<id>", "name": "Important"}, {"color": "#cfe8c6", "id": "<id>", "name": "Definition"}, {"color": "#cfe0f5", "id": "<id>", "name": "Question"}, {"color": "#f6d0d6", "id": "<id>", "name": "Unclear"}], "ignore": ["CLAUDE.md"], "root": "<root>", "scripts": ["b/app.html", "page.html"], "side": ["references.md"], "title": "Fixture Title"}
 ## docs
-200 [{"changed": "<changed>", "front": false, "group": "a", "path": "a/1-doc.md", "side": false, "title": "First"}, {"changed": "<changed>", "front": false, "group": "a", "path": "a/2-doc.md", "side": false, "title": "2-doc"}, {"changed": "<changed>", "front": false, "group": "a", "path": "a/10-doc.md", "side": false, "title": "Tenth"}, {"changed": "<changed>", "front": false, "group": "a", "path": "a/blocks.md", "side": false, "title": "Same  Words"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/app.html", "side": false, "title": "app.html"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/blocks.html", "side": false, "title": "T"}, {"front": false, "group": "b/book.epub", "path": "b/book.epub/OEBPS/text/ch1.xhtml", "side": false, "title": "The First & Best"}, {"front": false, "group": "b/book.epub", "path": "b/book.epub/OEBPS/text/ch2.xhtml", "side": false, "title": "ch2"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/clip.mp4", "side": false, "title": "clip.mp4"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/drawing.svg", "side": false, "title": "drawing.svg"}, {"changed": "<changed>", "front": false, "group": "b", "links": true, "path": "b/items.json", "side": false, "title": "items.json"}, {"changed": "<changed>", "front": false, "group": "b", "links": true, "path": "b/marks.html", "side": false, "title": "Bookmarks"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/page.html", "side": false, "title": "A Page"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/pic.png", "side": false, "title": "pic.png"}, {"changed": "<changed>", "front": false, "group": "b", "links": true, "path": "b/saved.json", "side": false, "title": "saved.json"}, {"changed": "<changed>", "front": false, "group": "", "path": "code.c", "side": false, "title": "code.c"}, {"changed": "<changed>", "front": true, "group": "", "path": "FRONTPAGE.md", "side": false, "title": "Fixture Title"}, {"changed": "<changed>", "front": false, "group": "", "path": "references.md", "side": true, "title": "Refs"}]
+200 [{"changed": "<changed>", "front": false, "group": "a", "path": "a/1-doc.md", "side": false, "title": "First"}, {"changed": "<changed>", "front": false, "group": "a", "path": "a/2-doc.md", "side": false, "title": "2-doc"}, {"changed": "<changed>", "front": false, "group": "a", "path": "a/10-doc.md", "side": false, "title": "Tenth"}, {"changed": "<changed>", "front": false, "group": "a", "path": "a/blocks.md", "side": false, "title": "Same  Words"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/app.html", "side": false, "title": "app.html"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/blocks.html", "side": false, "title": "T"}, {"bookTitle": "A Small Book", "front": false, "group": "b/book.epub", "path": "b/book.epub/OEBPS/text/ch1.xhtml", "side": false, "title": "The First & Best"}, {"bookTitle": "A Small Book", "front": false, "group": "b/book.epub", "path": "b/book.epub/OEBPS/text/ch2.xhtml", "side": false, "title": "ch2"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/clip.mp4", "side": false, "title": "clip.mp4"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/drawing.svg", "side": false, "title": "drawing.svg"}, {"changed": "<changed>", "front": false, "group": "b", "links": true, "path": "b/items.json", "side": false, "title": "items.json"}, {"changed": "<changed>", "front": false, "group": "b", "links": true, "path": "b/marks.html", "side": false, "title": "Bookmarks"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/page.html", "side": false, "title": "A Page"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/pic.png", "side": false, "title": "pic.png"}, {"changed": "<changed>", "front": false, "group": "b", "links": true, "path": "b/saved.json", "side": false, "title": "saved.json"}, {"changed": "<changed>", "front": false, "group": "", "path": "code.c", "side": false, "title": "code.c"}, {"changed": "<changed>", "front": true, "group": "", "path": "FRONTPAGE.md", "side": false, "title": "Fixture Title"}, {"changed": "<changed>", "front": false, "group": "", "path": "references.md", "side": true, "title": "Refs"}]
 ## doc
 200 # First
 
@@ -216,6 +216,39 @@ Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'
 200
 Content-Type: text/javascript; charset=utf-8
 Content-Security-Policy: default-src 'none'; script-src 'self'
+## vendor marginalia: the engine's files, its workers' policies, and nothing else of the package
+index.js
+200
+Content-Type: text/javascript; charset=utf-8
+Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'
+worker.js
+200
+Content-Type: text/javascript; charset=utf-8
+Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'
+recolor-worker.js
+200
+Content-Type: text/javascript; charset=utf-8
+Content-Security-Policy: default-src 'none'; script-src 'self'
+ui.css
+200
+Content-Type: text/css; charset=utf-8
+Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'
+wasm/marginalia_wasm_bg.wasm
+200
+Content-Type: application/wasm
+Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'
+node.js
+401
+Content-Type: application/json; charset=utf-8
+Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'
+../package.json
+401
+Content-Type: application/json; charset=utf-8
+Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'
+wasm-ocr/marginalia_wasm.js
+401
+Content-Type: application/json; charset=utf-8
+Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'
 ## unknown route
 404 {"error": "not found"}
 ## notes empty
@@ -242,6 +275,18 @@ Content-Security-Policy: default-src 'none'; script-src 'self'
 200 {"anchor": {"after": "", "before": "", "block": "abc", "nth": 0, "start": 0}, "doc": "a/1-doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "Body", "status": "highlight", "text": "", "ts": "<ts>", "type": ""}
 ## quote without anchor
 200 {"doc": "a/1-doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "Body one", "status": "highlight", "text": "", "ts": "<ts>", "type": ""}
+## highlight with engine anchor
+200 {"doc": "b/clip.mp4", "heading": "", "headingText": "", "id": "<id>", "mg": {"anchor": {"position": {"end": 9, "start": 4}, "quote": {"exact": "brown", "prefix": "quick ", "suffix": " fox"}, "rects": [{"x0": 1.5, "x1": 3, "y0": 2, "y1": 4.25}], "unit": "p0", "unitIndex": 0}, "doc": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}, "quote": "brown", "status": "highlight", "text": "", "ts": "<ts>", "type": ""}
+## engine anchor: not a fingerprint
+200 {"doc": "b/clip.mp4", "heading": "", "headingText": "", "id": "<id>", "quote": "brown", "status": "highlight", "text": "", "ts": "<ts>", "type": ""}
+## engine anchor: no quote in it
+200 {"doc": "b/clip.mp4", "heading": "", "headingText": "", "id": "<id>", "mg": {"anchor": {"position": {"end": 9, "start": 4}, "quote": {"exact": "brown", "prefix": "quick ", "suffix": " fox"}, "rects": [{"x0": 1.5, "x1": 3, "y0": 2, "y1": 4.25}], "unit": "p0", "unitIndex": 0}, "doc": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}, "quote": "brown", "status": "highlight", "text": "", "ts": "<ts>", "type": ""}
+## engine anchor goes with its quote
+200 {"doc": "b/clip.mp4", "heading": "", "headingText": "", "id": "<id>", "quote": "quick", "status": "highlight", "text": "", "ts": "<ts>", "type": ""}
+## engine notes gone
+200 {"ok": true}
+## engine notes 2 gone
+200 {"ok": true}
 ## anchored note gone
 200 {"ok": true}
 ## anchored note 2 gone
@@ -923,7 +968,7 @@ About this folder.
 ## locks after removal
 200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "locks": {"a": {}, "b": {}}, "root": "<root>", "scripts": ["b/app.html", "page.html"], "side": ["references.md"], "title": "Edited"}
 ## removed folder docs
-200 [{"changed": "<changed>", "front": false, "group": "a", "path": "a/1-doc.md", "side": false, "title": "First"}, {"changed": "<changed>", "front": false, "group": "a", "path": "a/2-doc.md", "side": false, "title": "2-doc"}, {"changed": "<changed>", "front": false, "group": "a", "path": "a/10-doc.md", "side": false, "title": "Tenth"}, {"changed": "<changed>", "front": false, "group": "a", "path": "a/blocks.md", "side": false, "title": "Same  Words"}, {"changed": "<changed>", "front": false, "group": "a", "path": "a/FRONTPAGE.md", "side": false, "title": "Folder A"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/app.html", "side": false, "title": "app.html"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/blocks.html", "side": false, "title": "T"}, {"front": false, "group": "b/book.epub", "path": "b/book.epub/OEBPS/text/ch1.xhtml", "side": false, "title": "The First & Best"}, {"front": false, "group": "b/book.epub", "path": "b/book.epub/OEBPS/text/ch2.xhtml", "side": false, "title": "ch2"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/clip.mp4", "side": false, "title": "clip.mp4"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/drawing.svg", "side": false, "title": "drawing.svg"}, {"changed": "<changed>", "front": false, "group": "b", "links": true, "path": "b/items.json", "side": false, "title": "items.json"}, {"changed": "<changed>", "front": false, "group": "b", "links": true, "path": "b/marks.html", "side": false, "title": "Bookmarks"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/page.html", "side": false, "title": "A Page"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/pic.png", "side": false, "title": "pic.png"}, {"changed": "<changed>", "front": false, "group": "b", "links": true, "path": "b/saved.json", "side": false, "title": "saved.json"}, {"changed": "<changed>", "front": false, "group": "", "path": "code.c", "side": false, "title": "code.c"}, {"changed": "<changed>", "front": true, "group": "", "path": "FRONTPAGE.md", "side": false, "title": "Edited"}, {"changed": "<changed>", "front": false, "group": "", "path": "references.md", "side": true, "title": "Refs"}]
+200 [{"changed": "<changed>", "front": false, "group": "a", "path": "a/1-doc.md", "side": false, "title": "First"}, {"changed": "<changed>", "front": false, "group": "a", "path": "a/2-doc.md", "side": false, "title": "2-doc"}, {"changed": "<changed>", "front": false, "group": "a", "path": "a/10-doc.md", "side": false, "title": "Tenth"}, {"changed": "<changed>", "front": false, "group": "a", "path": "a/blocks.md", "side": false, "title": "Same  Words"}, {"changed": "<changed>", "front": false, "group": "a", "path": "a/FRONTPAGE.md", "side": false, "title": "Folder A"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/app.html", "side": false, "title": "app.html"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/blocks.html", "side": false, "title": "T"}, {"bookTitle": "A Small Book", "front": false, "group": "b/book.epub", "path": "b/book.epub/OEBPS/text/ch1.xhtml", "side": false, "title": "The First & Best"}, {"bookTitle": "A Small Book", "front": false, "group": "b/book.epub", "path": "b/book.epub/OEBPS/text/ch2.xhtml", "side": false, "title": "ch2"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/clip.mp4", "side": false, "title": "clip.mp4"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/drawing.svg", "side": false, "title": "drawing.svg"}, {"changed": "<changed>", "front": false, "group": "b", "links": true, "path": "b/items.json", "side": false, "title": "items.json"}, {"changed": "<changed>", "front": false, "group": "b", "links": true, "path": "b/marks.html", "side": false, "title": "Bookmarks"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/page.html", "side": false, "title": "A Page"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/pic.png", "side": false, "title": "pic.png"}, {"changed": "<changed>", "front": false, "group": "b", "links": true, "path": "b/saved.json", "side": false, "title": "saved.json"}, {"changed": "<changed>", "front": false, "group": "", "path": "code.c", "side": false, "title": "code.c"}, {"changed": "<changed>", "front": true, "group": "", "path": "FRONTPAGE.md", "side": false, "title": "Edited"}, {"changed": "<changed>", "front": false, "group": "", "path": "references.md", "side": true, "title": "Refs"}]
 ## remove folder again
 400 {"error": "no such folder"}
 ## remove folder escape
