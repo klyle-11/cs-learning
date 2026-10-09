@@ -61,7 +61,10 @@ Not yet checked on real devices: installing the authority on an iPhone and an An
 - [x] "soft edges" in the settings: rounded corners, fills instead of outlines, seams drawn as stitched leather (groove, lip and thread, all gradients, no shadows), stitched dialogs, pressed-in fields, with any theme; kept with the look (9 October 2026). [ ] Not looked at on a real phone or in every theme
 - [ ] Find in a PDF's text (`engine.search`), and its table of contents (`engine.sections`) in the outline
 - [ ] Scanned PDFs: the engine's OCR, which needs two model files (about 12 MB) that are not in the package
-- [ ] A PDF that is not kept on the device is fetched whole for the engine; the engine worker that reads books in pieces (`hub/js/engine-worker.js`) would spare that, with the file's SHA-256 from `/api/sha256`
+- [x] A PDF that is not kept on the device is read by the engine in pieces, by the same worker as books, with the file's SHA-256 from `/api/sha256` (review, 48). [ ] On another hub it is still fetched whole
+- [x] PDF.js is opened afresh past 64 MB of a file, so a long PDF read slowly no longer ends up held whole (review, 47: at most 65 MB held of a 97 MB PDF, where it was all of it); the PDF's small picture is drawn from the document already open (9 October 2026)
+- [x] PDF.js has its character maps and standard typefaces (`/vendor/pdfjs/`, kept by the service worker, copied by `make card`): Chinese, Japanese and Korean PDFs, and Symbol and ZapfDingbats, are drawn right (review, 49)
+- [x] Each drawn PDF page carries its text for screen readers (review, 50). [ ] The engine misses some of it (Symbol text, predefined character maps): for `grounds-cc`
 - [ ] Notes that follow a renamed file by its hash (`mg.doc`)
 - [ ] A real phone (iPhone, Android), Firefox and Safari: checked in headless Chromium only
 - [ ] The native library on the board or in a desktop app, if text is ever wanted on the server's side (find across PDFs)
@@ -125,7 +128,9 @@ Not yet checked on real devices: installing the authority on an iPhone and an An
 - [x] Cold start with the server off: the page itself is kept by a service worker (needs HTTPS or localhost)
 - [ ] HTML pages kept offline lose their pictures and styles that live in separate files
 - [x] Pictures and video kept offline, opt-in per file (and "keep all pictures and videos", separate from documents and music)
-- [ ] If two devices edit the same note while both are offline, the later one to reconnect wins; no merge
+- [x] If two devices edit the same note while both are offline, the later *change* wins, part by part (text, type, place), not the later one to reconnect: each change is stamped with a hybrid logical clock (review, 51). [ ] No merge within a part, and no history of a note
+- [x] One line beside the note box says whether everything is saved: "saved", "saving…", "3 to send", "2 not saved", and "offline since …" (review, 52)
+- [x] Replies to notes: "reply" on a note, the reply shown under it (`replyTo`) (9 October 2026)
 - [ ] Editing the front page, settings and folder uploads are refused while offline (with a message), not queued
 - [x] Remove a folder from the server from inside the reader (on its front page). [ ] Single files still cannot be removed; removal has no undo (review, 31)
 - [ ] The C++ server has not been run with the page for a full session
@@ -235,9 +240,9 @@ Not yet checked on real devices: installing the authority on an iPhone and an An
 - [x] Thick keyboard focus outline; file rows and tabs reachable with Tab and Enter
 - [ ] Keyboard shortcuts (toggle sidebar, focus mode, next/previous heading)
 - [ ] Check every theme's contrast; Eva and Triple-M muted text has not been measured
-- [ ] Screen-reader pass (labels on grips, live region when a note is saved)
+- [ ] Screen-reader pass (labels on grips, live region when a note is saved). [x] The saved line is a live region; PDF pages carry their text
 - [ ] Dyslexia-friendly font option; line-by-line reading ruler
-- [ ] Session aids: "where I stopped" bookmark per document, optional timer
+- [ ] Session aids: "where I stopped" bookmark per document, optional timer. [x] "Where was I": the last place read and the last note, on the main front page and, coming back after two hours or more, in a card that closes by itself (9 October 2026)
 
 ## The C++ server (branch `c-server`, folder `server-cpp/`)
 

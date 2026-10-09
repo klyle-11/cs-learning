@@ -873,6 +873,7 @@ function saveLocal() {
 function setOnline(on) {
   if (net.online === on) return;
   net.online = on;
+  net.lostAt = on ? 0 : Date.now();
   document.body.classList.toggle('offline', !on);
   renderNet();
   renderPlayers();
@@ -1388,7 +1389,21 @@ function partlyKept() {
   return [...units.values()].filter((u) => u.missing.length && u.missing.length < u.items.length);
 }
 let partlyOpen = false;   // the list under "partly on this device", open or not: the box is redrawn often
+// One line over the note box that always says, in the same words, whether everything is saved: on the server; waiting
+// on this device to be sent (and since when the server has been out of reach); being sent; or refused.
+function paintSaved() {
+  const s = $('saved');
+  if (!s) return;
+  const waiting = outbox.length, since = net.lostAt ? new Date(net.lostAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : '';
+  s.textContent = refused.length ? `${refused.length} not saved` : flushing && waiting && net.online ? 'saving…' : waiting ? `${waiting} to send` : net.online ? 'saved' : 'all sent';
+  if (!net.online) s.textContent += ' · offline' + (since ? ' since ' + since : '');
+  s.className = refused.length ? 'say' : waiting || !net.online ? 'wait' : '';
+  s.title = refused.length ? 'The server refused some changes: the settings, under Connection, say which'
+    : waiting ? `${waiting} change${waiting > 1 ? 's are' : ' is'} kept on this device and will be sent when the server answers`
+    : net.online ? 'Every note and highlight is saved on the server' : 'Nothing is waiting: every change was sent before the server went out of reach';
+}
 function renderNet() {
+  paintSaved();
   const box = $('net');
   if (!box) return;
   box.textContent = '';
@@ -1710,10 +1725,33 @@ async function dropCopy(path) {
   renderPlayers();
 }
 
+// ---- when a change to a note was made -----------------------------------------------
+// Each change to a note is stamped with a hybrid logical clock (see stamp_ok in server-cpp/src/hub.cpp): this device's
+// clock, or the latest stamp it has seen if that is later, a counter, and a name for this device. The server applies a
+// change to a part of a note (its text, its type, its place) only if it is newer than the last one that part had, so
+// two devices editing one note while apart no longer leave whichever reconnects last as the winner.
+const deviceTag = store.get('deviceTag') || (() => { const t = Math.random().toString(36).slice(2, 10) || 'device'; store.set('deviceTag', t); return t; })();
+let hlc = store.get('clock') || { wall: 0, n: 0 };
+function stamp() {
+  const now = Date.now();
+  hlc = now > hlc.wall ? { wall: now, n: 0 } : hlc.n < 9999 ? { wall: hlc.wall, n: hlc.n + 1 } : { wall: hlc.wall + 1, n: 0 };
+  store.set('clock', hlc);
+  return String(hlc.wall).padStart(16, '0') + '-' + String(hlc.n).padStart(4, '0') + '-' + deviceTag;
+}
+// The latest stamp on the notes the server sent: this device's next one comes after it, whatever its own clock says.
+function seeStamps(list) {
+  for (const n of list) for (const st of Object.values(n?.stamps || {})) {
+    if (typeof st !== 'string' || st.length < 21) continue;
+    const wall = Number(st.slice(0, 16)), k = Number(st.slice(17, 21));
+    if (wall > hlc.wall || (wall === hlc.wall && k > hlc.n)) hlc = { wall, n: k };
+  }
+}
+
 // ---- the outbox: changes are applied here first, then sent ------------------------
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const makeNote = (fields) => ({ id: newId(), heading: '', headingText: '', quote: '', type: '', text: '', ...fields, ts: new Date().toISOString(), status: fields.text ? 'open' : 'highlight' });
 async function noteOp(op) {
+  if (op.kind !== 'del' && !op.at) op.at = stamp();   // when it was made, which is what counts, however late it is sent
   if (op.kind === 'add') notes.push(op.note);
   if (op.kind === 'set') {
     const n = notes.find((x) => x.id === op.id);
@@ -1738,6 +1776,7 @@ const opLabel = (op) => (op.kind === 'file' ? `the file “${op.path.split('/').
 async function flush() {
   if (flushing) return;
   flushing = true;
+  paintSaved();
   const json = (method, body) => ({ method, headers: { 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) });
   let sentFile = false;
   stuck = '';
@@ -1745,8 +1784,8 @@ async function flush() {
     while (outbox.length) {
       const op = outbox[0];
       let r = null;
-      if (op.kind === 'add') r = await call('/api/notes', json('POST', op.note));
-      else if (op.kind === 'set') r = await call('/api/notes/' + op.id, json('PUT', op.fields));
+      if (op.kind === 'add') r = await call('/api/notes', json('POST', op.at ? { ...op.note, at: op.at } : op.note));
+      else if (op.kind === 'set') r = await call('/api/notes/' + op.id, json('PUT', op.at ? { ...op.fields, at: op.at } : op.fields));
       else if (op.kind === 'del') r = await call('/api/notes/' + op.id, json('DELETE'));
       else if (op.kind === 'file') {
         const f = await idb.get('files', keyOf(op.path));
@@ -3367,7 +3406,7 @@ async function drawDoc(pane, hash, keepScroll) {
   article.replaceChildren(safeHtml(md));
   // The main front page gives up its right-hand corner to the latest notes and
   // highlights. The box sits outside the article, so it is not itself highlighted.
-  if (docOf(path)?.front) { scroller.classList.add('has-latest'); scroller.append(el('aside', 'latest'), el('aside', 'latest favs')); }
+  if (docOf(path)?.front) { scroller.classList.add('has-latest'); scroller.append(el('aside', 'latest where'), el('aside', 'latest'), el('aside', 'latest favs')); }
   scroller.append(article);
   v.body.replaceChildren(scroller);
   Object.assign(v, { scroller, article, surface: article });
@@ -4232,16 +4271,47 @@ const pdfjs = () => (pdfLib ||= import('/vendor/pdf.mjs').then((m) => { m.Global
 // as the pane (times the zoom). A page is drawn when it comes near the
 // window and let go when it is far from it, so a long book costs no more
 // memory than a short one; the file is fetched a piece at a time, as needed.
-// Where PDF.js reads a PDF from. `copy`: from this device (or, for another hub's file not kept here, fetched whole) and not from this server's address.
-async function pdfFrom(lib, path, copy) {
-  if (!copy) return { url: rawUrl(path) };
-  const blob = kept.has(path) ? (await idb.get('docs', keyOf(path)))?.blob : await call(rawUrl(path)).then((r) => (r.ok ? r.blob() : null));
-  if (!blob) throw new Error('no copy of it was found');
-  // PDF.js asks for the pieces it needs, as it does of the server: a long book is not read into memory whole.
-  const pieces = new lib.PDFDataRangeTransport(blob.size, null);
-  pieces.requestDataRange = (begin, end) => blob.slice(begin, end).arrayBuffer().then((b) => pieces.onDataRange(begin, new Uint8Array(b)), () => {});
-  return { range: pieces };
+// Where PDF.js reads a PDF from: this server, by range requests, or (`copy`) the copy on this device, or another hub's
+// file fetched whole. Either way PDF.js asks for the pieces it needs through a transport of the reader's own, so a long
+// book is not read into memory whole, and what it has been handed is counted (`got.bytes`): PDF.js keeps every piece
+// until the document is let go, and drawPdf opens it afresh when that count grows large. { range, size }, or { url }
+// for a server that does not answer ranges (PDF.js then reads it by itself, as before).
+async function pdfFrom(lib, path, copy, got = { bytes: 0 }) {
+  let size, piece;
+  if (!copy) {
+    const r = await call(rawUrl(path), { headers: { Range: 'bytes=0-0' }, quiet: true });
+    const total = /\/(\d+)\s*$/.exec(r.headers.get('Content-Range') || '');
+    if (r.status !== 206 || !total) return { url: rawUrl(path) };
+    size = Number(total[1]);
+    // The server sends at most a few megabytes to one request: the rest of a larger piece is asked for again.
+    piece = async (begin, end) => {
+      const out = new Uint8Array(end - begin);
+      for (let at = begin; at < end;) {
+        const x = await call(rawUrl(path), { headers: { Range: `bytes=${at}-${end - 1}` }, quiet: true, wait: 60000 });
+        const b = x.status === 206 ? new Uint8Array(await x.arrayBuffer()) : null;
+        if (!b?.length) throw new Error('the server answered ' + x.status);
+        out.set(b.subarray(0, end - at), at - begin);
+        at += b.length;
+      }
+      return out;
+    };
+  } else {
+    const blob = kept.has(path) ? (await idb.get('docs', keyOf(path)))?.blob : await call(rawUrl(path)).then((r) => (r.ok ? r.blob() : null));
+    if (!blob) throw new Error('no copy of it was found');
+    size = blob.size;
+    piece = (begin, end) => blob.slice(begin, end).arrayBuffer().then((b) => new Uint8Array(b));
+  }
+  const pieces = new lib.PDFDataRangeTransport(size, null);
+  pieces.requestDataRange = (begin, end) => piece(begin, end).then((b) => { got.bytes += b.length; pieces.onDataRange(begin, b); }, () => {});
+  return { range: pieces, size };
 }
+// What PDF.js is given besides the file. Some PDFs need its character maps (Chinese, Japanese and Korean, and some
+// older encodings) or one of the fourteen standard typefaces a PDF may name without including it: without them their
+// text is drawn wrong or not at all. The server has both (/vendor/pdfjs/); the page fetches them, not PDF.js's worker,
+// whose policy lets it fetch nothing.
+const PDF_OPTIONS = { isEvalSupported: false, disableAutoFetch: true, disableStream: true, rangeChunkSize: 1 << 20,
+  cMapUrl: '/vendor/pdfjs/cmaps/', cMapPacked: true, standardFontDataUrl: '/vendor/pdfjs/standard_fonts/', useWorkerFetch: false };
+const pdfOpen = async (lib, path, copy, got) => { const { size, ...source } = await pdfFrom(lib, path, copy, got); return { doc: await lib.getDocument({ ...source, ...PDF_OPTIONS }).promise, size: size || 0 }; };
 async function drawPdf(pane, path, box, bar, copy) {
   const v = views[pane], scroller = el('div', 'pdfpages'), status = el('p', 'empty', 'Opening the PDF\u2026');
   const where = el('small', 'pdfwhere'), less = el('button', '', '\u2212'), more = el('button', '', '+');
@@ -4250,24 +4320,29 @@ async function drawPdf(pane, path, box, bar, copy) {
   scroller.append(status);
   box.append(scroller);
   v.scroller = scroller;
-  let doc;
+  let doc, lib, fileSize = 0, ready;
+  const got = { bytes: 0 };   // what PDF.js has been handed of the file since it was opened (see pdfFrom)
+  const opened = new Promise((ok) => (ready = ok)), forget = () => { ready(null); if (openPdfs.get(path) === opened) openPdfs.delete(path); };
+  openPdfs.set(path, opened);
   try {
-    const lib = await pdfjs();
-    doc = await lib.getDocument({ ...(await pdfFrom(lib, path, copy)), isEvalSupported: false, disableAutoFetch: true, disableStream: true, rangeChunkSize: 1 << 20 }).promise;
+    lib = await pdfjs();
+    ({ doc, size: fileSize } = await pdfOpen(lib, path, copy, got));
   } catch (e) {
+    forget();
     // No PDF.js to be had: without the server, it was never kept on this device; with it, the server is one from before it had PDF.js, still running since then.
     status.textContent = pdfLib ? 'This PDF could not be drawn here' + (e?.message ? ' (' + e.message + ')' : '') + '.' + (copy ? '' : ' "open in new tab" hands it to the PDF viewer of this device.')
       : !net.online ? 'What the reader draws a PDF with is not on this device yet: open the reader once with the server in reach, and from then on a kept PDF is drawn here without it.'
       : 'The server that is running is older than the reader\'s PDF pages: stop it and start it again (npm start), and the PDF is drawn here, every page.';
     return;
   }
-  if (!scroller.isConnected) { doc.destroy(); return; }
+  if (!scroller.isConnected) { forget(); doc.destroy(); return; }
+  ready(() => doc);
   const first = await doc.getPage(1), shape = first.getViewport({ scale: 1 });
   status.remove();
   const holders = [], jobs = new Map();
   let zoom = 1, line = Promise.resolve();
   const seen = new IntersectionObserver((all) => {
-    if (!scroller.isConnected) { seen.disconnect(); shut(); doc.destroy(); return; }   // the pane shows something else now
+    if (!scroller.isConnected) { seen.disconnect(); shut(); forget(); doc.destroy(); return; }   // the pane shows something else now
     for (const e of all) { e.target.dataset.far = e.isIntersecting ? '0' : '1'; if (e.isIntersecting) draw(e.target); else drop(e.target); }   // "far" is kept on the page itself, so a drawing that finishes late knows it is no longer wanted
   }, { root: scroller, rootMargin: '150% 0px' });
   const canvasOf = (h) => h.querySelector(':scope > canvas');
@@ -4296,8 +4371,24 @@ async function drawPdf(pane, path, box, bar, copy) {
       page.cleanup();
       proxies.set(h, page);
       enter(h);
+      if (got.bytes > REOPEN && fileSize > REOPEN) await reopen();
     } catch { jobs.delete(h); /* let go while it was being drawn, or a page that cannot be read: its place stays blank */ }
   }); };
+  // PDF.js keeps every piece of the file it has been handed until the document is let go, so reading slowly through a
+  // large PDF would end with most of the file in memory. Past 64 MB, between two pages being drawn (one is drawn at a
+  // time), the PDF is opened afresh: the pages already drawn stay as they are, the next come from the new document, and
+  // the old one is let go with all it held.
+  const REOPEN = 64 << 20;
+  const reopen = async () => {
+    const was = doc;
+    got.bytes = 0;
+    try {
+      const fresh = (await pdfOpen(lib, path, copy, got)).doc;
+      if (!scroller.isConnected) { fresh.destroy(); return; }
+      doc = fresh;
+      was.destroy();
+    } catch { /* kept as it was: tried again after the next page */ }
+  };
   for (let n = 1; n <= doc.numPages; n++) {
     const h = el('div', 'pdfpage');
     h.dataset.n = n;
@@ -4347,11 +4438,20 @@ async function drawPdf(pane, path, box, bar, copy) {
     try { t = await textOf(unit); } catch { return; }
     if (!mg || !canvas?.isConnected) return;   // let go while its text was read
     pages.set(unit, { unit, element: h, viewport: viewOf(h), text: t.text, geometry: t.geometry, overlay: pages.get(unit)?.overlay ?? new mg.lib.OverlayLayer(h) });
+    mirror(h, unit, t);
     paintMarks(unit);
     mg.selection.render();
   };
+  // What a screen reader is given of a page: its text, a line at a time, out of sight. The page itself is a picture,
+  // and its words are only the engine's, so without this a page says nothing at all.
+  const mirror = (h, unit, t) => {
+    let m = h.querySelector(':scope > .pdftext');
+    if (!m) { m = el('div', 'pdftext'); m.setAttribute('aria-label', 'Text of page ' + (unit + 1)); h.append(m); }
+    m.textContent = (t.lines?.length ? t.lines.map((l) => t.text.slice(l.start, l.end)) : [t.text]).join('\n');
+  };
   function leave(h) {
     const unit = Number(h.dataset.n) - 1, p = pages.get(unit);
+    h.querySelector(':scope > .pdftext')?.remove();
     h.classList.remove('recoloured');
     h.style.background = '';
     if (!p) return;
@@ -4428,13 +4528,23 @@ async function drawPdf(pane, path, box, bar, copy) {
   (async () => {
     let engine;
     try {
-      const lib = await marginalia(), blob = await pdfBlob(path);
-      if (!blob || !scroller.isConnected) return;
-      engine = new lib.Engine();
-      const prints = mgPrints(), known = prints[path];
-      const summary = await engine.open(blob, known?.size === blob.size ? { fingerprint: known.print } : {});
+      // From this server, a PDF that is not kept here is read in pieces as pages are drawn (js/engine-worker.js), and its
+      // SHA-256 comes from the server; otherwise the engine reads the copy on this device (or another hub's file, whole).
+      const lib = await marginalia(), fromHere = !kept.has(path) && net.online && !hub.url;
+      const print = fromHere ? await serverPrint(path) : null;
+      let summary;
+      if (print) {
+        engine = new lib.Engine(engineWorker);
+        summary = await engine.open({ url: rawUrl(path) }, { fingerprint: print });
+      } else {
+        const blob = await pdfBlob(path);
+        if (!blob || !scroller.isConnected) return;
+        engine = new lib.Engine();
+        const prints = mgPrints(), known = prints[path];
+        summary = await engine.open(blob, known?.size === blob.size ? { fingerprint: known.print } : {});
+        if (known?.print !== summary.info.fingerprint || known.size !== blob.size) store.set('mgPrints:' + config.root, { ...prints, [path]: { size: blob.size, print: summary.info.fingerprint } });
+      }
       if (!scroller.isConnected) { engine.close(); return; }
-      if (known?.print !== summary.info.fingerprint || known.size !== blob.size) store.set('mgPrints:' + config.root, { ...prints, [path]: { size: blob.size, print: summary.info.fingerprint } });
       const surface = lib.pdfSurface(() => pages.values());
       let flyTimer;
       const selection = new lib.SelectionEngine(scroller, surface, {
@@ -4840,17 +4950,24 @@ function addPageCover(wrap, key, room, byText) {
   b.append(img);
   wrap.append(b);
 }
-// The first page of a PDF, as a small drawing. null if it cannot be had (not kept, and no server).
+// PDFs open in a pane, by path: a promise of what gives the document, null if it could not be opened (see drawPdf).
+const openPdfs = new Map();
+// The first page of a PDF, as a small drawing. null if it cannot be had (not kept, and no server). A PDF being read
+// is not opened a second time for it: its first page is drawn from the document the pane has open, so the start of
+// the file is not fetched and held twice.
 async function pdfThumb(path) {
+  await new Promise((ok) => setTimeout(ok));   // the pane that draws it may be about to open it
+  const open = (await openPdfs.get(path))?.();
   const here = net.online && !hub.url;
-  if (!here && !kept.has(path)) return null;
-  const lib = await pdfjs(), doc = await lib.getDocument({ ...(await pdfFrom(lib, path, !here)), isEvalSupported: false, disableAutoFetch: true, disableStream: true, rangeChunkSize: 1 << 20 }).promise;
+  if (!open && !here && !kept.has(path)) return null;
+  const doc = open || (await pdfOpen(await pdfjs(), path, !here)).doc;
   try {
     const page = await doc.getPage(1), flat = page.getViewport({ scale: 1 }), view = page.getViewport({ scale: 480 / flat.width }), canvas = el('canvas');
     canvas.width = Math.floor(view.width); canvas.height = Math.floor(view.height);
     await page.render({ canvasContext: canvas.getContext('2d'), viewport: view }).promise;
+    if (open) page.cleanup();   // what drawing it held, let go: the document is the pane's
     return canvas;
-  } finally { doc.destroy(); }
+  } finally { if (!open) doc.destroy(); }
 }
 // On the page of a folder that comes down to one thing: that thing, as a card at the side of the title and the
 // description. Its picture is the folder's cover if it has one, else the thing's own (the picture, the video's
@@ -5343,8 +5460,71 @@ function track(pane) {
   for (const h of v.heads) { if (h.getBoundingClientRect().top - top < 48) cur = h; else break; }
   if (cur === v.cur) return;
   v.cur = cur;
-  if (pane === state.active) { markOutline(); renderContext(); }
+  if (pane === state.active) { markOutline(); renderContext(); noteWhere(); }
 }
+
+// ---- where was I ---------------------------------------------------------------------
+// Where the reader was (the document and the section being read) and the last note made, said on the main front page
+// and, on coming back after a while (the reader opened again, or brought to the front after two hours or more), in a
+// small card over the page that closes by itself. What is in a locked folder is not named.
+function noteWhere() {
+  const path = activeDoc(), d = docOf(path);
+  if (!d || d.front || gateOf(path)) return;
+  const cur = views[state.active]?.cur;
+  store.set('where:' + config.root, { path, slug: cur?.dataset?.slug || '', text: (cur?.textContent || '').trim().slice(0, 120), ts: Date.now() });
+}
+function ago(ms) {
+  const s = (Date.now() - ms) / 1000, h = Math.round(s / 3600), d = Math.round(s / 86400);
+  return s < 90 ? 'just now' : s < 3600 ? Math.round(s / 60) + ' minutes ago' : s < 86400 ? (h === 1 ? 'an hour ago' : h + ' hours ago') : d === 1 ? 'yesterday' : d < 14 ? d + ' days ago' : new Date(ms).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+}
+function whereParts(at = store.get('where:' + config.root)) {
+  const parts = [], d = at && docOf(at.path);
+  if (d && !d.front && !gateOf(at.path)) {
+    const where = titleOf(d) + (at.text && at.text !== d.title ? ' › ' + at.text : '');
+    parts.push({ label: 'You were reading', what: where, when: at.ts, button: 'Go there', go: () => openDoc(at.path, { hash: at.slug || undefined }) });
+  }
+  const last = notes.filter((n) => docOf(n.doc) && !gateOf(n.doc) && (n.text || n.quote)).reduce((a, n) => (!a || n.ts > a.ts ? n : a), null);
+  if (last) parts.push({ label: last.text ? 'Your last note' : 'Your last highlight', what: '“' + clip(last.text || last.quote, 110) + '” · ' + titleOf(docOf(last.doc)), when: Date.parse(last.ts), button: 'Show it', go: async () => { await openDoc(last.doc); showNote(last.id); } });
+  return parts;
+}
+function whereRow(part, close) {
+  const row = el('div', 'whereRow'), go = el('button', '', part.button);
+  go.type = 'button';
+  go.onclick = () => { close?.(); part.go(); };
+  const words = el('div', 'words');
+  words.append(el('small', '', part.label + (part.when ? ' · ' + ago(part.when) : '')), el('div', 'what', part.what));
+  row.append(words, go);
+  return row;
+}
+let whereCard = null;
+function showWhereWas(at) {
+  const parts = whereParts(at);
+  if (!parts.length || docOf(activeDoc())?.front) return;   // the main front page says it already
+  whereCard?.remove();
+  const card = el('div', 'whereCard'), x = el('button', 'x', '×'), close = () => { card.remove(); if (whereCard === card) whereCard = null; };
+  card.setAttribute('role', 'status');
+  x.type = 'button';
+  x.title = 'Close';
+  x.setAttribute('aria-label', 'Close');
+  x.onclick = close;
+  card.append(el('h5', '', 'Where was I'), x, ...parts.map((p) => whereRow(p, close)));
+  $('work').append(card);
+  whereCard = card;
+  let timer = setTimeout(close, 30000);
+  card.addEventListener('pointerenter', () => clearTimeout(timer));
+  card.addEventListener('pointerleave', () => { clearTimeout(timer); timer = setTimeout(close, 10000); });
+}
+// When the reader was last in front of someone: kept, so coming back after a while can be told from a reload.
+const AWAY = 2 * 3600e3;
+let awaySince = 0;
+const markSeen = () => store.set('seenAt:' + (config.root || ''), Date.now());
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { awaySince = Date.now(); markSeen(); return; }
+  if (awaySince && Date.now() - awaySince > AWAY && config.root) showWhereWas();
+  awaySince = 0;
+});
+addEventListener('pagehide', markSeen);
+setInterval(() => { if (!document.hidden && config.root) markSeen(); }, 60000);
 
 function renderOutline() {
   const v = views[state.active];
@@ -5469,6 +5649,7 @@ function chrome() {
   treeEl.querySelector('.file.active, summary.active')?.scrollIntoView({ block: 'nearest' });
   pendingQuote = '';
   activeHl = null;
+  replyTo = null;
   hideFlyout();
   closeDial();
   renderOutline();
@@ -5480,6 +5661,7 @@ function chrome() {
   $('mTools').hidden = !isPdf(activeDoc());
   $('mTools').setAttribute('aria-pressed', !!state.pdfTools);
   if (activeDoc()) history.replaceState(null, '', '?doc=' + encodeURIComponent(activeDoc()));
+  noteWhere();
   save();
 }
 
@@ -5519,8 +5701,17 @@ function renderContext() {
   paintBareWhere();
   c.textContent = '';
   if (!d) return c.append('Open a document to take notes on it.');
+  const to = replyTo && notes.find((n) => n.id === replyTo);
+  if (replyTo && !to) replyTo = null;
   const hl = hlNote();
-  if (hl) {
+  if (to) {
+    const x = el('button', '', '×');
+    x.type = 'button';
+    x.title = 'Stop replying';
+    x.onclick = () => { replyTo = null; renderContext(); };
+    const said = (to.text || to.reply || to.quote || '').replace(/\s+/g, ' ').trim();
+    c.append('Replying to ', x, el('b', '', '“' + (said.length > 80 ? said.slice(0, 80) + '…' : said) + '”'));
+  } else if (hl) {
     const x = el('button', '', '×');
     x.type = 'button';
     x.title = 'Stop annotating this highlight';
@@ -5541,10 +5732,22 @@ function renderContext() {
 }
 
 // ---- notes ---------------------------------------------------------------------
+// A note being replied to (its id): the note box then writes a reply, shown under it in the notes, in its thread.
+let replyTo = null;
+function replyToNote(id) {
+  replyTo = id;
+  activeHl = null;
+  pendingQuote = '';
+  dropPendingMg();
+  hideFlyout();
+  renderContext();
+  markActive();
+  input.focus();
+}
 async function loadNotes() {
   // While changes are still waiting to be sent, this device's copy is the newer one.
   if (!outbox.some((op) => op.kind !== 'file')) {
-    try { notes = await api('/api/notes'); saveLocal(); }
+    try { notes = await api('/api/notes'); seeStamps(notes); saveLocal(); }
     catch (e) { notes = store.get('notes:' + config.root) || notes; if (e.refused) { net.said = 'Notes shown are this device\'s copy: ' + e.message + '.'; renderNet(); } }
   }
   renderNotes();
@@ -5557,8 +5760,10 @@ $('composer').onsubmit = async (e) => {
   if (!text || !doc) return;
   endRefs();
   input.value = '';
-  const hl = hlNote();
-  if (hl && !hl.text) await noteOp({ kind: 'set', id: hl.id, fields: { text } });
+  const hl = hlNote(), to = replyTo && notes.find((n) => n.id === replyTo);
+  replyTo = null;
+  if (to) await noteOp({ kind: 'add', note: makeNote({ doc: to.doc, text, replyTo: to.id, heading: to.heading, headingText: to.headingText }) });
+  else if (hl && !hl.text) await noteOp({ kind: 'set', id: hl.id, fields: { text } });
   else if (hl) await noteOp({ kind: 'add', note: makeNote({ doc: hl.doc, text, quote: hl.quote, type: hl.type, heading: hl.heading, headingText: hl.headingText, ...(hl.anchor ? { anchor: hl.anchor } : {}) }) });
   else await createNote(text);
   pendingQuote = '';
@@ -5571,7 +5776,7 @@ $('composer').onsubmit = async (e) => {
 };
 input.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('composer').requestSubmit(); }
-  if (e.key === 'Escape') endRefs();
+  if (e.key === 'Escape') { endRefs(); if (replyTo) { replyTo = null; renderContext(); } }
 });
 
 // ---- references inside a note ----------------------------------------------------
@@ -6109,63 +6314,85 @@ function renderNotes(rehighlight = true) {
   }
   notesEl.append(renderTypes(), el('h4', '', 'Highlights and notes on this document'));
   if (!mine.length) notesEl.append(el('p', 'empty', 'None yet. Select text to highlight it, or type below.'));
-  for (const n of mine) {
-    const div = el('div', 'note');
-    div.dataset.id = n.id;
-    if (n.quote) {
-      const q = el('div', 'quote', n.quote.length > 160 ? n.quote.slice(0, 160) + '…' : n.quote);
-      if (n.type) q.style.borderLeftColor = typeOf(n.type).color;
-      q.onclick = () => {
-        drawer(null);
-        seekNote(n);
-        selectHighlight(n.id);
-      };
-      div.append(q);
-    }
-    if (n.id === activeHl) div.classList.add('on');
-    if (lost.has(n.id)) div.classList.add('lost');
-    if (n.text) div.append(noteText(n.text));
-
-    const meta = el('div', 'meta');
-    meta.append(new Date(n.ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }));
-    if (n.type) meta.append(' · ', typeOf(n.type).name);
-    if (n.headingText) {
-      const where = el('a', '', n.headingText);
-      where.href = '#' + n.heading;
-      where.onclick = (e) => { e.preventDefault(); seekNote(n); };
-      meta.append(' · ', where);
-    }
-    if (pendingQuote) {
-      const attach = el('button', '', n.quote ? 'move to selection' : 'attach selection');
-      attach.onclick = async () => { await noteOp({ kind: 'set', id: n.id, fields: { quote: pendingQuote, ...(await pendingPlace()) } }); pendingQuote = ''; dropPendingMg(); renderContext(); loadNotes(); };
-      meta.append(attach);
-    }
-    const del = el('button', '', 'delete');
-    del.onclick = async () => { if (del.textContent === 'delete') return (del.textContent = 'really delete?'); await noteOp({ kind: 'del', id: n.id }); loadNotes(); };
-    meta.append(del);
-    div.append(meta);
-
-    if (n.reply) {
-      const r = el('div', 'reply');
-      r.replaceChildren(safeHtml(n.reply));
-      if (n.replyDoc) {
-        const a = el('a', '', 'Read the full write-up →');
-        a.href = '#';
-        a.onclick = (e) => { e.preventDefault(); const [f, h] = n.replyDoc.split('#'); openDoc(f, { hash: h, side: true }); };
-        r.append(a);
+  // Replies are shown under the note they answer, in its thread, oldest first; a reply to a reply goes in the same
+  // thread. A reply whose note was removed stands on its own, and says so.
+  const byId = new Map(mine.map((n) => [n.id, n]));
+  const rootOf = (n) => { let r = n; for (let i = 0; r.replyTo && byId.has(r.replyTo) && i < 50; i++) r = byId.get(r.replyTo); return r; };
+  const threads = new Map();
+  for (const n of mine) { const r = rootOf(n); if (r !== n) { if (!threads.has(r.id)) threads.set(r.id, []); threads.get(r.id).push(n); } }
+  for (const list of threads.values()) list.sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
+  for (const top of mine) {
+    if (rootOf(top) !== top) continue;
+    for (const n of [top, ...(threads.get(top.id) || [])]) {
+      const div = el('div', 'note' + (n === top ? '' : ' replyNote'));
+      div.dataset.id = n.id;
+      if (n.quote) {
+        const q = el('div', 'quote', n.quote.length > 160 ? n.quote.slice(0, 160) + '…' : n.quote);
+        if (n.type) q.style.borderLeftColor = typeOf(n.type).color;
+        q.onclick = () => {
+          drawer(null);
+          seekNote(n);
+          selectHighlight(n.id);
+        };
+        div.append(q);
       }
-      div.append(r);
+      if (n.id === activeHl) div.classList.add('on');
+      if (lost.has(n.id)) div.classList.add('lost');
+      if (n.text) div.append(noteText(n.text));
+
+      const meta = el('div', 'meta');
+      meta.append(new Date(n.ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }));
+      if (n.replyTo) meta.append(' · ', byId.has(n.replyTo) ? 'reply' : 'reply to a note that was removed');
+      if (n.type) meta.append(' · ', typeOf(n.type).name);
+      if (n.headingText) {
+        const where = el('a', '', n.headingText);
+        where.href = '#' + n.heading;
+        where.onclick = (e) => { e.preventDefault(); seekNote(n); };
+        meta.append(' · ', where);
+      }
+      if (pendingQuote) {
+        const attach = el('button', '', n.quote ? 'move to selection' : 'attach selection');
+        attach.onclick = async () => { await noteOp({ kind: 'set', id: n.id, fields: { quote: pendingQuote, ...(await pendingPlace()) } }); pendingQuote = ''; dropPendingMg(); renderContext(); loadNotes(); };
+        meta.append(attach);
+      }
+      const answer = el('button', '', 'reply');
+      answer.title = 'Write a reply to this, shown under it';
+      answer.onclick = () => replyToNote(n.id);
+      if (n.id === replyTo) div.classList.add('replying');
+      const del = el('button', '', 'delete');
+      del.onclick = async () => { if (del.textContent === 'delete') return (del.textContent = 'really delete?'); await noteOp({ kind: 'del', id: n.id }); loadNotes(); };
+      meta.append(answer, del);
+      div.append(meta);
+
+      if (n.reply) {
+        const r = el('div', 'reply');
+        r.replaceChildren(safeHtml(n.reply));
+        if (n.replyDoc) {
+          const a = el('a', '', 'Read the full write-up →');
+          a.href = '#';
+          a.onclick = (e) => { e.preventDefault(); const [f, h] = n.replyDoc.split('#'); openDoc(f, { hash: h, side: true }); };
+          r.append(a);
+        }
+        div.append(r);
+      }
+      notesEl.append(div);
     }
-    notesEl.append(div);
   }
   if (rehighlight) views.forEach((v, i) => (v.surface ? highlightAll(v.surface, state.panes[i].active) : v.pdfMarks?.place()));
   renderLatest();
 }
 // The latest notes and highlights from every document, newest first, beside
 // the main front page. Pressing one opens its document at that passage.
+const clip = (s, n) => { const t = s.replace(/\[([^\]\n]+)\]\([^)\s]+\)/g, '$1').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n) + '…' : t; };
 function renderLatest() {
-  const cut = (s, n) => { const t = s.replace(/\[([^\]\n]+)\]\([^)\s]+\)/g, '$1').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n) + '…' : t; };
-  for (const box of document.querySelectorAll('.latest:not(.favs)')) {
+  const cut = clip;
+  // At the top of the main front page: where the reader was, and the last note (see whereParts).
+  for (const box of document.querySelectorAll('.latest.where')) {
+    const parts = whereParts();
+    box.hidden = !parts.length;
+    box.replaceChildren(el('h5', '', 'Where you were'), ...parts.map((p) => whereRow(p)));
+  }
+  for (const box of document.querySelectorAll('.latest:not(.favs, .where)')) {
     const recent = notes.filter((n) => docOf(n.doc) && !gateOf(n.doc)).sort((x, y) => (y.ts > x.ts ? 1 : y.ts < x.ts ? -1 : 0)).slice(0, 15);
     box.replaceChildren(el('h5', '', 'Latest notes and highlights'));
     if (!recent.length) box.append(el('p', 'empty', 'None yet.'));
@@ -6177,7 +6404,7 @@ function renderLatest() {
       if (n.type) row.style.borderLeftColor = typeOf(n.type).color;
       if (n.quote) row.append(el('div', 'quote', '“' + cut(n.quote, n.text ? 70 : 120) + '”'));
       if (n.text) row.append(el('div', 'said', cut(n.text, 120)));
-      row.append(el('div', 'meta', new Date(n.ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) + ' · ' + titleOf(docOf(n.doc))));
+      row.append(el('div', 'meta', new Date(n.ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) + (n.replyTo ? ' · reply' : '') + ' · ' + titleOf(docOf(n.doc))));
       row.onclick = async () => { await openDoc(n.doc); showNote(n.id); };
       box.append(row);
     }
@@ -6474,6 +6701,8 @@ $('fresh').onclick = () => location.reload();
   adoptLook();
   listen();
   loadWorkspaces();
+  const wasAt = store.get('where:' + config.root), awayFor = Date.now() - (store.get('seenAt:' + config.root) || Date.now());
+  markSeen();
   refused = store.get('refused:' + config.root) || [];
   outbox = store.get('outbox:' + config.root) || [];
   loadQueue();
@@ -6483,7 +6712,7 @@ $('fresh').onclick = () => location.reload();
   if (kept.size || matchMedia('(display-mode: standalone)').matches) askDurable();
   setTimeout(catchUpParts, 8000);
   setTimeout(() => learnBookFronts().catch(() => {}).then(learnBookStarts), 5000);
-  try { notes = outbox.some((op) => op.kind !== 'file') ? store.get('notes:' + config.root) || [] : await api('/api/notes'); saveLocal(); }
+  try { notes = outbox.some((op) => op.kind !== 'file') ? store.get('notes:' + config.root) || [] : await api('/api/notes'); seeStamps(notes); saveLocal(); }
   catch { notes = store.get('notes:' + config.root) || []; }
   await loadDocs();
 
@@ -6510,4 +6739,5 @@ $('fresh').onclick = () => location.reload();
   else { if (want && hash) goTo(state.active, hash); chrome(); }
   renderNet();
   flush(); // anything left waiting from last time
+  if (awayFor > AWAY) setTimeout(() => showWhereWas(wasAt), 1200);
 })().catch(showProblem);

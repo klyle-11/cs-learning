@@ -69,6 +69,7 @@ card:
 	cd ../hub/node_modules/marginalia-engine/dist && cp index.js client.js worker.js selection.js selection-engine.js frame.js geometry.js overlay.js surfaces.js caret.js dom.js themes.js recolor.js recolor-worker.js ui.css "$(CARD)/hub/www/vendor/marginalia/"
 	cp ../hub/node_modules/marginalia-engine/dist/wasm/marginalia_wasm.js ../hub/node_modules/marginalia-engine/dist/wasm/marginalia_wasm_bg.wasm "$(CARD)/hub/www/vendor/marginalia/wasm/"
 	if ls ../hub/js/*.js >/dev/null 2>&1; then mkdir -p "$(CARD)/hub/www/js" && cp ../hub/js/*.js "$(CARD)/hub/www/js/"; fi
+	mkdir -p "$(CARD)/hub/www/vendor/pdfjs" && cp -R ../hub/node_modules/pdfjs-dist/cmaps ../hub/node_modules/pdfjs-dist/standard_fonts "$(CARD)/hub/www/vendor/pdfjs/"
 
 clean:
 	rm -rf build hubd hubd.exe

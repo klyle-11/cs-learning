@@ -790,11 +790,26 @@
   .latest .empty { margin: 6px 0 0; color: var(--muted); }
   .latest.favs { clear: right; margin-top: 0; max-height: 50vh; }   /* what is in #fav, under the latest notes */
   .tick { border-left: 3px solid var(--rule); padding: 3px 0 3px 8px; margin-top: 8px; cursor: pointer; }
+  /* where you were, at the top of the main front page's column */
+  .latest.where + .latest { clear: right; margin-top: 0; }
+  .latest.where[hidden] { display: none; }
+  .whereRow { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+  .whereRow .words { flex: 1; min-width: 0; }
+  .whereRow small { display: block; font-size: 11px; color: var(--muted); }
+  .whereRow .what { overflow-wrap: anywhere; }
+  .whereRow button { flex: none; font-size: 12px; padding: 2px 8px; }
+  /* where was I: a card over the page on coming back, which closes by itself */
+  .whereCard { position: absolute; z-index: 6; top: 46px; left: 50%; transform: translateX(-50%); width: min(460px, calc(100% - 24px)); padding: 12px 14px 12px; background: var(--paper); border: 1px solid var(--rule); box-shadow: 0 6px 24px rgba(0, 0, 0, .16); font: 13.5px/1.4 var(--head); }
+  .whereCard h5 { margin: 0; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 400; }
+  .whereCard .x { position: absolute; top: 6px; right: 8px; border: 0; color: var(--muted); font-size: 16px; }
   .tick .quote { font-family: var(--body); font-style: italic; color: var(--muted); }
   .tick .meta { margin-top: 2px; font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   @container (max-width: 560px) { .latest { float: none; width: auto; max-height: 40vh; margin: 16px 0 0; } }
   .note.lost .quote::after { content: ' · not found in this document as it is now'; font-style: normal; color: var(--accent); }
   .note { border-top: 1px solid var(--rule); padding: 10px 0; }
+  /* a reply, under the note it answers */
+  .note.replyNote { margin-left: 14px; padding-left: 10px; border-top: 0; border-left: 2px solid var(--rule); }
+  .note.replying { box-shadow: inset 3px 0 0 var(--accent); }
   .note .quote { font-family: var(--body); font-style: italic; color: var(--muted); border-left: 3px solid var(--mark); padding-left: 8px; margin-bottom: 6px; cursor: pointer; }
   .note .text { font-family: var(--body); font-size: 15px; white-space: pre-wrap; }
   .note .meta { color: var(--muted); font-size: 12px; margin-top: 6px; }
@@ -816,6 +831,11 @@
   #grip::before { content: ''; display: block; width: 40px; height: 4px; margin: 6px auto; border-radius: 2px; background: var(--rule); }
   #grip:hover::before, #grip:focus-visible::before { background: var(--muted); }
   #ctxRow { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  /* whether everything is saved: quiet when it is, in the accent while something waits */
+  #saved { flex: none; font: 11.5px var(--head); color: var(--muted); white-space: nowrap; }
+  #saved:empty { display: none; }
+  #saved.wait { color: var(--accent); }
+  #saved.say { color: var(--accent); font-weight: 600; }
   /* Before "In:": puts the bars over the page away (the tabs, a phone's top bar), and brings them back. The note box stays, so the button does. */
   #bare { flex: none; width: 26px; height: 26px; padding: 4px; border: 0; color: var(--muted); }
   #bare svg { display: block; width: 100%; height: 100%; }
@@ -850,6 +870,9 @@
   #context button { border: 0; padding: 0 4px; color: var(--accent); }
   #input { display: block; width: 100%; height: 56px; resize: none; padding: 8px 12px; border: 1px solid var(--rule); border-radius: 14px; background: var(--field); font: 16px/1.4 var(--body); }
 
+  /* A PDF page's text for a screen reader: there for it, out of sight, and not in the way of selecting on the page. */
+  .pdftext { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: pre-wrap; pointer-events: none; user-select: none; }
+
   /* ---- phone: one column; files and notes become slide-over drawers ---- */
   @media (max-width: 760px) {
     #app { grid-template-columns: minmax(0, 1fr) !important; grid-template-rows: auto minmax(0, 1fr); }
@@ -860,6 +883,7 @@
     .tab .tabWhere:not(:empty) { display: inline; color: var(--muted); font-size: 12px; }
     .tab.paged span { max-width: 90px; }
     #mobileBar #mTools { flex: none; padding: 8px; }
+    #saved:not(.wait):not(.say) { display: none; }   /* on a phone the note box's line says it only while something waits */
     #mTools svg { display: block; width: 18px; height: 18px; }
     #mTools[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
     .viewer.pdfv:not(.tools) > .viewbar, .viewer.pdfv .pdfwhere { display: none; }
@@ -1027,7 +1051,7 @@
     border: 1.5px solid transparent; border-radius: 14px; box-shadow: none;
     background: linear-gradient(var(--field), var(--field)) padding-box, linear-gradient(to bottom, var(--lip), var(--groove)) border-box;
   }
-  :root[data-edges="soft"] .linkcard .fly {
+  :root[data-edges="soft"] :is(.linkcard .fly, .whereCard) {
     border: 1.5px solid transparent; border-radius: 14px; box-shadow: none;
     background: linear-gradient(var(--paper), var(--paper)) padding-box, linear-gradient(to bottom, var(--lip), var(--groove)) border-box;
   }
@@ -1096,7 +1120,7 @@
     <form id="composer">
       <div class="inner">
         <button type="button" id="grip" aria-label="Make the note box taller or shorter" title="Drag up to make the note box taller, or press to switch between small and tall"></button>
-        <div id="ctxRow"><button type="button" id="bare" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="out" d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/><path class="in" d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg></button><div id="context"></div><button type="submit" id="send" title="Save the note">Save note</button></div>
+        <div id="ctxRow"><button type="button" id="bare" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="out" d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/><path class="in" d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg></button><div id="context"></div><span id="saved" aria-live="polite"></span><button type="submit" id="send" title="Save the note">Save note</button></div>
         <textarea id="input" placeholder="Write a note or a question…  (Enter to save, Shift+Enter for a new line; // to link to a file, heading or note)"></textarea>
       </div>
     </form>

@@ -1100,6 +1100,20 @@ static cJSON *clean_mg(const cJSON *in) {
   return mg;
 }
 
+// ---- when a note was changed ------------------------------------------------------------------
+// The page stamps each change to a note with a hybrid logical clock: 16 digits of milliseconds, 4 of a counter, and a
+// name for the device ("0001760000000000-0002-k3x9a1"). The device takes the later of its own clock and the latest
+// stamp it has seen, so a device whose clock is behind still stamps its changes after the ones it was shown; and the
+// fixed widths make stamps compare as text in the order they were made. A note keeps the stamp of the last change to
+// each of three parts of it (`stamps`): its text, its type, and its place (the quote, where it is, its anchors). A
+// change older than the one a part has already had is not applied to that part: two devices editing one note while
+// apart no longer leave whichever reconnects last as the winner, part for part.
+static bool stamp_ok(const string &s) {
+  if (s.size() < 23 || s.size() > 38 || s[16] != '-' || s[21] != '-') return false;
+  for (size_t i = 0; i < 21; i++) if (i != 16 && !std::isdigit(static_cast<unsigned char>(s[i]))) return false;
+  return std::all_of(s.begin() + 22, s.end(), [](unsigned char c) { return std::islower(c) || std::isdigit(c); });
+}
+
 // ---- a file's SHA-256 ------------------------------------------------------------------------
 // What the document engine knows a file by (a note's `mg.doc`). Working it out reads the whole file, so it is done here,
 // where the file is, rather than by sending the file to a device; and the answer is kept while the file's size and time
@@ -1325,6 +1339,22 @@ static http::Response answer(http::Request &req) {
       // A worker runs under the policy its own file is sent with: the one for data would not let it run at all. It may run itself, and nothing more.
       if (p == "/vendor/pdf.worker.mjs") r.extra += "Content-Security-Policy: default-src 'none'; script-src 'self'\r\n";
       return r;
+    }
+    // What PDF.js needs for some PDFs, fetched by the page only for such a PDF: the character maps (a PDF in Chinese,
+    // Japanese or Korean, or one that names its characters by an old encoding) and the fourteen standard typefaces a
+    // PDF may use without including them. From pdfjs-dist, or beside the page on the board. Plain names only, with the
+    // types those folders hold, and nothing else of the package.
+    if (starts_with(p, "/vendor/pdfjs/cmaps/") || starts_with(p, "/vendor/pdfjs/standard_fonts/")) {
+      const bool cmap = starts_with(p, "/vendor/pdfjs/cmaps/");
+      const string name = p.substr(cmap ? 20 : 29);
+      const size_t dot = name.rfind('.');
+      const string ext = dot == string::npos ? "" : lower(name.substr(dot));
+      const char *type = cmap ? (ext == ".bcmap" ? "application/octet-stream" : nullptr)
+                              : ext == ".pfb" ? "application/octet-stream" : ext == ".ttf" ? "font/ttf" : nullptr;
+      if (!type || dot == 0 || name.size() > 80 || !std::all_of(name.begin(), name.begin() + static_cast<std::ptrdiff_t>(dot), [](unsigned char c) { return std::isalnum(c) || c == '-' || c == '_'; }))
+        return http::error(404, "no such file");
+      const string folder = cmap ? "cmaps/" : "standard_fonts/";
+      return asset_response(is_file(WWW + p) ? WWW + p : WWW + "/node_modules/pdfjs-dist/" + folder + name, type);
     }
     // The document engine (marginalia-engine): what reads a PDF's text and where each character is, for selecting and
     // highlighting on its pages. Many small modules, so they are served by name and not listed: plain names only, a
@@ -1874,6 +1904,10 @@ static http::Response answer(http::Request &req) {
     // A highlight is a note with a quote and no text yet.
     string doc = str_of(body.p, "doc"), text = str_of(body.p, "text"), quote = str_of(body.p, "quote");
     if (doc.empty() || (text.empty() && quote.empty())) return http::error(400, "doc and text or quote required");
+    // A reply answers another note: its id, in the same characters a note's own id may have.
+    const string reply_to = str_of(body.p, "replyTo");
+    const bool reply_ok = reply_to.size() >= 1 && reply_to.size() <= 40 && std::all_of(reply_to.begin(), reply_to.end(), [](unsigned char c) { return std::isalnum(c) || c == '_' || c == '-'; });
+    if (!reply_to.empty() && !reply_ok) return http::error(400, "replyTo is not a note's id");
     std::lock_guard<std::mutex> g(store_lock);
     if (damaged(ROOT + "/notes/notes.json", true)) return damaged_error("notes.json");
     Json notes(read_notes());
@@ -1896,8 +1930,13 @@ static http::Response answer(http::Request &req) {
     if (cJSON *a = clean_anchor(cJSON_GetObjectItemCaseSensitive(body.p, "anchor"))) cJSON_AddItemToObject(note, "anchor", a);
     if (cJSON *mg = clean_mg(cJSON_GetObjectItemCaseSensitive(body.p, "mg"))) cJSON_AddItemToObject(note, "mg", mg);
     cJSON_AddStringToObject(note, "text", text.c_str());
+    if (reply_ok) cJSON_AddStringToObject(note, "replyTo", reply_to.c_str());
     cJSON_AddStringToObject(note, "ts", ts_ok ? own_ts.c_str() : now_iso().c_str());
     cJSON_AddStringToObject(note, "status", text.empty() ? "highlight" : "open");
+    if (const string at = str_of(body.p, "at"); stamp_ok(at)) {
+      cJSON *stamps = cJSON_AddObjectToObject(note, "stamps");
+      for (const char *part : {"text", "type", "place"}) cJSON_AddStringToObject(stamps, part, at.c_str());
+    }
     cJSON_AddItemToArray(notes.p, note);
     if (!write_notes(notes.p)) return http::error(500, "could not save");
     return json_response(note);
@@ -1923,14 +1962,34 @@ static http::Response answer(http::Request &req) {
     }
     Json body(cJSON_Parse(text.c_str()));
     if (!cJSON_IsObject(body.p)) return http::error(400, "json object required");
-    for (const char *key : {"text", "quote", "heading", "headingText", "type"}) if (has_str(body.p, key)) set_str(note, key, str_of(body.p, key));
-    // A new quote comes with its own anchor, or with none: the old one is for the old quote.
+    // Each part of the note a stamped change touches is changed only if the change is newer than the last one that part
+    // had (see stamp_ok). A change without a stamp (from a page older than stamps) is applied, as it always was.
+    const string at = str_of(body.p, "at");
+    const bool stamped = stamp_ok(at);
+    auto newer = [&](const char *part) {
+      if (!stamped) return true;
+      cJSON *stamps = cJSON_GetObjectItemCaseSensitive(note, "stamps");
+      if (!cJSON_IsObject(stamps)) { cJSON_DeleteItemFromObjectCaseSensitive(note, "stamps"); stamps = cJSON_AddObjectToObject(note, "stamps"); }
+      const string had = str_of(stamps, part);
+      if (!had.empty() && at <= had) return false;
+      set_str(stamps, part, at);
+      return true;
+    };
+    if (has_str(body.p, "text") && newer("text")) set_str(note, "text", str_of(body.p, "text"));
+    if (has_str(body.p, "type") && newer("type")) set_str(note, "type", str_of(body.p, "type"));
     cJSON *a = clean_anchor(cJSON_GetObjectItemCaseSensitive(body.p, "anchor"));
-    if (a || has_str(body.p, "quote")) cJSON_DeleteItemFromObjectCaseSensitive(note, "anchor");
-    if (a) cJSON_AddItemToObject(note, "anchor", a);
     cJSON *mg = clean_mg(cJSON_GetObjectItemCaseSensitive(body.p, "mg"));
-    if (mg || has_str(body.p, "quote")) cJSON_DeleteItemFromObjectCaseSensitive(note, "mg");
-    if (mg) cJSON_AddItemToObject(note, "mg", mg);
+    const bool place = a || mg || has_str(body.p, "quote") || has_str(body.p, "heading") || has_str(body.p, "headingText");
+    if (place && newer("place")) {
+      for (const char *key : {"quote", "heading", "headingText"}) if (has_str(body.p, key)) set_str(note, key, str_of(body.p, key));
+      // A new quote comes with its own anchor, or with none: the old one is for the old quote.
+      if (a || has_str(body.p, "quote")) cJSON_DeleteItemFromObjectCaseSensitive(note, "anchor");
+      if (a) { cJSON_AddItemToObject(note, "anchor", a); a = nullptr; }
+      if (mg || has_str(body.p, "quote")) cJSON_DeleteItemFromObjectCaseSensitive(note, "mg");
+      if (mg) { cJSON_AddItemToObject(note, "mg", mg); mg = nullptr; }
+    }
+    cJSON_Delete(a);
+    cJSON_Delete(mg);
     if (str_of(note, "status") == "highlight" && !str_of(note, "text").empty()) set_str(note, "status", "open");
     if (!write_notes(notes.p)) return http::error(500, "could not save");
     return json_response(note);
