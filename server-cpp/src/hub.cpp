@@ -1486,6 +1486,18 @@ static http::Response answer(http::Request &req) {
       const string folder = cmap ? "cmaps/" : "standard_fonts/";
       return asset_response(is_file(WWW + p) ? WWW + p : WWW + "/node_modules/pdfjs-dist/" + folder + name, type);
     }
+    // Two typefaces made for reading, offered beside the reader's serif and sans: Atkinson Hyperlegible and OpenDyslexic
+    // (both under the SIL Open Font License, from @fontsource in node_modules, or beside the page on the board). A
+    // browser fetches one only when it is chosen. Their files by the names @fontsource gives them, and nothing else.
+    if (starts_with(p, "/vendor/fonts/")) {
+      const string name = p.substr(14);
+      const bool atkinson = starts_with(name, "atkinson-hyperlegible-latin-"), dyslexic = starts_with(name, "opendyslexic-latin-");
+      const string rest = name.substr(atkinson ? 28 : dyslexic ? 19 : 0);
+      static const std::set<string> CUTS = {"400-normal.woff2", "400-italic.woff2", "700-normal.woff2", "700-italic.woff2"};
+      if (!(atkinson || dyslexic) || !(CUTS.count(rest) || (atkinson && starts_with(rest, "ext-") && CUTS.count(rest.substr(4))))) return http::error(404, "no such file");
+      const string family = atkinson ? "atkinson-hyperlegible" : "opendyslexic";
+      return asset_response(is_file(WWW + p) ? WWW + p : WWW + "/node_modules/@fontsource/" + family + "/files/" + name, "font/woff2");
+    }
     // The document engine (marginalia-engine): what reads the text of a PDF or a book and where each character is, for
     // selecting and highlighting on its pages. The seventeen files the reader loads, by name, from the package's dist
     // folder (or beside the page, on the board): the same list sw.js keeps and `make card` copies. The rest of the

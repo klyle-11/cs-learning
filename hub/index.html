@@ -124,6 +124,10 @@
     83.3% { --sun: #ff8c00; }      /* dark orange */
   }
   :root[data-font="sans"] { --body: var(--sans); --head: var(--serif); }
+  /* Two typefaces made for reading (served by the hub; see FACES in app.js): Atkinson Hyperlegible, whose letters are
+     told apart even when blurred, for text and headings; OpenDyslexic, weighted at the foot, for the text. */
+  :root[data-font="legible"] { --body: "Atkinson Hyperlegible", var(--sans); --head: "Atkinson Hyperlegible", var(--sans); }
+  :root[data-font="dyslexic"] { --body: "OpenDyslexic", var(--sans); --head: var(--sans); }
 
   * { box-sizing: border-box; }
   /* Scroll bars: no track of their own, so the theme's colour shows through; the handle is a tint of the ink. */
@@ -616,6 +620,11 @@
   .hljs-title, .hljs-section, .hljs-name { color: var(--c-fn); }
   .hljs-type, .hljs-built_in, .hljs-class .hljs-title { color: var(--c-type); }
   .md { overflow-wrap: anywhere; }
+  /* How many notes are on a paragraph, in the margin beside it (see marginCounts in app.js): drawn here, not put into
+     the text. Pressing it opens the notes at them. */
+  .md [data-notes] { position: relative; }
+  .md [data-notes]::after { content: attr(data-notes); position: absolute; top: .15em; right: -2.4em; min-width: 1.5em; padding: 0 .35em; border-radius: .75em; background: color-mix(in srgb, var(--accent) 14%, var(--paper)); color: var(--accent); font: 600 12px/1.6 var(--head); font-style: normal; text-align: center; cursor: pointer; }
+  @media (max-width: 760px) { .md [data-notes]::after { right: -1.3em; min-width: 1.3em; padding: 0 .25em; font-size: 11px; } }
   .md table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; font-size: .92em; }
   .md td, .md th { border: 1px solid var(--rule); padding: 6px 10px; vertical-align: top; }
   .md img { max-width: 100%; }
@@ -1097,7 +1106,7 @@
     </div>
     <div id="settings" hidden>
       <div class="label">Text</div>
-      <div id="sideTools"><select id="theme" title="Theme"><option value="plain">Plain</option><option value="selenized">Selenized Light</option><option value="lime">Pale Lime</option><option value="sky">Pale Sky</option><option value="lime-dark">Lime Night</option><option value="sky-dark">Sky Night</option><option value="eva">Eva Night</option><option value="triple-m">Triple-M</option><option value="sun-sound">Sun Sound</option><option value="periwinkle">Periwinkle</option><option value="mahogany">Mahogany</option></select><button id="themeOne" title="One theme for the whole reader. Release it to give the left and right panes themes of their own.">one theme</button><select id="themeSide" title="Theme of the left pane (files and outline)"></select><select id="themeRight" title="Theme of the right pane (the side document and notes)"></select><button id="fontToggle"></button><button id="focusToggle" title="Fade everything except the paragraph you are reading">reading focus</button><button id="turnToggle" title="In a book, scrolling on at the end of a page turns to the next, and scrolling back at the top to the one before">scroll through books</button><button id="roomyToggle" title="More space between lines and words">roomy text</button><button id="softToggle" title="Softer edges: rounded corners, controls without outlines, and seams drawn like stitched leather where parts meet, instead of hard lines. Works with every theme">soft edges</button><button id="smaller" aria-label="Smaller text" title="Smaller text">A−</button><button id="bigger" aria-label="Larger text" title="Larger text">A+</button></div>
+      <div id="sideTools"><select id="theme" title="Theme"><option value="plain">Plain</option><option value="selenized">Selenized Light</option><option value="lime">Pale Lime</option><option value="sky">Pale Sky</option><option value="lime-dark">Lime Night</option><option value="sky-dark">Sky Night</option><option value="eva">Eva Night</option><option value="triple-m">Triple-M</option><option value="sun-sound">Sun Sound</option><option value="periwinkle">Periwinkle</option><option value="mahogany">Mahogany</option></select><button id="themeOne" title="One theme for the whole reader. Release it to give the left and right panes themes of their own.">one theme</button><select id="themeSide" title="Theme of the left pane (files and outline)"></select><select id="themeRight" title="Theme of the right pane (the side document and notes)"></select><select id="fontToggle" title="Typeface of the text"><option value="serif">Aa serif</option><option value="sans">Aa sans</option><option value="legible">Aa Atkinson Hyperlegible</option><option value="dyslexic">Aa OpenDyslexic</option></select><button id="focusToggle" title="Fade everything except the paragraph you are reading">reading focus</button><button id="turnToggle" title="In a book, scrolling on at the end of a page turns to the next, and scrolling back at the top to the one before">scroll through books</button><button id="roomyToggle" title="More space between lines and words">roomy text</button><button id="softToggle" title="Softer edges: rounded corners, controls without outlines, and seams drawn like stitched leather where parts meet, instead of hard lines. Works with every theme">soft edges</button><button id="smaller" aria-label="Smaller text" title="Smaller text">A−</button><button id="bigger" aria-label="Larger text" title="Larger text">A+</button></div>
       <div class="label">Connection</div>
       <div id="net" role="status" aria-live="polite"></div>
       <div class="label">This device</div>

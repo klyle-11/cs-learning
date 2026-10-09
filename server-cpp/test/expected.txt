@@ -346,6 +346,28 @@ Content-Type: application/json; charset=utf-8
 cmaps/x.js
 404
 Content-Type: application/json; charset=utf-8
+## reading typefaces, and what is not served
+atkinson-hyperlegible-latin-400-normal.woff2
+200
+Content-Type: font/woff2
+atkinson-hyperlegible-latin-ext-700-italic.woff2
+200
+Content-Type: font/woff2
+opendyslexic-latin-700-normal.woff2
+200
+Content-Type: font/woff2
+opendyslexic-latin-ext-400-normal.woff2
+404
+Content-Type: application/json; charset=utf-8
+atkinson-hyperlegible-greek-400-normal.woff2
+404
+Content-Type: application/json; charset=utf-8
+opendyslexic-latin-400-normal.woff
+404
+Content-Type: application/json; charset=utf-8
+../../package.json
+404
+Content-Type: application/json; charset=utf-8
 ## highlight on a pdf page
 200 {"doc": "b/paper.pdf", "heading": "", "headingText": "page 1", "id": "<id>", "mg": {"anchor": {"position": {"end": 15, "start": 10}, "quote": {"exact": "risks", "prefix": "are ", "suffix": " associated"}, "rects": [{"x0": 1.5, "x1": 2, "y0": 3, "y1": 4}], "unit": "p1", "unitIndex": 0}, "doc": "b34531a9d344f4405422a9f1edb6b33fdc50c69fb28f4c723e8deed368a43674"}, "quote": "risks", "status": "highlight", "text": "", "ts": "<ts>", "type": ""}
 ## engine anchor not usable

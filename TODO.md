@@ -243,7 +243,11 @@ Not yet checked on real devices: installing the authority on an iPhone and an An
 - [ ] Keyboard shortcuts (toggle sidebar, focus mode, next/previous heading)
 - [ ] Check every theme's contrast; Eva and Triple-M muted text has not been measured
 - [ ] Screen-reader pass (labels on grips, live region when a note is saved). [x] The saved line is a live region; PDF pages carry their text
-- [ ] Dyslexia-friendly font option; line-by-line reading ruler
+- [x] Two reading typefaces beside the serif and the sans, in the settings' typeface menu: Atkinson Hyperlegible and OpenDyslexic (SIL Open Font License, from @fontsource, served by the hub; a book's page takes them too; 9 October 2026). [ ] A line-by-line reading ruler
+- [x] Notes counted in the margin beside each paragraph that has notes written on it (replies included), in documents and on a book's pages; pressing the number opens the notes at them (an idea from `grounds-cc`; 9 October 2026)
+- [x] A book's next page is read ahead while the one before is shown, so turning to it does not wait on the hub (`grounds-cc`'s idea; it shows on books with long chapters, which the engine's few cached blocks do not hold)
+- [x] Covers shown small (a tab's, a page's corner, a folder's line and card) are read once and kept small for the visit: they were read whole again on every page turned and every redraw of the file list
+- [ ] Bookmarks that are not highlights (`grounds-cc`): not built; "where was I" and the kept reading places cover most of it
 - [x] Pressing something that is open already goes to its tab, in either pane (a book's tab is turned to the page), and does not take the place of the tab being looked at (9 October 2026). Checked in headless Chromium, computer and phone
 - [x] The file list opens short every time: only the way to the folder being read in, the rest of each folder on the way behind "Show N more" (9 October 2026). Checked in headless Chromium, computer and phone. [ ] On a computer, where the sidebar stays open, it is shortened only when the reader starts and when the sidebar is brought back or peeked at, not each time something else is opened
 - [ ] Session aids: "where I stopped" bookmark per document, optional timer. [x] "Where was I": the last place read and the last note, on the main front page and, coming back after two hours or more, in a card that closes by itself (9 October 2026)

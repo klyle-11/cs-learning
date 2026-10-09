@@ -163,7 +163,7 @@ function adoptLook() {
   const look = hub.url ? null : config.look;
   if (look) {
     if (fresh.theme && [...$('theme').options].some((o) => o.value === look.theme)) setTheme(look.theme);
-    if (fresh.font && (look.font === 'serif' || look.font === 'sans')) setFont(look.font);
+    if (fresh.font && FONTS.includes(look.font)) setFont(look.font);
     if (fresh.panes) {
       for (const [id] of paneThemes) if (typeof look[id] === 'string' && [...$(id).options].some((o) => o.value === look[id])) { $(id).value = look[id]; store.set(id, look[id]); }
       if (typeof look.themeOne === 'boolean') { oneTheme = look.themeOne; store.set('themeOne', oneTheme); }
@@ -180,13 +180,24 @@ function adoptLook() {
 }
 
 // ---- font switcher, notes panel toggle ------------------------------------
+// The typefaces: the reader's serif and sans (the device's own), and two made for reading, served by the hub
+// (/vendor/fonts/, from @fontsource): Atkinson Hyperlegible and OpenDyslexic. Their faces are declared here, once, for
+// the page and for the frame a book's page is in; a browser fetches a file only when its typeface is used.
+const FONTS = ['serif', 'sans', 'legible', 'dyslexic'];
+const FACES = [['Atkinson Hyperlegible', 'atkinson-hyperlegible', true], ['OpenDyslexic', 'opendyslexic', false]].flatMap(([family, file, ext]) =>
+  ['400-normal', '400-italic', '700-normal', '700-italic'].flatMap((cut) => [['latin', 'U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD'],
+    ...(ext ? [['latin-ext', 'U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF']] : [])]
+    .map(([set, range]) => `@font-face { font-family: "${family}"; font-weight: ${cut.slice(0, 3)}; font-style: ${cut.slice(4)}; font-display: swap; src: url(/vendor/fonts/${file}-${set}-${cut}.woff2) format("woff2"); unicode-range: ${range}; }`))).join('\n');
+document.head.append(Object.assign(document.createElement('style'), { textContent: FACES }));
 // `keep` false: a default being shown, not a choice to remember.
 function setFont(f, keep = true) {
+  if (!FONTS.includes(f)) f = 'serif';
   document.documentElement.dataset.font = f;
-  $('fontToggle').textContent = f === 'serif' ? 'Aa sans body' : 'Aa serif body';
+  $('fontToggle').value = f;
   if (keep) { store.set('font', f); pushLook(); }
+  for (const v of views) dressBook(v);   // a book's page has the typeface written into it (see dressBook)
 }
-$('fontToggle').onclick = () => setFont(document.documentElement.dataset.font === 'serif' ? 'sans' : 'serif');
+$('fontToggle').onchange = () => setFont($('fontToggle').value);
 setFont(store.get('font') || 'serif', !fresh.font);
 
 // A page of a book (an .epub) reads as the reader's own documents do: the
@@ -220,7 +231,7 @@ function dressBook(v) {
   probe.remove();
   // A dark pane gets the browser's dark scrollbar too.
   const [r, g, b] = c.paper.match(/[\d.]+/g).map(Number), dark = r * 0.299 + g * 0.587 + b * 0.114 < 128;
-  v.dress.textContent =
+  v.dress.textContent = FACES +
     `html { font-size: ${view.fs}px !important; background: ${c.paper} !important; color-scheme: ${dark ? 'dark' : 'light'}; }` +
     ` body { font-size: 1rem !important; background: ${c.paper} !important; color: ${c.ink} !important; font-family: ${face.body} !important;` +
     ` line-height: ${view.roomy ? 1.95 : 1.65} !important; letter-spacing: ${view.roomy ? '.015em' : 'normal'} !important; word-spacing: ${view.roomy ? '.08em' : 'normal'} !important;` +
@@ -237,6 +248,8 @@ function dressBook(v) {
     ' body :is(small, sub, sup) { font-size: .8em !important; } body :is(pre, code, kbd, samp, tt) { font-size: .9em !important; } body pre code { font-size: 1em !important; }' +
     ' body :is(p, li) { line-height: inherit !important; }' +
     (view.roomy ? ' body :is(p, li) { margin-bottom: 1.3em !important; }' : '') +
+    // How many notes are on a paragraph, in the margin (see marginCounts).
+    ` body [data-notes] { position: relative !important; } body [data-notes]::after { content: attr(data-notes); position: absolute; top: .15em; right: -2.4em; min-width: 1.5em; padding: 0 .35em; border-radius: .75em; background: color-mix(in srgb, ${c.accent} 14%, ${c.paper}); color: ${c.accent}; font: 600 12px/1.6 ${face.head}; text-align: center; cursor: pointer; }` +
     // Focus: every block faint but the one being read (frameHere marks it). A block inside another is not made fainter still.
     (view.focus ? ` body :is(${FOCUS_BLOCKS}) { opacity: .3; } body :is(${FOCUS_BLOCKS}) :is(${FOCUS_BLOCKS}) { opacity: 1; } body .hub-here { opacity: 1 !important; box-shadow: -12px 0 0 0 ${c.paper}, -16px 0 0 0 ${c.accent}; }` : '');
 }
@@ -4332,7 +4345,7 @@ function sweepBooks() {
     if (state.panes.some((p) => inBook(book, p.active))) continue;
     bookEngines.delete(book);
     bookOpen.delete(book);
-    opening.then((rec) => rec?.engine.close());
+    opening.then((rec) => { if (!rec) return; rec.closed = true; rec.ahead = null; rec.engine.close(); });
   }
 }
 // Where each piece of a page's text begins in the page's whole text, which is what the engine counts in.
@@ -4361,7 +4374,11 @@ async function bookChapter(path) {
   if (unit == null) return null;
   const urls = [], made = new Map();
   try {
-    const cv = await rec.engine.chapter(unit);
+    // The page after the one being read is asked of the engine ahead of time (below), so turning to it does not wait on
+    // the hub: on the board, reading a chapter out of the book takes a round of requests. One page is held, no more.
+    const ahead = rec.ahead?.unit === unit ? await rec.ahead.cv : null;
+    rec.ahead = null;
+    const cv = ahead || (await rec.engine.chapter(unit));
     const parsed = new DOMParser().parseFromString(cv.html, 'application/xhtml+xml');
     if (parsed.getElementsByTagName('parsererror').length) return null;
     // A file in the book (a picture, a font), as an address here.
@@ -4388,6 +4405,7 @@ async function bookChapter(path) {
       if (poster) { const u = await address(poster); if (u) m.setAttribute('poster', u); }
     }));
     rec.texts.set(unit, cv.text);
+    if (unit + 1 < rec.units.size) setTimeout(() => { if (!rec.ahead && !rec.closed) rec.ahead = { unit: unit + 1, cv: rec.engine.chapter(unit + 1).catch(() => null) }; }, 400);
     return { root, sheets, urls, text: cv.text };
   } catch {
     for (const u of urls) URL.revokeObjectURL(u);
@@ -5090,9 +5108,36 @@ async function bookCover(book) {
 // for this visit. `key`: the book's own path, or the PDF's. '' if it has none, or it cannot be had now.
 const coverKeyOf = (path) => (isBookPage(path) ? path.slice(0, path.search(/\.epub\//i) + 5) : isPdf(path) ? path : null);
 const coverUrls = new Map();
+// A picture shown small (a cover on a tab, at a page's corner, on a folder's line or card): read once, drawn at most
+// 480 pixels wide, and kept as a small JPEG for this visit. Shown from the server's address instead, it was read whole
+// each time it appeared, since the browser keeps nothing the server sends of a workspace: for a book of large pictures,
+// the whole cover again on every page turned, and a folder's cover on every redraw of the file list. Left as it was if
+// it cannot be drawn (an SVG some browsers will not): then the bytes read are kept as they are, so they are still read once.
+async function smallPicture(src) {
+  if (!src) return '';
+  let blob = null, pic;
+  try {
+    // A copy on this device (a blob: address) is read through a picture: the page may not fetch such an address.
+    if (src.startsWith('blob:')) { pic = new Image(); pic.src = src; await pic.decode(); }
+    else {
+      const r = await fetch(src);
+      if (!r.ok) return src;
+      blob = await r.blob();
+      pic = await createImageBitmap(blob);
+    }
+    const pw = pic.naturalWidth || pic.width, ph = pic.naturalHeight || pic.height, w = Math.min(480, pw), c = el('canvas');
+    c.width = w;
+    c.height = Math.max(1, Math.round((ph * w) / pw));
+    c.getContext('2d').drawImage(pic, 0, 0, c.width, c.height);
+    pic.close?.();
+    const small = await new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.82));
+    c.width = c.height = 0;
+    return small ? URL.createObjectURL(small) : blob ? URL.createObjectURL(blob) : src;
+  } catch { return blob ? URL.createObjectURL(blob) : src; }
+}
 function coverUrl(key) {
   if (!coverUrls.has(key)) coverUrls.set(key, (async () => {
-    if (!isPdf(key)) { const p = await bookCover(key); return !p ? '' : net.online ? await mediaSrc(p) : await keptUrl(p); }
+    if (!isPdf(key)) { const p = await bookCover(key); return !p ? '' : smallPicture(net.online ? await mediaSrc(p) : await keptUrl(p)); }
     const drawn = await pdfThumb(key);
     if (!drawn) return '';
     const blob = await new Promise((ok) => drawn.toBlob(ok, 'image/jpeg', 0.82));
@@ -5202,7 +5247,7 @@ let folderCovers = new Map();
 function folderCoverUrl(root, books = true) {
   const key = (books ? 'b|' : 'p|') + root;
   if (!folderCovers.has(key)) folderCovers.set(key, (async () => {
-    const url = async (p) => (!p ? '' : net.online ? await mediaSrc(p) : await keptUrl(p));
+    const url = async (p) => (!p ? '' : smallPicture(net.online ? await mediaSrc(p) : await keptUrl(p)));
     const cover = [...covers.keys()].filter((f) => f === root || f.startsWith(root + '/')).sort((a, b) => a.length - b.length)[0];
     const inside = docs.filter((d) => d.path.startsWith(root + '/') && !gateOf(d.path));
     const pic = (await url(covers.get(cover))) || (await url(inside.find((d) => isImage(d.path) && !isBookPage(d.path))?.path));
@@ -6771,8 +6816,42 @@ function highlightAll(article, path) {
     marked = Math.min(marked, start);
   }
   for (const d of notesEl.querySelectorAll('.note')) d.classList.toggle('lost', lost.has(d.dataset.id));
+  marginCounts(article, path);
   markActive();
   if (isBookPage(path) && mine.some((n) => n.mg?.anchor && mgPlaces.get(n.id)?.exact !== n.mg.anchor.quote?.exact)) placeBookMarks(article, path);   // a highlight the engine has not been asked about yet
+}
+// In the margin beside each paragraph that has notes written on it: how many (with the replies to them). A highlight
+// with nothing written shows as its colour already and is not counted. The number is drawn by the style sheet from an
+// attribute of the paragraph, not put into its text, so no highlight's place in the text moves. Pressing it opens the
+// notes at them. Counted again whenever the highlights are drawn.
+const COUNTED = 'p, li, h1, h2, h3, h4, h5, h6, blockquote, dd, dt, figcaption';
+function marginCounts(article, path) {
+  for (const b of article.querySelectorAll('[data-notes]')) { delete b.dataset.notes; delete b.dataset.noteIds; }
+  const said = new Set(notes.filter((n) => n.doc === path && n.text).map((n) => n.id));
+  for (const n of notes) if (n.doc === path && n.replyTo && said.has(n.replyTo)) said.add(n.id);
+  const at = new Map();   // paragraph -> the ids of the notes on it
+  for (const m of article.querySelectorAll('mark[data-note]')) {
+    const id = m.dataset.note;
+    if (!said.has(id)) continue;
+    const b = m.closest(COUNTED);
+    if (!b || !article.contains(b) || b.closest('pre, table')) continue;   // a code block or a table scrolls, and would hide it
+    if (!at.has(b)) at.set(b, new Set());
+    at.get(b).add(id);
+    for (const r of notes) if (r.replyTo === id && r.doc === path) at.get(b).add(r.id);
+  }
+  for (const [b, ids] of at) { b.dataset.notes = ids.size; b.dataset.noteIds = [...ids].join(' '); }
+  if (article.countsWired) return;
+  article.countsWired = true;
+  article.addEventListener('click', (e) => {
+    const b = e.target.closest?.('[data-notes]');
+    if (!b || e.clientX < b.getBoundingClientRect().right - 2) return;   // the number sits past the paragraph's right edge
+    e.preventDefault();
+    e.stopPropagation();
+    if (phone.matches) drawer('right'); else if (!state.notesOpen) setNotesOpen(true);
+    const entries = b.dataset.noteIds.split(' ').map((id) => notesEl.querySelector(`.note[data-id="${CSS.escape(id)}"]`)).filter(Boolean);
+    entries[0]?.scrollIntoView({ block: 'nearest' });
+    for (const d of entries) flash(d);
+  }, true);
 }
 function mark(article, map, start, length, id, color) {
   const doc = article.ownerDocument, framed = doc !== document, at = map.at;

@@ -72,6 +72,7 @@ card:
 	cp ../hub/node_modules/marginalia-engine/dist/wasm/marginalia_wasm.js ../hub/node_modules/marginalia-engine/dist/wasm/marginalia_wasm_bg.wasm "$(CARD)/hub/www/vendor/marginalia/wasm/"
 	if ls ../hub/js/*.js >/dev/null 2>&1; then mkdir -p "$(CARD)/hub/www/js" && cp ../hub/js/*.js "$(CARD)/hub/www/js/"; fi
 	mkdir -p "$(CARD)/hub/www/vendor/pdfjs" && cp -R ../hub/node_modules/pdfjs-dist/cmaps ../hub/node_modules/pdfjs-dist/standard_fonts "$(CARD)/hub/www/vendor/pdfjs/"
+	mkdir -p "$(CARD)/hub/www/vendor/fonts" && cp ../hub/node_modules/@fontsource/atkinson-hyperlegible/files/*-latin-*.woff2 ../hub/node_modules/@fontsource/opendyslexic/files/*-latin-*.woff2 "$(CARD)/hub/www/vendor/fonts/"
 
 clean:
 	rm -rf build hubd hubd.exe
