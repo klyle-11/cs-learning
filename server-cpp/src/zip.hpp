@@ -203,7 +203,10 @@ inline bool read_at(FILE *f, long offset, unsigned char *out, size_t n) {
 }
 
 // The entries of a zip, from the directory at its end. False if it is not a zip that can be read.
-inline bool list(const std::string &file, std::vector<Entry> &out) {
+// `max` is the most the list of entries may take to read: on the board, where a
+// block of tens of KB is often more than there is free in one piece, a book
+// with thousands of entries is not opened rather than failing for memory.
+inline bool list(const std::string &file, std::vector<Entry> &out, size_t max = 16u * 1024 * 1024) {
   out.clear();
   FILE *f = std::fopen(file.c_str(), "rb");
   if (!f) return false;
@@ -212,16 +215,24 @@ inline bool list(const std::string &file, std::vector<Entry> &out) {
     if (std::fseek(f, 0, SEEK_END) != 0) break;
     const long size = std::ftell(f);
     if (size < 22) break;
-    // The end record is the last thing in the file, but for a comment of up to 65535 bytes after it.
-    const long span = size < 65557 ? size : 65557;
-    std::vector<unsigned char> tail(static_cast<size_t>(span));
-    if (!read_at(f, size - span, tail.data(), tail.size())) break;
-    long at = span - 22;
-    while (at >= 0 && u32(tail.data() + at) != 0x06054b50u) at--;
+    // The end record is the last thing in the file, but for a comment of up to 65535 bytes after it. Almost every
+    // zip has no comment, so the last kilobyte is looked at first, and the whole 64 KB only when it is not there.
+    std::vector<unsigned char> tail;
+    long span = 0, at = -1;
+    for (const long want : {1024L + 22, 65535L + 22}) {
+      if (span >= size || (want > 1024 + 22 && static_cast<size_t>(want) > max)) break;
+      span = size < want ? size : want;
+      tail.resize(static_cast<size_t>(span));
+      if (!read_at(f, size - span, tail.data(), tail.size())) { span = size; break; }
+      at = span - 22;
+      while (at >= 0 && u32(tail.data() + at) != 0x06054b50u) at--;
+      if (at >= 0) break;
+    }
     if (at < 0) break;
     const unsigned char *end = tail.data() + at;
     const uint32_t count = u16(end + 10), dir_size = u32(end + 12), dir_at = u32(end + 16);
-    if (dir_size > 16u * 1024 * 1024 || static_cast<unsigned long long>(dir_at) + dir_size > static_cast<unsigned long long>(size)) break;
+    if (dir_size > 16u * 1024 * 1024 || dir_size > max || static_cast<unsigned long long>(dir_at) + dir_size > static_cast<unsigned long long>(size)) break;
+    std::vector<unsigned char>().swap(tail);
     std::vector<unsigned char> dir(dir_size);
     if (dir_size && !read_at(f, static_cast<long>(dir_at), dir.data(), dir.size())) break;
     size_t p = 0;

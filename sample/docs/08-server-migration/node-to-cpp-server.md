@@ -168,7 +168,9 @@ Two requests saving notes at once would also be a problem (both read, both write
 
 Node's `fs.watch` asks the operating system to report changes. The ESP32 has no such service, so `watch_loop` does it the plain way: at a fixed interval (half a second on a computer), walk the folder, record each file's modification time and size, and compare with the previous walk. Anything different is announced to the connected pages.
 
-It only walks while a page is connected. On an SD card, a full walk is real work, so the board's profile does it every five seconds.
+It only walks while a page is connected.
+
+On the board it does not walk at all. A walk over a 32 GB card is real work, and it is also unnecessary: while the card is in the board, nothing but the server can write to it. So the server announces each change itself, the moment it saves it (`changed()` in `hub.cpp`), and the pages hear about it at once instead of up to five seconds later. The same reasoning removes the other walks: how much the folder holds is measured once at start-up and then counted as the server writes, and the document list is rebuilt only when the server's own count of changes has moved. A computer cannot make that assumption (an editor, or Claude writing a reply, changes files behind the server's back), so there the walks stay.
 
 ## 9. One program, different machines
 
@@ -177,7 +179,11 @@ The same source has to behave sensibly on a laptop with 8 GB of memory and on a 
 - On the ESP32 the answer is known when the program is *compiled*: ESP-IDF defines `ESP_PLATFORM`, and an `#ifdef` selects the small limits.
 - Anywhere else it asks the operating system at *run time* how much memory there is (`sysconf`) and picks `desktop` or `small` (under 1 GB, a Raspberry Pi Zero class board).
 
-The profile sets the upload limit, how often the folder is checked for changes, and whether the page and its scripts are kept in memory. `--profile esp32` forces the board's limits on a computer, so they can be tested without the board.
+The profile sets the upload limit, whether the folder is watched (and how often), where the document list is kept, how much the folder may hold, and whether the page and its scripts are kept in memory. `--profile esp32` forces the board's limits on a computer, so they can be tested without the board.
+
+Memory on the board is the hard limit, and what costs memory is *how many files* there are, not how many bytes: a 32 GB card full of documents and pictures holds tens of thousands of names. So nothing on the board may hold one thing per file at once. The document list is written out as it is made, to a file on the card, instead of being built as a tree of JSON objects (on 20,000 files that tree was 26 MB; the board has a few hundred KB). Sorting a folder's names is the one step that needs them together; it gets 32 KB, and a folder with more names than that is read again, each pass taking the next run of names in order. Reading the card twice costs time the board has; memory it does not have.
+
+Two FAT details matter at that size. ESP-IDF's `readdir` gives only names, so `stat` must look each file up again from the top, reading the directory from its start every time: n²/2 entries for a folder of n files. FatFS's own `f_readdir` hands out size and time with the name, in one pass, so the board lists folders with it (`src/fs.hpp`). And FAT32 holds files up to 4 GB while the board's `off_t` is a signed 32-bit number: past 2 GB, `stat` reports a negative size and `fseek` cannot get there, so large files are read through FatFS too.
 
 Caching is where the speed comes from. Building the document list reads every file to find its title; the cached version only asks the filesystem for each file's modification time and size (`stat`, no reading) and rebuilds when any of them changed. On this repository that took the list from about 8 ms per request under Node to under 1 ms.
 

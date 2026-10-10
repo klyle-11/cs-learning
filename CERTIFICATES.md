@@ -192,6 +192,8 @@ Menu names vary a little between versions. What was actually done or run in this
 
 Always compare the fingerprint before installing. The server prints the SHA-256 when it starts, and the hub's `/trust` page shows what the device received; they must match the table above.
 
+**Why the hub's own printout is the one to trust (review, 23; 9 October 2026).** Until the authority is installed, the trust page and the file come over a connection that is not encrypted yet, so someone on the same network could swap both the file and the fingerprint the page shows. What they cannot change is what the hub printed on its own terminal (or the board's screen). Since 9 October the hub prints the trust page's addresses on this network and the fingerprint together, in one block, and the trust page says this in its first step. The way that does not use the network at all: copy `ca.pem` from the hub's state folder (`~/.config/hub/ca.pem`) to the device directly, by AirDrop, a cable or a USB stick, and install that; it is the same file as `hub-ca.crt`. Nothing about the authority, the certificates or the devices that already trust them changed.
+
 ### iPhone and iPad
 
 **See what is installed:** Settings → General → VPN & Device Management. Anything under "Configuration Profile" was added by hand. Settings → General → About → Certificate Trust Settings lists the authorities given full trust.

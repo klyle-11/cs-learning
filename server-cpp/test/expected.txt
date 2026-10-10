@@ -96,7 +96,7 @@ Body one.
 ## oversized json
 413 {"error": "body too large"}
 ## config
-200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#fbeeb0", "id": "<id>", "name": "Important"}, {"color": "#cfe8c6", "id": "<id>", "name": "Definition"}, {"color": "#cfe0f5", "id": "<id>", "name": "Question"}, {"color": "#f6d0d6", "id": "<id>", "name": "Unclear"}], "ignore": ["CLAUDE.md"], "root": "<root>", "scripts": ["b/app.html", "page.html"], "side": ["references.md"], "title": "Fixture Title"}
+200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#fbeeb0", "id": "<id>", "name": "Important"}, {"color": "#cfe8c6", "id": "<id>", "name": "Definition"}, {"color": "#cfe0f5", "id": "<id>", "name": "Question"}, {"color": "#f6d0d6", "id": "<id>", "name": "Unclear"}], "ignore": ["CLAUDE.md"], "root": "<root>", "scripts": ["b/app.html", "page.html"], "side": ["references.md"], "title": "Fixture Title", "workspace": "<workspace>"}
 ## docs
 200 [{"changed": "<changed>", "front": false, "group": "a", "path": "a/1-doc.md", "side": false, "title": "First"}, {"changed": "<changed>", "front": false, "group": "a", "path": "a/2-doc.md", "side": false, "title": "2-doc"}, {"changed": "<changed>", "front": false, "group": "a", "path": "a/10-doc.md", "side": false, "title": "Tenth"}, {"changed": "<changed>", "front": false, "group": "a", "path": "a/blocks.md", "side": false, "title": "Same  Words"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/app.html", "side": false, "title": "app.html"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/blocks.html", "side": false, "title": "T"}, {"bookTitle": "A Small Book", "front": false, "group": "b/book.epub", "path": "b/book.epub/OEBPS/text/ch1.xhtml", "side": false, "title": "The First & Best"}, {"bookTitle": "A Small Book", "front": false, "group": "b/book.epub", "path": "b/book.epub/OEBPS/text/ch2.xhtml", "side": false, "title": "ch2"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/clip.mp4", "side": false, "title": "clip.mp4"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/drawing.svg", "side": false, "title": "drawing.svg"}, {"changed": "<changed>", "front": false, "group": "b", "links": true, "path": "b/items.json", "side": false, "title": "items.json"}, {"changed": "<changed>", "front": false, "group": "b", "links": true, "path": "b/marks.html", "side": false, "title": "Bookmarks"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/page.html", "side": false, "title": "A Page"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/pic.png", "side": false, "title": "pic.png"}, {"changed": "<changed>", "front": false, "group": "b", "links": true, "path": "b/saved.json", "side": false, "title": "saved.json"}, {"changed": "<changed>", "front": false, "group": "", "path": "code.c", "side": false, "title": "code.c"}, {"changed": "<changed>", "front": true, "group": "", "path": "FRONTPAGE.md", "side": false, "title": "Fixture Title"}, {"changed": "<changed>", "front": false, "group": "", "path": "references.md", "side": true, "title": "Refs"}]
 ## doc
@@ -244,6 +244,15 @@ Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'
 404
 Content-Type: application/json; charset=utf-8
 Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'
+404
+Content-Type: application/json; charset=utf-8
+Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'
+404
+Content-Type: application/json; charset=utf-8
+Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'
+404
+Content-Type: application/json; charset=utf-8
+Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'
 ## the engine worker of the reader itself, and the policy it runs under
 200
 Content-Type: text/javascript; charset=utf-8
@@ -298,6 +307,67 @@ Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval
 200 {"ok": true}
 ## anchored note 2 gone
 200 {"ok": true}
+## note with a stamp
+200 {"doc": "a/1-doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "Body", "stamps": {"place": "0001760000000000-0000-aaa", "text": "0001760000000000-0000-aaa", "type": "0001760000000000-0000-aaa"}, "status": "open", "text": "first", "ts": "<ts>", "type": "question"}
+## an older edit is not applied
+200 {"doc": "a/1-doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "Body", "stamps": {"place": "0001760000000000-0000-aaa", "text": "0001760000000000-0000-aaa", "type": "0001760000000000-0000-aaa"}, "status": "open", "text": "first", "ts": "<ts>", "type": "question"}
+## a newer edit is applied
+200 {"doc": "a/1-doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "Body", "stamps": {"place": "0001760000000000-0000-aaa", "text": "0001760000000001-0000-bbb", "type": "0001760000000000-0000-aaa"}, "status": "open", "text": "newer", "ts": "<ts>", "type": "question"}
+## each part goes by its own stamp
+200 {"doc": "a/1-doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "Body", "stamps": {"place": "0001760000000000-0000-aaa", "text": "0001760000000001-0000-bbb", "type": "0001760000000000-0001-ccc"}, "status": "open", "text": "newer", "ts": "<ts>", "type": ""}
+## an old edit to the text still loses
+200 {"doc": "a/1-doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "Body", "stamps": {"place": "0001760000000000-0000-aaa", "text": "0001760000000001-0000-bbb", "type": "0001760000000000-0001-ccc"}, "status": "open", "text": "newer", "ts": "<ts>", "type": ""}
+## no stamp: applied as before
+200 {"doc": "a/1-doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "Body", "stamps": {"place": "0001760000000000-0000-aaa", "text": "0001760000000001-0000-bbb", "type": "0001760000000000-0001-ccc"}, "status": "open", "text": "no stamp", "ts": "<ts>", "type": ""}
+## a reply
+200 {"doc": "a/1-doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "", "replyTo": "stamped-1", "status": "open", "text": "and also", "ts": "<ts>", "type": ""}
+## a reply to no id
+400 {"error": "replyTo is not a note's id"}
+## stamped note gone
+200 {"ok": true}
+## reply gone
+200 {"ok": true}
+## pdf.js character maps and typefaces, and what is not served
+cmaps/78-EUC-H.bcmap
+200
+Content-Type: application/octet-stream
+standard_fonts/FoxitSerif.pfb
+200
+Content-Type: application/octet-stream
+standard_fonts/LiberationSans-Regular.ttf
+200
+Content-Type: font/ttf
+standard_fonts/LICENSE_FOXIT
+404
+Content-Type: application/json; charset=utf-8
+cmaps/../../package.json
+404
+Content-Type: application/json; charset=utf-8
+cmaps/x.js
+404
+Content-Type: application/json; charset=utf-8
+## reading typefaces, and what is not served
+atkinson-hyperlegible-latin-400-normal.woff2
+200
+Content-Type: font/woff2
+atkinson-hyperlegible-latin-ext-700-italic.woff2
+200
+Content-Type: font/woff2
+opendyslexic-latin-700-normal.woff2
+200
+Content-Type: font/woff2
+opendyslexic-latin-ext-400-normal.woff2
+404
+Content-Type: application/json; charset=utf-8
+atkinson-hyperlegible-greek-400-normal.woff2
+404
+Content-Type: application/json; charset=utf-8
+opendyslexic-latin-400-normal.woff
+404
+Content-Type: application/json; charset=utf-8
+../../package.json
+404
+Content-Type: application/json; charset=utf-8
 ## highlight on a pdf page
 200 {"doc": "b/paper.pdf", "heading": "", "headingText": "page 1", "id": "<id>", "mg": {"anchor": {"position": {"end": 15, "start": 10}, "quote": {"exact": "risks", "prefix": "are ", "suffix": " associated"}, "rects": [{"x0": 1.5, "x1": 2, "y0": 3, "y1": 4}], "unit": "p1", "unitIndex": 0}, "doc": "b34531a9d344f4405422a9f1edb6b33fdc50c69fb28f4c723e8deed368a43674"}, "quote": "risks", "status": "highlight", "text": "", "ts": "<ts>", "type": ""}
 ## engine anchor not usable
@@ -952,23 +1022,23 @@ body: not really a png either
 ## note put missing
 404 {"error": "no such note"}
 ## rename title
-200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#fbeeb0", "id": "<id>", "name": "Important"}, {"color": "#cfe8c6", "id": "<id>", "name": "Definition"}, {"color": "#cfe0f5", "id": "<id>", "name": "Question"}, {"color": "#f6d0d6", "id": "<id>", "name": "Unclear"}], "ignore": ["CLAUDE.md"], "root": "<root>", "scripts": ["b/app.html", "page.html"], "side": ["references.md"], "title": "Renamed Title"}
+200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#fbeeb0", "id": "<id>", "name": "Important"}, {"color": "#cfe8c6", "id": "<id>", "name": "Definition"}, {"color": "#cfe0f5", "id": "<id>", "name": "Question"}, {"color": "#f6d0d6", "id": "<id>", "name": "Unclear"}], "ignore": ["CLAUDE.md"], "root": "<root>", "scripts": ["b/app.html", "page.html"], "side": ["references.md"], "title": "Renamed Title", "workspace": "<workspace>"}
 ## front after rename
 200 # Renamed Title
 
 Description.
 
 ## set highlights
-200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "root": "<root>", "scripts": ["b/app.html", "page.html"], "side": ["references.md"], "title": "Renamed Title"}
+200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "root": "<root>", "scripts": ["b/app.html", "page.html"], "side": ["references.md"], "title": "Renamed Title", "workspace": "<workspace>"}
 ## edit front
-200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "root": "<root>", "scripts": ["b/app.html", "page.html"], "side": ["references.md"], "title": "Edited"}
+200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "root": "<root>", "scripts": ["b/app.html", "page.html"], "side": ["references.md"], "title": "Edited", "workspace": "<workspace>"}
 ## front after edit
 200 # Edited
 
 New text.
 
 ## folder front page
-200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "root": "<root>", "scripts": ["b/app.html", "page.html"], "side": ["references.md"], "title": "Edited"}
+200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "root": "<root>", "scripts": ["b/app.html", "page.html"], "side": ["references.md"], "title": "Edited", "workspace": "<workspace>"}
 ## folder front content
 200 # Folder A
 
@@ -981,11 +1051,11 @@ About this folder.
 ## edit front bad
 400 {"error": "markdown required"}
 ## set locks
-200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "locks": {"a": {}, "b": {}, "gone": {"hash": "aGFzaA==", "salt": "c2FsdA=="}, "gone/deep": {}}, "root": "<root>", "scripts": ["b/app.html", "page.html"], "side": ["references.md"], "title": "Edited"}
+200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "locks": {"a": {}, "b": {}, "gone": {"hash": "aGFzaA==", "salt": "c2FsdA=="}, "gone/deep": {}}, "root": "<root>", "scripts": ["b/app.html", "page.html"], "side": ["references.md"], "title": "Edited", "workspace": "<workspace>"}
 ## remove folder
-200 {"removed": "gone"}
+200 {"removed": "gone", "undo": "<undo>"}
 ## locks after removal
-200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "locks": {"a": {}, "b": {}}, "root": "<root>", "scripts": ["b/app.html", "page.html"], "side": ["references.md"], "title": "Edited"}
+200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "locks": {"a": {}, "b": {}}, "root": "<root>", "scripts": ["b/app.html", "page.html"], "side": ["references.md"], "title": "Edited", "workspace": "<workspace>"}
 ## removed folder docs
 200 [{"changed": "<changed>", "front": false, "group": "a", "path": "a/1-doc.md", "side": false, "title": "First"}, {"changed": "<changed>", "front": false, "group": "a", "path": "a/2-doc.md", "side": false, "title": "2-doc"}, {"changed": "<changed>", "front": false, "group": "a", "path": "a/10-doc.md", "side": false, "title": "Tenth"}, {"changed": "<changed>", "front": false, "group": "a", "path": "a/blocks.md", "side": false, "title": "Same  Words"}, {"changed": "<changed>", "front": false, "group": "a", "path": "a/FRONTPAGE.md", "side": false, "title": "Folder A"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/app.html", "side": false, "title": "app.html"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/blocks.html", "side": false, "title": "T"}, {"bookTitle": "A Small Book", "front": false, "group": "b/book.epub", "path": "b/book.epub/OEBPS/text/ch1.xhtml", "side": false, "title": "The First & Best"}, {"bookTitle": "A Small Book", "front": false, "group": "b/book.epub", "path": "b/book.epub/OEBPS/text/ch2.xhtml", "side": false, "title": "ch2"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/clip.mp4", "side": false, "title": "clip.mp4"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/drawing.svg", "side": false, "title": "drawing.svg"}, {"changed": "<changed>", "front": false, "group": "b", "links": true, "path": "b/items.json", "side": false, "title": "items.json"}, {"changed": "<changed>", "front": false, "group": "b", "links": true, "path": "b/marks.html", "side": false, "title": "Bookmarks"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/page.html", "side": false, "title": "A Page"}, {"changed": "<changed>", "front": false, "group": "b", "path": "b/pic.png", "side": false, "title": "pic.png"}, {"changed": "<changed>", "front": false, "group": "b", "links": true, "path": "b/saved.json", "side": false, "title": "saved.json"}, {"changed": "<changed>", "front": false, "group": "", "path": "code.c", "side": false, "title": "code.c"}, {"changed": "<changed>", "front": true, "group": "", "path": "FRONTPAGE.md", "side": false, "title": "Edited"}, {"changed": "<changed>", "front": false, "group": "", "path": "references.md", "side": true, "title": "Refs"}]
 ## remove folder again
@@ -998,6 +1068,47 @@ About this folder.
 400 {"error": "no such folder"}
 ## remove a file
 400 {"error": "no such folder"}
+## removed, listed
+200 [{"at": "<at>", "from": "gone", "locked": true, "size": 9, "undo": "<undo>"}]
+## removed folder kept aside
+.removed/<undo>.json
+.removed/<undo>/gone/FRONTPAGE.md
+.removed/<undo>/gone/deep/x.md
+## kept aside, not served
+404 {"error": "not found"}
+## put back, name taken
+409 {"error": "something by that name is there now"}
+## put back, bad name
+404 {"error": "nothing removed by that name"}
+## put back
+200 {"restored": "gone"}
+## put back again
+404 {"error": "nothing removed by that name"}
+## locks put back
+200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "locks": {"a": {}, "b": {}, "gone": {"hash": "aGFzaA==", "salt": "c2FsdA=="}, "gone/deep": {}}, "root": "<root>", "scripts": ["b/app.html", "page.html"], "side": ["references.md"], "title": "Edited", "workspace": "<workspace>"}
+## its file is back
+200 x
+
+## remove it again
+200 {"removed": "gone", "undo": "<undo>"}
+## let go now
+200 {"letGo": true, "undo": "<undo>"}
+## let go again
+404 {"error": "nothing removed by that name"}
+## nothing removed now
+200 []
+## nothing kept aside
+0
+## a long name: a book
+{"ends": "~<hex>.epub", "kept its start": true, "saved": true, "shortened": true, "shorter": true, "skipped": false}
+## the same again
+{"ends": "~<hex>.epub", "kept its start": true, "saved": false, "shortened": true, "shorter": true, "skipped": true}
+## a long folder: a file
+{"ends": "~<hex>/a.md", "kept its start": true, "saved": true, "shortened": true, "shorter": true, "skipped": false}
+## its files together, listed by the names given
+3 files; 1 folder for the two; ['long/<long>.epub', 'long/<long>/a.md', 'long/<long>/b.md']
+## in the list
+[('a', 'long/<long>/a.md'), ('b', 'long/<long>/b.md')]
 ## upload new
 200 {"root": "<root>", "saved": true}
 ## upload again
@@ -1009,7 +1120,7 @@ About this folder.
 ## upload hidden
 400 {"error": "bad path"}
 ## look saved
-200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "locks": {"a": {}, "b": {}}, "look": {"font": "sans", "fs": 20, "roomy": true, "theme": "lime-dark", "themeSide": ""}, "root": "<root>", "scripts": ["b/app.html", "page.html"], "side": ["references.md"], "title": "Edited"}
+200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "locks": {"a": {}, "b": {}}, "look": {"font": "sans", "fs": 20, "roomy": true, "theme": "lime-dark", "themeSide": ""}, "root": "<root>", "scripts": ["b/app.html", "page.html"], "side": ["references.md"], "title": "Edited", "workspace": "<workspace>"}
 ## upload replaces
 200 {"replaced": true, "root": "<root>", "saved": true}
 ## replaced content
@@ -1048,12 +1159,14 @@ About this folder.
 200
 ## other hub, headers
 Access-Control-Allow-Origin: https://other.example:4321
+Access-Control-Expose-Headers: X-Hub-Workspace
 HTTP/1.1 200 OK
 Vary: Origin
 ## other hub, preflight
-Access-Control-Allow-Headers: Authorization, Content-Type, Range
+Access-Control-Allow-Headers: Authorization, Content-Type, Range, X-Hub-Workspace
 Access-Control-Allow-Methods: GET, POST, PUT, DELETE
 Access-Control-Allow-Origin: https://other.example:4321
+Access-Control-Expose-Headers: X-Hub-Workspace
 Access-Control-Max-Age: 600
 HTTP/1.1 204 No Content
 Vary: Origin
@@ -1061,8 +1174,26 @@ Vary: Origin
 403
 ## other hub, pair no code
 403
+## other hub, pair from a website
+{"error":"pairing from that site is not allowed"} 403
 ## other hub, pair with code
 given a token
+## pairing from http://192.168.1.20:4321
+{"error":"wrong or expired pairing code"} 403
+## pairing from http://[fd00::5]:4321
+{"error":"wrong or expired pairing code"} 403
+## pairing from http://localhost:4321
+{"error":"wrong or expired pairing code"} 403
+## pairing from https://hub.example.com
+{"error":"pairing from that site is not allowed"} 403
+## pairing from http://8.8.8.8
+{"error":"pairing from that site is not allowed"} 403
+## five wrong codes from another hub's page
+403 403 403 403 403 
+## then the right one from there
+{"error":"too many wrong codes from other sites: make a new code"} 403
+## the code still works for this hub's own page
+200
 ## other hub, new token
 200
 ## set hubs
@@ -1119,6 +1250,18 @@ Cache-Control: no-store
 500 {"error": "hub.json is damaged and was left as it is; repair or remove it"}
 ## settings onto a damaged file
 500 {"error": "hub.json is damaged and was left as it is; repair or remove it"}
+## a note, to be kept before
+200 
+## the copy before is the version before
+same
+## earlier copies kept
+.hub.prev.json
+.notes.<day>.json
+.notes.prev.json
+## an earlier copy is not served
+404 {"error": "not found"}
+## nor listed
+200 [{"changed": "<changed>", "path": "notes/notes.json", "size": 1065}]
 ## upload to own workspace
 200 {"root": "<workspaces>/My Space", "saved": true}
 ## own workspace, odd name
@@ -1130,27 +1273,39 @@ Cache-Control: no-store
 ## own workspace, again
 200 {"skipped": true}
 ## workspaces listed
-200 [{"current": true, "home": true, "name": "ws", "root": "<root>"}, {"current": false, "home": false, "name": "escape", "root": "<workspaces>/escape"}, {"current": false, "home": false, "name": "My Space", "root": "<workspaces>/My Space"}]
+200 [{"current": true, "home": true, "name": "ws", "root": "<root>", "workspace": "<workspace>"}, {"current": false, "home": false, "name": "escape", "root": "<workspaces>/escape", "workspace": "<workspace>"}, {"current": false, "home": false, "name": "My Space", "root": "<workspaces>/My Space", "workspace": "<workspace>"}]
 ## switch to missing
 404 {"error": "no such workspace"}
 ## switch with no root
 404 {"error": "no such workspace"}
 ## switch to own
-200 [{"current": false, "home": true, "name": "ws", "root": "<root>"}, {"current": false, "home": false, "name": "escape", "root": "<workspaces>/escape"}, {"current": true, "home": false, "name": "My Space", "root": "<workspaces>/My Space"}]
+200 [{"current": false, "home": true, "name": "ws", "root": "<root>", "workspace": "<workspace>"}, {"current": false, "home": false, "name": "escape", "root": "<workspaces>/escape", "workspace": "<workspace>"}, {"current": true, "home": false, "name": "My Space", "root": "<workspaces>/My Space", "workspace": "<workspace>"}]
+## stale page: a note
+412 {"error": "another workspace has been opened on this hub"}
+## stale page: the config
+412 {"error": "another workspace has been opened on this hub"}
+## stale page: a file
+412 {"error": "another workspace has been opened on this hub"}
+## stale page: told the open one
+the open one
+## stale page: workspaces
+200 
+## current page: a note
+200 {"doc": "doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "", "status": "open", "text": "meant for own", "ts": "<ts>", "type": ""}
 ## config in own
-200 {"front": null, "highlights": [{"color": "#fbeeb0", "id": "<id>", "name": "Important"}, {"color": "#cfe8c6", "id": "<id>", "name": "Definition"}, {"color": "#cfe0f5", "id": "<id>", "name": "Question"}, {"color": "#f6d0d6", "id": "<id>", "name": "Unclear"}], "ignore": ["CLAUDE.md"], "root": "<workspaces>/My Space", "side": [], "title": "My Space"}
+200 {"front": null, "highlights": [{"color": "#fbeeb0", "id": "<id>", "name": "Important"}, {"color": "#cfe8c6", "id": "<id>", "name": "Definition"}, {"color": "#cfe0f5", "id": "<id>", "name": "Question"}, {"color": "#f6d0d6", "id": "<id>", "name": "Unclear"}], "ignore": ["CLAUDE.md"], "root": "<workspaces>/My Space", "side": [], "title": "My Space", "workspace": "<workspace>"}
 ## docs in own
 200 [{"changed": "<changed>", "front": false, "group": "", "path": "doc.md", "side": false, "title": "In Own"}]
 ## note in own
 200 {"doc": "doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "", "status": "open", "text": "in the other workspace", "ts": "<ts>", "type": ""}
 ## notes in own
-200 [{"doc": "doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "", "status": "open", "text": "in the other workspace", "ts": "<ts>", "type": ""}]
+200 [{"doc": "doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "", "status": "open", "text": "meant for own", "ts": "<ts>", "type": ""}, {"doc": "doc.md", "heading": "", "headingText": "", "id": "<id>", "quote": "", "status": "open", "text": "in the other workspace", "ts": "<ts>", "type": ""}]
 ## switch home
-200 [{"current": true, "home": true, "name": "ws", "root": "<root>"}, {"current": false, "home": false, "name": "escape", "root": "<workspaces>/escape"}, {"current": false, "home": false, "name": "My Space", "root": "<workspaces>/My Space"}]
+200 [{"current": true, "home": true, "name": "ws", "root": "<root>", "workspace": "<workspace>"}, {"current": false, "home": false, "name": "escape", "root": "<workspaces>/escape", "workspace": "<workspace>"}, {"current": false, "home": false, "name": "My Space", "root": "<workspaces>/My Space", "workspace": "<workspace>"}]
 ## notes at home
 200 
 ## config at home
-200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "locks": {"a": {}, "b": {}}, "look": {"font": "sans", "fs": 20, "roomy": true, "theme": "lime-dark", "themeSide": ""}, "root": "<root>", "scripts": ["b/app.html", "page.html"], "side": ["references.md"], "title": "Edited"}
+200 {"front": "FRONTPAGE.md", "highlights": [{"color": "#AABBCC", "id": "<id>", "name": "Alpha"}, {"color": "#112233", "id": "<id>", "name": "Untitled"}], "ignore": ["CLAUDE.md"], "locks": {"a": {}, "b": {}}, "look": {"font": "sans", "fs": 20, "roomy": true, "theme": "lime-dark", "themeSide": ""}, "root": "<root>", "scripts": ["b/app.html", "page.html"], "side": ["references.md"], "title": "Edited", "workspace": "<workspace>"}
 ## unpair
 200 {"ok": true}
 ## after unpairing

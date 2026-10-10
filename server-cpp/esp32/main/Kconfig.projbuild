@@ -1,6 +1,6 @@
 menu "Hub"
     config HUB_WIFI_SSID
-        string "Wi-Fi network name"
+        string "Wi-Fi network name (used only if the card has no wifi.txt)"
         default ""
     config HUB_WIFI_PASSWORD
         string "Wi-Fi password"
@@ -8,4 +8,34 @@ menu "Hub"
     config HUB_PORT
         int "Port the hub listens on"
         default 443
+    config HUB_NAME
+        string "Name on the network: the board is NAME.local (wifi.txt can change it)"
+        default "hub"
+    config HUB_UPDATE_REPO
+        string "GitHub repository with firmware releases (owner/name); empty: no updates"
+        default ""
+    config HUB_UPDATE_HOURS
+        int "Hours between looks for a new release"
+        default 24
+    config HUB_OLED_SH1106
+        bool "The OLED is an SH1106 (some clones) rather than an SSD1306"
+        default n
+    config HUB_OLED_FLIP
+        bool "The OLED is mounted the other way up"
+        default n
+    choice HUB_STAR
+        prompt "Star beside the title"
+        default HUB_STAR_TALL
+        help
+            Three designs, one file each (main/star_*.hpp). To see them side by
+            side on a computer: tools/screen-preview.cpp, or docs/stars.gif.
+        config HUB_STAR_TALL
+            bool "Tall and narrow (the current one)"
+        config HUB_STAR_WIDE
+            bool "Wide: the earlier one, as wide as it is tall"
+        config HUB_STAR_BURST
+            bool "Burst: the first draft, two stars and a ring"
+        config HUB_STAR_TURNS
+            bool "Take turns: tall, wide, burst, one cycle each, to compare on the board"
+    endchoice
 endmenu

@@ -8,6 +8,8 @@
 #                                 after reading the differences and meaning them
 #   HUBD=build/hubd-own ./test/contract.sh   test another copy of the server
 #                                 than ./hubd ("make test-own" builds and tests that one)
+#   HUBD_ARGS="--profile esp32" ./test/contract.sh   the same server with a board's limits; the answers
+#                                 that should differ are the device's own (/api/device, the storage quota)
 set -u
 cd "$(dirname "$0")/.."
 REPO="$(cd .. && pwd)"
@@ -76,7 +78,7 @@ fixture "$WORK/cpp/ws"
 # It is told to ask even this machine to pair, so the requests below prove
 # that nothing is answered without a paired device's token.
 mkdir -p "$WORK/cpp/workspaces"
-"${HUBD:-./hubd$EXE}" "$WORK/cpp/ws" --port $CPP_PORT --www "$REPO/hub" --state "$WORK/cpp/state" --workspaces "$WORK/cpp/workspaces" --pair-local > "$WORK/cpp.log" 2>&1 &
+"${HUBD:-./hubd$EXE}" "$WORK/cpp/ws" --port $CPP_PORT --www "$REPO/hub" --state "$WORK/cpp/state" --workspaces "$WORK/cpp/workspaces" --pair-local ${HUBD_ARGS:-} > "$WORK/cpp.log" 2>&1 &
 CPP_PID=$!
 # wait until it answers (the memory-checked build starts slowly)
 for port in $CPP_PORT; do
@@ -94,7 +96,7 @@ status, root = sys.argv[1], sys.argv[2]
 raw = sys.stdin.read()
 def scrub(v):
     if isinstance(v, dict):
-        return {k: ("<" + k + ">" if k in ("id", "ts", "code", "created", "seen", "used", "free", "changed") else scrub(x)) for k, x in v.items()}
+        return {k: ("<" + k + ">" if k in ("id", "ts", "code", "created", "seen", "used", "free", "changed", "workspace", "undo", "at") else scrub(x)) for k, x in v.items()}
     if isinstance(v, list): return [scrub(x) for x in v]
     if isinstance(v, str): return v.replace(root, "<root>")
     return v
@@ -176,7 +178,7 @@ run() { # run <port> <root> <log>: the request script
   req "vendor marked"         status-only "$B/vendor/marked.js"
   req "vendor highlight"      status-only "$B/vendor/highlight.js"
   echo "## vendor pdf, and its worker"; for f in pdf.mjs pdf.worker.mjs; do curl -s -o /dev/null -D - "$B/vendor/$f" | tr -d '\r' | grep -iE '^(HTTP/|content-type|content-security-policy)' | sed 's/^HTTP\/1.1 \([0-9]*\).*/\1/'; done
-  echo "## vendor document engine: a module, its worker, its WebAssembly, and what is not served"; for f in index.js worker.js recolor-worker.js ui.css wasm/marginalia_wasm_bg.wasm wasm-ocr/marginalia_wasm.js ../package.json Index.js .js; do curl -s -o /dev/null --path-as-is -D - "$B/vendor/marginalia/$f" | tr -d '' | grep -iE '^(HTTP/|content-type|content-security-policy)' | sed 's/^HTTP\/1.1 \([0-9]*\).*/\1/'; done
+  echo "## vendor document engine: a module, its worker, its WebAssembly, and what is not served"; for f in index.js worker.js recolor-worker.js ui.css wasm/marginalia_wasm_bg.wasm wasm-ocr/marginalia_wasm.js ../package.json Index.js .js ocr-worker.js node.js direct.js; do curl -s -o /dev/null --path-as-is -D - "$B/vendor/marginalia/$f" | tr -d '' | grep -iE '^(HTTP/|content-type|content-security-policy)' | sed 's/^HTTP\/1.1 \([0-9]*\).*/\1/'; done
   echo "## the engine worker of the reader itself, and the policy it runs under"; curl -s -o /dev/null -D - "$B/js/engine-worker.js" | tr -d '\r' | grep -iE '^(HTTP/|content-type|content-security-policy)' | sed 's/^HTTP\/1.1 \([0-9]*\).*/\1/'
   req "sha256 of a file"      body "$B/api/sha256?path=a/1-doc.md"
   req "sha256 again, kept"    body "$B/api/sha256?path=a/1-doc.md"
@@ -203,6 +205,18 @@ run() { # run <port> <root> <log>: the request script
   req "quote without anchor"  body -X PUT "${J[@]}" -d '{"quote":"Body one"}' "$B/api/notes/anchored-1"
   req "anchored note gone"    body -X DELETE "$B/api/notes/anchored-1"
   req "anchored note 2 gone"  body -X DELETE "$B/api/notes/anchored-2"
+  req "note with a stamp"     body -X POST "${J[@]}" -d '{"id":"stamped-1","ts":"2026-01-02T03:04:05.678Z","doc":"a/1-doc.md","text":"first","quote":"Body","type":"question","at":"0001760000000000-0000-aaa"}' "$B/api/notes"
+  req "an older edit is not applied" body -X PUT "${J[@]}" -d '{"text":"older","at":"0001759999999999-0000-bbb"}' "$B/api/notes/stamped-1"
+  req "a newer edit is applied" body -X PUT "${J[@]}" -d '{"text":"newer","at":"0001760000000001-0000-bbb"}' "$B/api/notes/stamped-1"
+  req "each part goes by its own stamp" body -X PUT "${J[@]}" -d '{"type":"","at":"0001760000000000-0001-ccc"}' "$B/api/notes/stamped-1"
+  req "an old edit to the text still loses" body -X PUT "${J[@]}" -d '{"text":"late","at":"0001760000000000-0002-ccc"}' "$B/api/notes/stamped-1"
+  req "no stamp: applied as before" body -X PUT "${J[@]}" -d '{"text":"no stamp","at":"yesterday"}' "$B/api/notes/stamped-1"
+  req "a reply"                 body -X POST "${J[@]}" -d '{"id":"reply-1","ts":"2026-01-02T03:04:05.678Z","doc":"a/1-doc.md","text":"and also","replyTo":"stamped-1"}' "$B/api/notes"
+  req "a reply to no id"        body -X POST "${J[@]}" -d '{"doc":"a/1-doc.md","text":"x","replyTo":"../x"}' "$B/api/notes"
+  req "stamped note gone"       body -X DELETE "$B/api/notes/stamped-1"
+  req "reply gone"              body -X DELETE "$B/api/notes/reply-1"
+  echo "## pdf.js character maps and typefaces, and what is not served"; for f in cmaps/78-EUC-H.bcmap standard_fonts/FoxitSerif.pfb standard_fonts/LiberationSans-Regular.ttf standard_fonts/LICENSE_FOXIT cmaps/../../package.json cmaps/x.js; do echo "$f"; curl -s -o /dev/null --path-as-is -D - "$B/vendor/pdfjs/$f" | tr -d '\r' | grep -iE '^(HTTP/|content-type)' | sed 's/^HTTP\/1.1 \([0-9]*\).*/\1/'; done
+  echo "## reading typefaces, and what is not served"; for f in atkinson-hyperlegible-latin-400-normal.woff2 atkinson-hyperlegible-latin-ext-700-italic.woff2 opendyslexic-latin-700-normal.woff2 opendyslexic-latin-ext-400-normal.woff2 atkinson-hyperlegible-greek-400-normal.woff2 opendyslexic-latin-400-normal.woff ../../package.json; do echo "$f"; curl -s -o /dev/null --path-as-is -D - "$B/vendor/fonts/$f" | tr -d '\r' | grep -iE '^(HTTP/|content-type)' | sed 's/^HTTP\/1.1 \([0-9]*\).*/\1/'; done
   req "highlight on a pdf page" body -X POST "${J[@]}" -d '{"id":"engine-1","ts":"2026-01-02T03:04:05.678Z","doc":"b/paper.pdf","quote":"risks","headingText":"page 1","mg":{"doc":"b34531a9d344f4405422a9f1edb6b33fdc50c69fb28f4c723e8deed368a43674","anchor":{"unit":"p1","unitIndex":0,"quote":{"exact":"risks","prefix":"are ","suffix":" associated"},"position":{"start":10,"end":15},"rects":[{"x0":1.5,"x1":2,"y0":3,"y1":4},{"x0":"no"}],"other":1},"other":2}}' "$B/api/notes"
   req "engine anchor not usable" body -X POST "${J[@]}" -d '{"id":"engine-2","ts":"2026-01-02T03:04:05.678Z","doc":"b/paper.pdf","quote":"risks","mg":{"doc":"../x","anchor":{"unit":"p1","quote":{"exact":"risks"}}}}' "$B/api/notes"
   req "engine anchor kept on edit" body -X PUT "${J[@]}" -d '{"type":"question"}' "$B/api/notes/engine-1"
@@ -263,6 +277,52 @@ run() { # run <port> <root> <log>: the request script
   req "remove notes folder"   body -X DELETE "$B/api/folder?path=notes"
   req "remove notes folder, other case" body -X DELETE "$B/api/folder?path=Notes"
   req "remove a file"         body -X DELETE "$B/api/folder?path=code.c"
+  # A removed folder is kept aside, hidden, and can be put back with its locks; or let go for good.
+  req "removed, listed"         body "$B/api/removed"
+  UNDO="$(curl -s -b "$JAR" "$B/api/removed" | "$PY" -c 'import sys,json; print(json.load(sys.stdin)[0]["undo"])' | tr -d '\r')"
+  echo "## removed folder kept aside"
+  (cd "$2" && find .removed -type f | sed "s|$UNDO|<undo>|" | sort)
+  req "kept aside, not served"  body "$B/raw/.removed/$UNDO/gone/FRONTPAGE.md"
+  mkdir -p "$2/gone"
+  req "put back, name taken"    body -X POST "${J[@]}" -d "{\"undo\":\"$UNDO\"}" "$B/api/folder/restore"
+  rmdir "$2/gone"
+  req "put back, bad name"      body -X POST "${J[@]}" -d '{"undo":"../../x"}' "$B/api/folder/restore"
+  req "put back"                body -X POST "${J[@]}" -d "{\"undo\":\"$UNDO\"}" "$B/api/folder/restore"
+  req "put back again"          body -X POST "${J[@]}" -d "{\"undo\":\"$UNDO\"}" "$B/api/folder/restore"
+  req "locks put back"          body "$B/api/config"
+  req "its file is back"        body "$B/api/doc?path=gone/deep/x.md"
+  req "remove it again"         body -X DELETE "$B/api/folder?path=gone"
+  UNDO="$(curl -s -b "$JAR" "$B/api/removed" | "$PY" -c 'import sys,json; print(json.load(sys.stdin)[0]["undo"])' | tr -d '\r')"
+  req "let go now"              body -X DELETE "$B/api/removed?undo=$UNDO"
+  req "let go again"            body -X DELETE "$B/api/removed?undo=$UNDO"
+  req "nothing removed now"     body "$B/api/removed"
+  echo "## nothing kept aside"
+  ls -A "$2/.removed" | wc -l | tr -d ' '
+  # A name too long for this system is shortened, not refused: the same way each time, the files of such a folder kept
+  # together, and the name it was given kept for the list and for "update". The shorter name differs from one system to
+  # another (and with the folder served), so what is printed is what holds on all of them.
+  LONGNAME="$("$PY" -c "print('A very long title of a book that goes on and on ' * 6 + '(2017)')")"
+  LONGQ="$("$PY" -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$LONGNAME")"
+  long_said() { "$PY" -c "
+import sys, json, re
+r, asked = json.loads(sys.stdin.read()), sys.argv[1]
+p = r.get('path', '')
+print(json.dumps({'saved': r.get('saved', False), 'skipped': r.get('skipped', False), 'shortened': r.get('shortened', False),
+  'kept its start': p.split('/')[-1].startswith(asked.split('/')[-1][:20]) or p.split('/')[-2].startswith(asked.split('/')[-2][:20]),
+  'ends': re.sub('[0-9a-f]{6}', '<hex>', p[-12:]), 'shorter': len(p) < len(asked)}, sort_keys=True))" "$1"; }
+  echo "## a long name: a book";   curl -s -b "$JAR" -X POST --data-binary 'not really a book' "$B/api/upload?path=long/$LONGQ.epub" | long_said "long/$LONGNAME.epub"
+  echo "## the same again";         curl -s -b "$JAR" -X POST --data-binary 'not really a book' "$B/api/upload?path=long/$LONGQ.epub" | long_said "long/$LONGNAME.epub"
+  echo "## a long folder: a file";  curl -s -b "$JAR" -X POST --data-binary 'one' "$B/api/upload?path=long/$LONGQ/a.md" | long_said "long/$LONGNAME/a.md"
+  curl -s -b "$JAR" -X POST --data-binary 'two' "$B/api/upload?path=long/$LONGQ/b.md" > /dev/null
+  echo "## its files together, listed by the names given"
+  curl -s -b "$JAR" "$B/api/files?path=long" | "$PY" -c "
+import sys, json
+fs = json.load(sys.stdin)
+print(len(fs), 'files;', len({f['path'].rsplit('/', 1)[0] for f in fs if f['path'].endswith('.md')}), 'folder for the two;', sorted(f['asked'].replace(sys.argv[1], '<long>') for f in fs))" "$LONGNAME"
+  echo "## in the list"
+  curl -s -b "$JAR" "$B/api/docs" | "$PY" -c "
+import sys, json
+print(sorted((d['title'].replace(sys.argv[1], '<long>'), d.get('asked', '').replace(sys.argv[1], '<long>')) for d in json.load(sys.stdin) if d['path'].startswith('long/')))" "$LONGNAME"
   req "upload new"            body -X POST --data-binary '# Uploaded' "$B/api/upload?path=up/new%20file.md"
   req "upload again"          body -X POST --data-binary '# Changed' "$B/api/upload?path=up/new%20file.md"
   req "uploaded content"      body "$B/api/doc?path=up/new%20file.md"
@@ -296,8 +356,18 @@ run() { # run <port> <root> <log>: the request script
   echo "## other hub, odd origin";    curl -s -o /dev/null -w '%{http_code}\n' -H 'Origin: null' -H "Authorization: Bearer $TOKEN" "$B/api/hubs"
   echo "## other hub, pair no code";  curl -s -o /dev/null -w '%{http_code}\n' "${X[@]}" -X POST "${J[@]}" -d '{"code":"AAAA-AAAA","name":"x"}' "$B/api/pair"
   CODE=$(curl -s -b "$JAR" -X POST "$B/api/pair/code" | grep -o '[A-Z0-9]\{4\}-[A-Z0-9]\{4\}')
-  T2=$(curl -s "${X[@]}" -X POST "${J[@]}" -d "{\"code\":\"$CODE\",\"name\":\"other reader\"}" "$B/api/pair" | grep -o '"token": *"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/')
+  # Pairing from another site: only from a page on a home network (as another hub is), and its wrong tries are its own.
+  echo "## other hub, pair from a website"; curl -s -w ' %{http_code}\n' "${X[@]}" -X POST "${J[@]}" -d "{\"code\":\"$CODE\",\"name\":\"x\"}" "$B/api/pair"
+  H=(-H 'Origin: https://desk.local:4321')
+  T2=$(curl -s "${H[@]}" -X POST "${J[@]}" -d "{\"code\":\"$CODE\",\"name\":\"other reader\"}" "$B/api/pair" | grep -o '"token": *"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/')
   echo "## other hub, pair with code"; [ -n "$T2" ] && echo "given a token"
+  for o in http://192.168.1.20:4321 'http://[fd00::5]:4321' http://localhost:4321 https://hub.example.com http://8.8.8.8; do echo "## pairing from $o"; curl -s -w ' %{http_code}\n' -H "Origin: $o" -X POST "${J[@]}" -d '{"code":"AAAA-AAAA"}' "$B/api/pair"; done
+  CODE=$(curl -s -b "$JAR" -X POST "$B/api/pair/code" | grep -o '[A-Z0-9]\{4\}-[A-Z0-9]\{4\}')
+  echo "## five wrong codes from another hub's page"; for _ in 1 2 3 4 5; do curl -s -o /dev/null -w '%{http_code} ' "${H[@]}" -X POST "${J[@]}" -d '{"code":"AAAA-AAAA"}' "$B/api/pair"; done; echo
+  echo "## then the right one from there"; curl -s -w ' %{http_code}\n' "${H[@]}" -X POST "${J[@]}" -d "{\"code\":\"$CODE\"}" "$B/api/pair"
+  echo "## the code still works for this hub's own page"; curl -s -o /dev/null -w '%{http_code}\n' -X POST "${J[@]}" -d "{\"code\":\"$CODE\",\"name\":\"own page\"}" "$B/api/pair"
+  OWN=$(curl -s -b "$JAR" "$B/api/devices" | "$PY" -c 'import sys,json; print([d["id"] for d in json.load(sys.stdin) if d["name"]=="own page"][0])' | tr -d '\r')
+  curl -s -o /dev/null -b "$JAR" -X DELETE "$B/api/devices/$OWN"
   echo "## other hub, new token";     curl -s -o /dev/null -w '%{http_code}\n' "${X[@]}" -H "Authorization: Bearer $T2" "$B/api/session"
   req "set hubs"              body -X PUT "${J[@]}" -d '{"hubs":[{"name":"  Desk   top ","url":"https://Desk.local:4321/some/path"},{"name":"dup","url":"https://desk.local:4321"},{"name":"usual port","url":"https://pi.local:443"},{"name":"","url":"https://x.local"},{"name":"bad","url":"ftp://x.local"},{"name":"bad2","url":"not a url"}]}' "$B/api/hubs"
   req "hubs"                  body "$B/api/hubs"
@@ -333,6 +403,15 @@ run() { # run <port> <root> <log>: the request script
   req "settings from a damaged file" body "$B/api/config"
   req "settings onto a damaged file" body -X PUT "${J[@]}" -d '{"locks":{}}' "$B/api/config"
   cp "$WORK/hub.keep" "$R/hub.json"
+  # What notes.json and hub.json held before each write is kept beside them, hidden: the version before, and one a day.
+  cp "$R/notes/notes.json" "$WORK/notes.before"
+  req "a note, to be kept before"  status-only -X POST "${J[@]}" -d '{"doc":"a/1-doc.md","text":"kept before"}' "$B/api/notes"
+  echo "## the copy before is the version before"
+  if cmp -s "$WORK/notes.before" "$R/notes/.notes.prev.json"; then echo same; else echo different; fi
+  echo "## earlier copies kept"
+  (cd "$R" && ls -a notes . | grep -E '^\.(notes|hub)\.' | sed -E 's/[0-9]{4}-[0-9]{2}-[0-9]{2}/<day>/' | sort)
+  req "an earlier copy is not served" body "$B/raw/notes/.notes.prev.json"
+  req "nor listed"                body "$B/api/files?path=notes"
   # Workspaces: an upload that becomes a workspace of its own, switching to it and back.
   req "upload to own workspace"   body -X POST --data-binary $'# In Own\n\nBody.\n' "$B/api/upload?path=doc.md&workspace=My%20Space"
   req "own workspace, odd name"   body -X POST --data-binary 'x' "$B/api/upload?path=a/b.md&workspace=..%2F..%2Fescape%3F"
@@ -343,12 +422,22 @@ run() { # run <port> <root> <log>: the request script
   req "switch to missing"         body -X POST "${J[@]}" -d '{"root":"/nowhere"}' "$B/api/workspace"
   req "switch with no root"       body -X POST "${J[@]}" -d '{}' "$B/api/workspace"
   WSROOT="$(curl -s -b "$JAR" "$B/api/workspaces" | "$PY" -c 'import sys,json; print([w["root"] for w in json.load(sys.stdin) if w["name"]=="My Space"][0])' | tr -d '\r')"
+  HOMEWS="$(curl -s -b "$JAR" "$B/api/config" | "$PY" -c 'import sys,json; print(json.load(sys.stdin)["workspace"])' | tr -d '\r')"
   req "switch to own"             body -X POST "${J[@]}" -d "{\"root\":\"$WSROOT\"}" "$B/api/workspace"
+  OWNWS="$(curl -s -b "$JAR" "$B/api/config" | "$PY" -c 'import sys,json; print(json.load(sys.stdin)["workspace"])' | tr -d '\r')"
+  # A page left showing home, after own was opened: refused, and told which is open. Reading included.
+  req "stale page: a note"        body -X POST "${J[@]}" -H "X-Hub-Workspace: $HOMEWS" -d '{"doc":"doc.md","text":"meant for home"}' "$B/api/notes"
+  req "stale page: the config"    body -H "X-Hub-Workspace: $HOMEWS" "$B/api/config"
+  req "stale page: a file"        body -H "X-Hub-Workspace: $HOMEWS" "$B/raw/doc.md"
+  echo "## stale page: told the open one"
+  curl -s -m 5 -b "$JAR" -D - -o /dev/null -H "X-Hub-Workspace: $HOMEWS" "$B/api/notes" | tr -d '\r' | grep -i '^x-hub-workspace:' | awk -v own="$OWNWS" '{print ($2 == own) ? "the open one" : "another: " $2}'
+  req "stale page: workspaces"    status-only -H "X-Hub-Workspace: $HOMEWS" "$B/api/workspaces"
+  req "current page: a note"      body -X POST "${J[@]}" -H "X-Hub-Workspace: $OWNWS" -d '{"doc":"doc.md","text":"meant for own"}' "$B/api/notes"
   req "config in own"             body "$B/api/config"
   req "docs in own"               body "$B/api/docs"
   req "note in own"               body -X POST "${J[@]}" -d '{"doc":"doc.md","text":"in the other workspace"}' "$B/api/notes"
   req "notes in own"              body "$B/api/notes"
-  req "switch home"               body -X POST "${J[@]}" -d "{\"root\":\"$R\"}" "$B/api/workspace"
+  req "switch home"               body -X POST "${J[@]}" -H "X-Hub-Workspace: $HOMEWS" -d "{\"root\":\"$R\"}" "$B/api/workspace"   # from a stale page too
   req "notes at home"             status-only "$B/api/notes"
   req "config at home"            body "$B/api/config"
   ID="$(curl -s -b "$JAR" "$B/api/devices" | "$PY" -c 'import sys,json; print(json.load(sys.stdin)[0]["id"])' | tr -d '\r')"

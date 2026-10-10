@@ -20,7 +20,7 @@ TODO.md       the plan
 
 The first run creates `data/` as a copy of `sample/`, fetches the page's libraries with npm, and builds the server (it needs a C++ compiler and mbedTLS: `brew install mbedtls`). From then on everything you do in the reader lands in `data/` and stays out of git. To start again from the samples, delete `data/`.
 
-The server is `server-cpp/hubd`, one program for a computer, a Raspberry Pi and the ESP32 board, with limits chosen to suit each. `./start.sh` runs it for you; to run it by hand: `server-cpp/hubd data --www hub`. For the board see `server-cpp/esp32/`.
+The server is `server-cpp/hubd`, one program for a computer, a Raspberry Pi and the ESP32 board, with limits chosen to suit each. `./start.sh` runs it for you; to run it by hand: `server-cpp/hubd data --www hub`. For the ESP32 boards (LilyGO T3 V1.6.1 and T3-S3 V1.3: the OLED, a microSD card up to 32 GB, signed updates from GitHub) see `server-cpp/esp32/README.md`, with its own plan and review beside it.
 
 It answers this computer only by default. To reach the reader from a phone: `cd hub && npm run start:network` (the same as `HOST=0.0.0.0 ./start.sh`), then on the phone open `http://<this computer's address>:4321/`, follow the page to trust the hub's certificate, and type the pairing code the server printed. **Read `CERTIFICATES.md` first:** it says what installing that certificate means, and what the alternatives are. The computer the hub runs on never needs the certificate: `http://localhost:4321` keeps working there.
 

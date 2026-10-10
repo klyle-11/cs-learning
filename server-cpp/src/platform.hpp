@@ -205,6 +205,20 @@ inline bool replace(const std::string &tmp, const std::string &path) {
   return ::rename(tmp.c_str(), path.c_str()) == 0;
 #endif
 }
+// Move a folder or a file to a new name on the same disk, in one step, never onto something that is there already.
+inline bool move(const std::string &from, const std::string &to) {
+#ifdef _WIN32
+  return MoveFileExA(from.c_str(), to.c_str(), 0) != 0;   // without MOVEFILE_REPLACE_EXISTING: refused if `to` exists
+#else
+  struct stat st;
+#  ifdef ESP_PLATFORM
+  if (::stat(to.c_str(), &st) == 0) return false;    // ESP-IDF has no lstat; the card has no links to tell apart
+#  else
+  if (::lstat(to.c_str(), &st) == 0) return false;   // rename() would put a folder in place of an empty one
+#  endif
+  return ::rename(from.c_str(), to.c_str()) == 0;
+#endif
+}
 // Readable and writable by the owner only (0600, 0700). Windows keeps files
 // under the user's profile private to that user already.
 inline void owner_only(const std::string &path, int mode) {
@@ -229,6 +243,29 @@ inline bool real_path(const std::string &path, std::string &out) {
   if (!::realpath(path.c_str(), buf)) return false;
   out = buf;
   return true;
+#endif
+}
+// Where something that exists really is, every link and junction on the way followed, with "/" between its parts.
+// real_path does that elsewhere, but on Windows only tidies the path. False if it does not exist, and on the board,
+// whose card has no links.
+inline bool final_path(const std::string &path, std::string &out) {
+#ifdef _WIN32
+  HANDLE h = CreateFileA(path.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+  if (h == INVALID_HANDLE_VALUE) return false;
+  char buf[MAX_PATH * 4];
+  const DWORD n = GetFinalPathNameByHandleA(h, buf, sizeof buf, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+  CloseHandle(h);
+  if (n == 0 || n >= sizeof buf) return false;
+  out.assign(buf, n);
+  if (out.rfind("\\\\?\\UNC\\", 0) == 0) out = "//" + out.substr(8);   // \\?\UNC\server\share
+  else if (out.rfind("\\\\?\\", 0) == 0) out = out.substr(4);          // \\?\C:\...
+  for (char &c : out) if (c == '\\') c = '/';
+  return true;
+#elif defined(ESP_PLATFORM)
+  (void)path; (void)out;
+  return false;
+#else
+  return real_path(path, out);
 #endif
 }
 // Bytes free on the disk that holds `path`; all ones if it cannot be told.

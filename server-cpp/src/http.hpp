@@ -5,7 +5,7 @@
 // Everything arriving here is untrusted, so every size and every wait has a
 // limit, set before anything is allocated:
 //   - 16 KB of headers; a body limit chosen per route by the handler
-//   - a fixed number of connections at once; the rest are turned away
+//   - a fixed number of connections at once; the rest wait to be taken in
 //   - a deadline for the handshake, for the headers, and for the body (which
 //     grows with its size, so a slow upload is fine but a stalled one is not)
 // Bodies and files are moved in pieces, never held whole in memory.
@@ -20,6 +20,8 @@
 #include <atomic>
 #include <cctype>
 #include <cerrno>
+#include <climits>
+#include <cstdint>
 #include <chrono>
 #include <csignal>
 #include <cstdio>
@@ -32,6 +34,7 @@
 #include <thread>
 #include <vector>
 
+#include "fs.hpp"
 #include "secure.hpp"
 
 namespace http {
@@ -84,12 +87,14 @@ class Conn {
  public:
   int fd;
   bool local;                 // the other end is this machine itself
+  std::string peer;           // its address ("192.168.1.23")
+  std::string who;            // for a page listening for events: the paired device it belongs to
   bool tls = false;
   mbedtls_ssl_context ssl;
   Clock::time_point deadline; // nothing waits past this
   std::string ahead;          // bytes already read from the wire but not yet used
 
-  Conn(int socket, bool is_local) : fd(socket), local(is_local) {
+  Conn(int socket, bool is_local, std::string address) : fd(socket), local(is_local), peer(std::move(address)) {
     sys::nonblocking(fd);
     within(15000);
   }
@@ -166,6 +171,15 @@ class Conn {
   }
   bool write_all(const std::string &s) { return write_all(s.data(), s.size()); }
 
+  // For a connection kept open to send events: whether the other side has
+  // closed it. A page listening for events never sends anything after its
+  // request, so anything to read (a TLS close notice, the end of the stream)
+  // means it has gone. Does not wait.
+  bool gone() {
+    // (A socket in error is not reported here; the next write to it fails and drops it.)
+    return !ahead.empty() || sys::wait_ready(fd, true, 0);
+  }
+
  private:
   bool wait(bool to_read) {
     auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - Clock::now()).count();
@@ -221,7 +235,7 @@ struct Request {
     return it == headers.end() ? none : it->second;
   }
   // How long a body of this size may take: half a minute, plus its size at 32 KB a second.
-  void body_deadline() const { conn->within(30000 + static_cast<long>(content_length / 32)); }
+  void body_deadline() const { conn->deadline = Clock::now() + std::chrono::milliseconds(30000 + static_cast<long long>(content_length / 32)); }
 
   // The body as a string. Returns 0, or the status to answer with.
   int read_body(std::string &out, size_t max) {
@@ -238,15 +252,20 @@ struct Request {
     }
     return 0;
   }
-  // The body written straight to a file, a piece at a time.
+  // The body written straight to a file, a piece at a time. Besides the time
+  // for the whole body, each piece must arrive within 30 seconds of the last,
+  // so an upload of gigabytes that stalls frees its connection in half a minute
+  // rather than at the end of its many hours.
   int save_body(const std::string &file, size_t max, size_t piece) {
     if (content_length > max) return 413;
     body_deadline();
+    const Clock::time_point end = conn->deadline;
     FILE *f = std::fopen(file.c_str(), "wb");
     if (!f) return 500;
     std::vector<char> chunk(piece);
     int status = 0;
     while (body_left > 0 && !status) {
+      conn->deadline = std::min(end, Clock::now() + std::chrono::seconds(30));
       long n = conn->read(chunk.data(), std::min(chunk.size(), body_left));
       if (n <= 0) status = 408;
       else if (std::fwrite(chunk.data(), 1, static_cast<size_t>(n), f) != static_cast<size_t>(n)) status = 507;
@@ -274,10 +293,14 @@ struct Response {
   int status = 200;
   std::string type = "application/json";
   std::string body;
+  // A body kept elsewhere and shared (a cached page file, the cached document list), in place of `body`: sent from
+  // there, never copied for each answer.
+  std::shared_ptr<const std::string> shared;
   std::string extra;  // further header lines, each ending in \r\n
   // When `file` is set the body is that file's bytes [offset, offset + length), sent in pieces.
   std::string file;
   unsigned long long offset = 0, length = 0;
+  std::shared_ptr<void> keep; // whatever must outlive the sending (the file of a cached document list)
   std::string etag;   // set for the page's own files: the browser may keep them and ask "still this one?"
   bool hold = false;  // the handler wrote its own response and keeps the connection (event stream)
   bool close = false; // do not reuse the connection after this
@@ -289,7 +312,11 @@ struct Options {
   std::string host = "127.0.0.1";
   int port = 4321;
   Tls *tls = nullptr;
-  int max_conns = 64;      // connections served at once
+  int max_conns = 64;      // connections served at once; more wait to be taken in
+  // Whether there is memory for one more connection. While there is not,
+  // newcomers wait (unaccepted, so they cost nothing) instead of being turned away.
+  std::function<bool()> admit;
+  std::function<void()> listening; // called once the port is open
   long keepalive_ms = 5000; // how long an idle connection is kept for its next request
   size_t piece = 16384;    // bytes moved at a time when sending a file
 };
@@ -306,6 +333,7 @@ inline const char *reason(int status) {
     case 403: return "Forbidden";
     case 404: return "Not Found";
     case 408: return "Request Timeout";
+    case 412: return "Precondition Failed";
     case 413: return "Payload Too Large";
     case 416: return "Range Not Satisfiable";
     case 429: return "Too Many Requests";
@@ -343,7 +371,8 @@ inline Response error(int status, const std::string &message) {
 
 // Send a response. Returns false if the connection can no longer be used.
 inline bool write_response(Conn &conn, const Response &r, bool keep, size_t piece) {
-  const unsigned long long length = r.file.empty() ? r.body.size() : r.length;
+  const std::string &body = r.shared ? *r.shared : r.body;
+  const unsigned long long length = r.file.empty() ? body.size() : r.length;
   std::string head = "HTTP/1.1 " + std::to_string(r.status) + " " + reason(r.status) + "\r\n";
   bool text = r.type.compare(0, 5, "text/") == 0 || r.type.find("javascript") != std::string::npos || r.type.find("json") != std::string::npos;
   head += "Content-Type: " + r.type + (text ? "; charset=utf-8" : "") + "\r\n";
@@ -354,17 +383,16 @@ inline bool write_response(Conn &conn, const Response &r, bool keep, size_t piec
   head += std::string(r.etag.empty() ? "Cache-Control: no-store" : "Cache-Control: no-cache") + "\r\nConnection: " + (keep ? "keep-alive" : "close") + "\r\n\r\n";
   conn.within(30000 + static_cast<long>(length / 8)); // at least 8 KB a second
   if (!conn.write_all(head)) return false;
-  if (r.file.empty()) return conn.write_all(r.body);
-  FILE *f = std::fopen(r.file.c_str(), "rb");
-  bool ok = f && sys::seek(f, r.offset);
+  if (r.file.empty()) return conn.write_all(body);
+  fs::Reader f;   // positions past 2 GB, on the board's card too
+  bool ok = f.open(r.file) && f.seek(r.offset);
   std::vector<char> chunk(piece);
   unsigned long long left = r.length;
   while (ok && left > 0) {
-    size_t n = std::fread(chunk.data(), 1, static_cast<size_t>(std::min<unsigned long long>(chunk.size(), left)), f);
+    size_t n = f.read(chunk.data(), static_cast<size_t>(std::min<unsigned long long>(chunk.size(), left)));
     if (n == 0) ok = false; // the file shrank after its size was announced
     else { ok = conn.write_all(chunk.data(), n); left -= n; }
   }
-  if (f) std::fclose(f);
   return ok && left == 0;
 }
 
@@ -432,8 +460,11 @@ inline int read_head(const std::shared_ptr<Conn> &conn, Request &req) {
   auto cl = req.headers.find("content-length");
   if (cl != req.headers.end()) {
     char *end = nullptr;
+    errno = 0;
     unsigned long long v = std::strtoull(cl->second.c_str(), &end, 10);
     if (end == cl->second.c_str() || *end != '\0' || !std::isdigit(static_cast<unsigned char>(cl->second[0]))) return 400;
+    // On the board size_t is 32 bits: a larger length must not wrap round to a small one.
+    if (v > SIZE_MAX || (v == ULLONG_MAX && errno == ERANGE)) return 413;
     req.content_length = req.body_left = static_cast<size_t>(v);
   } else if (req.headers.count("transfer-encoding")) {
     return 400;
@@ -465,7 +496,7 @@ inline void handle_connection(std::shared_ptr<Conn> conn, const Handler &handler
     int bad = read_head(conn, req);
     if (bad < 0) return;
     if (bad) {
-      const char *why = bad == 431 ? "headers too large" : bad == 408 ? "too slow" : "bad request";
+      const char *why = bad == 431 ? "headers too large" : bad == 408 ? "too slow" : bad == 413 ? "body too large" : "bad request";
       write_response(*conn, error(bad, why), false, opt.piece);
       return;
     }
@@ -502,7 +533,12 @@ inline int serve(const Options &opt, Handler handler) {
   addr.sin_port = htons(static_cast<uint16_t>(opt.port));
   if (::inet_pton(AF_INET, opt.host.c_str(), &addr.sin_addr) != 1) { std::fprintf(stderr, "bad host address: %s\n", opt.host.c_str()); return 1; }
   if (!sys::bind_and_listen(srv, addr, 16)) { std::fprintf(stderr, "port %d is in use, or may not be used\n", opt.port); return 1; }
+  if (opt.listening) opt.listening();
   for (;;) {
+    // Full, or short of memory: leave the next one waiting on the listening
+    // socket until a place frees up. A browser waits; a refused one shows an error.
+    // One connection is always let in: with none open, memory is as free as it gets.
+    while (active().load() >= opt.max_conns || (active().load() > 0 && opt.admit && !opt.admit())) std::this_thread::sleep_for(std::chrono::milliseconds(20));
     sockaddr_in peer{};
     int fd = sys::accept_from(srv, peer);
     if (fd < 0) continue;
@@ -510,14 +546,14 @@ inline int serve(const Options &opt, Handler handler) {
     sys::set_option(fd, SOL_SOCKET, SO_NOSIGPIPE);
 #endif
     sys::set_option(fd, IPPROTO_TCP, TCP_NODELAY);
-    // Full: turn the newcomer away rather than start a thread for it.
-    if (active().load() >= opt.max_conns) { sys::close_socket(fd); continue; }
     bool local = (ntohl(peer.sin_addr.s_addr) >> 24) == 127;
+    char address[INET_ADDRSTRLEN] = "";
+    ::inet_ntop(AF_INET, &peer.sin_addr, address, sizeof address);
     active()++;
     try {
-      std::thread([fd, local, handler, opt] {
+      std::thread([fd, local, ip = std::string(address), handler, opt] {
         // Nothing that goes wrong with one connection may end the process.
-        try { handle_connection(std::make_shared<Conn>(fd, local), handler, opt); } catch (...) {}
+        try { handle_connection(std::make_shared<Conn>(fd, local, ip), handler, opt); } catch (...) {}
         active()--;
       }).detach();
     } catch (...) { // no thread to be had

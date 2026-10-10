@@ -1,0 +1,14 @@
+# The LilyGO T3-S3 V1.3, added to sdkconfig.defaults when the target is esp32s3
+# (`idf.py set-target esp32s3`). Its ESP32-S3FH4R2 carries 2 MB of quad-SPI PSRAM.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_QUAD=y
+CONFIG_SPIRAM_SPEED_80M=y
+# Ordinary allocations may land in PSRAM (above 16 KB by default; smaller ones,
+# and anything for DMA, stay in internal memory)
+CONFIG_SPIRAM_USE_MALLOC=y
+# TLS keeps its buffers (16 KB in and 4 KB out per connection) and its
+# certificates in PSRAM: internal memory is then mostly thread stacks, which is
+# what lets the "esp32-psram" profile serve 8 connections and 12 open pages.
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+# Logs and the serial monitor on the USB-C port, which is the chip's own USB
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y

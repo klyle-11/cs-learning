@@ -29,6 +29,10 @@ A self-directed CS learning environment. The user works in small steps, irregula
 
 New learning material the user should keep goes in `data/` (so they see it) and, if it is meant as part of the starter set, in `sample/` too. Never commit anything from `data/`. For testing, work on a scratch copy (`data-test/`, also ignored), not on `data/`.
 
+## Building the hub
+
+Memory efficiency and safety come first on every platform the hub runs on: a computer, a Raspberry Pi, Windows, and the ESP32 boards. Nothing grows with the number of files without a budget, nothing is held twice when it can be shared, files are moved in pieces, and a file the server cannot read is never written over. The same code does this everywhere; only the limits differ, set per platform in the profiles in `server-cpp/src/hub.cpp`. The boards' limits are the tighter ones, at the values set on 10 October 2026 (`esp32`, `esp32-psram`; see `server-cpp/API.md`, "Device profile"). Keep them there: do not tighten them further, or loosen them, without measuring on a board first. Check every change against the boards' profiles too (`HUBD_ARGS="--profile esp32" ./test/contract.sh`), and run `make memory` in `server-cpp/` (Linux): it measures the server on 20,000 files on every profile and fails if any goes over its ceiling. `server-cpp/MEMORY.md` lists every memory measure, where it came from and where it lives.
+
 ## Notes
 
 Each entry in `notes/notes.json`:

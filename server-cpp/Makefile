@@ -33,7 +33,7 @@ endif
 hubd$(EXE) build/hubd-own$(EXE): build/hub.o build/cJSON.o $(EXTRA)
 	$(CXX) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
-build/hub.o: src/hub.cpp src/http.hpp src/secure.hpp src/platform.hpp src/anchor.hpp src/zip.hpp src/epub.hpp src/links.hpp vendor/cJSON.h | build
+build/hub.o: src/hub.cpp src/http.hpp src/fs.hpp src/status.hpp src/secure.hpp src/platform.hpp src/anchor.hpp src/zip.hpp src/epub.hpp src/links.hpp vendor/cJSON.h | build
 	$(CXX) $(CXXFLAGS) -c -o $@ src/hub.cpp
 
 build/cJSON.o: vendor/cJSON.c vendor/cJSON.h | build
@@ -51,8 +51,13 @@ check: clean hubd
 # Send the recorded requests and compare the answers with test/expected.txt.
 test: hubd
 	./test/contract.sh
+	./test/links.sh
+# The server's memory on 20,000 files, on every profile, against a ceiling for each (Linux only).
+memory: hubd
+	./test/memory.sh
 test-own: build/hubd-own$(EXE)
 	HUBD=build/hubd-own$(EXE) ./test/contract.sh
+	HUBD=build/hubd-own$(EXE) ./test/links.sh
 
 # Put the page on the board's SD card:  make card CARD=/Volumes/NAME
 # Everything lives in CARD/hub: the page in hub/www, your documents beside it.
@@ -69,8 +74,10 @@ card:
 	cd ../hub/node_modules/marginalia-engine/dist && cp index.js client.js worker.js selection.js selection-engine.js frame.js geometry.js overlay.js surfaces.js caret.js dom.js themes.js recolor.js recolor-worker.js ui.css "$(CARD)/hub/www/vendor/marginalia/"
 	cp ../hub/node_modules/marginalia-engine/dist/wasm/marginalia_wasm.js ../hub/node_modules/marginalia-engine/dist/wasm/marginalia_wasm_bg.wasm "$(CARD)/hub/www/vendor/marginalia/wasm/"
 	if ls ../hub/js/*.js >/dev/null 2>&1; then mkdir -p "$(CARD)/hub/www/js" && cp ../hub/js/*.js "$(CARD)/hub/www/js/"; fi
+	mkdir -p "$(CARD)/hub/www/vendor/pdfjs" && cp -R ../hub/node_modules/pdfjs-dist/cmaps ../hub/node_modules/pdfjs-dist/standard_fonts "$(CARD)/hub/www/vendor/pdfjs/"
+	mkdir -p "$(CARD)/hub/www/vendor/fonts" && cp ../hub/node_modules/@fontsource/atkinson-hyperlegible/files/*-latin-*.woff2 ../hub/node_modules/@fontsource/opendyslexic/files/*-latin-*.woff2 "$(CARD)/hub/www/vendor/fonts/"
 
 clean:
 	rm -rf build hubd hubd.exe
 
-.PHONY: check test test-own clean card
+.PHONY: check test test-own memory clean card

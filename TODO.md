@@ -18,11 +18,13 @@ Now, in order:
 3. [x] Loose ends from the newest features: characters allowed in a hub's address; locked folders showing through in two lists; hidden and ignored files served by path; renew the pairing cookie (25, 28, 29, 30)
 4. [x] The page's own folder must not be writable through the API (18)
 5. [x] Retire the Node server: workspaces in C++, `hub/server.js` deleted, `./start.sh` (and `npm start`) run `hubd`. [ ] A full session in a browser against `hubd` as the only server
-6. [ ] A browser test suite in the repo; split `hub/app.js` into modules
+6. [x] A browser test suite in the repo (`hub/test/browser.mjs`, `npm run test:browser`: 14 checks; 9 October). [ ] More in it: the highlight flyout, locks, pairing with another hub, the phone layout, a PDF's highlights. [ ] Split `hub/app.js` into modules
 7. Efficiency for the board and for phones. [x] One list request per burst of changes; "not modified" answers for the page's files; a guarded watcher; the folder walked at most once per interval; looking for an absent server less and less often; headings measured once per frame; the track list no longer rebuilt on play and pause (32, 33, 24, 37, 39). [ ] Compressed files; one shared list for the watcher and the document list; notes per document; files from another hub streamed; large files kept in pieces (33, 24, 36, 34, 35)
 8. Design and flow: [x] find (file names, text in documents, notes); [x] a document reopens where it was left; [x] wide tables as cards on a phone; [x] pressed and hover look; [x] instant start from the kept page, with "a newer version is ready"; [x] a track plays without leaving the page; [x] a switch to show only what is on the device; [x] the hub's own computer uses `http://localhost` with no certificate. [ ] The rest: the "rough edges" table in the review, starting with the note box on a phone, the contents button overlapping "edit front page", and playing a track without leaving the page
 9. [ ] Decide: devices encrypt before upload (the board only holds ciphertext), or the board encrypts the card itself
-10. [ ] Smaller items: pairing from other sites, tokens for other hubs, an undo for folder removal (26, 27, 31)
+10. [x] Pairing from other sites only from a home network, its wrong tries counted apart (26); an undo for folder removal (31); links that lead out of the workspace refused (14); only the engine's seventeen files served (41) (9 October). [ ] Tokens for other hubs: protection is offered when one is kept, but they never expire (27)
+12. [ ] The trust step (23): [x] said plainly on the page and in the terminal, address and fingerprint printed together (9 October). [ ] A QR code with both; on the board, its screen (an e-ink panel would hold it with the power off: see "Hardware for the board" below)
+11. [x] Data safety (9 October 2026): a page left on one workspace can no longer write into another; earlier versions of `notes.json` are kept beside it; the notes and the outbox survive a full small store
 
 Not yet checked on real devices: installing the authority on an iPhone and an Android phone, and the reader in Safari and Firefox (tested in Chrome only).
 
@@ -61,7 +63,10 @@ Not yet checked on real devices: installing the authority on an iPhone and an An
 - [x] "soft edges" in the settings: rounded corners, fills instead of outlines, seams drawn as stitched leather (groove, lip and thread, all gradients, no shadows), stitched dialogs, pressed-in fields, with any theme; kept with the look (9 October 2026). [ ] Not looked at on a real phone or in every theme
 - [ ] Find in a PDF's text (`engine.search`), and its table of contents (`engine.sections`) in the outline
 - [ ] Scanned PDFs: the engine's OCR, which needs two model files (about 12 MB) that are not in the package
-- [ ] A PDF that is not kept on the device is fetched whole for the engine; the engine worker that reads books in pieces (`hub/js/engine-worker.js`) would spare that, with the file's SHA-256 from `/api/sha256`
+- [x] A PDF that is not kept on the device is read by the engine in pieces, by the same worker as books, with the file's SHA-256 from `/api/sha256` (review, 48). [ ] On another hub it is still fetched whole
+- [x] PDF.js is opened afresh past 64 MB of a file, so a long PDF read slowly no longer ends up held whole (review, 47: at most 65 MB held of a 97 MB PDF, where it was all of it); the PDF's small picture is drawn from the document already open (9 October 2026)
+- [x] PDF.js has its character maps and standard typefaces (`/vendor/pdfjs/`, kept by the service worker, copied by `make card`): Chinese, Japanese and Korean PDFs, and Symbol and ZapfDingbats, are drawn right (review, 49)
+- [x] Each drawn PDF page carries its text for screen readers (review, 50). [ ] The engine misses some of it (Symbol text, predefined character maps): for `grounds-cc`
 - [ ] Notes that follow a renamed file by its hash (`mg.doc`)
 - [ ] A real phone (iPhone, Android), Firefox and Safari: checked in headless Chromium only
 - [ ] The native library on the board or in a desktop app, if text is ever wanted on the server's side (find across PDFs)
@@ -125,9 +130,11 @@ Not yet checked on real devices: installing the authority on an iPhone and an An
 - [x] Cold start with the server off: the page itself is kept by a service worker (needs HTTPS or localhost)
 - [ ] HTML pages kept offline lose their pictures and styles that live in separate files
 - [x] Pictures and video kept offline, opt-in per file (and "keep all pictures and videos", separate from documents and music)
-- [ ] If two devices edit the same note while both are offline, the later one to reconnect wins; no merge
+- [x] If two devices edit the same note while both are offline, the later *change* wins, part by part (text, type, place), not the later one to reconnect: each change is stamped with a hybrid logical clock (review, 51). [ ] No merge within a part, and no history of a note
+- [x] One line beside the note box says whether everything is saved: "saved", "saving…", "3 to send", "2 not saved", and "offline since …" (review, 52)
+- [x] Replies to notes: "reply" on a note, the reply shown under it (`replyTo`) (9 October 2026)
 - [ ] Editing the front page, settings and folder uploads are refused while offline (with a message), not queued
-- [x] Remove a folder from the server from inside the reader (on its front page). [ ] Single files still cannot be removed; removal has no undo (review, 31)
+- [x] Remove a folder from the server from inside the reader (on its front page). [x] It is kept aside for seven days and can be put back ("removed folders…"; review, 31). [ ] Single files still cannot be removed
 - [ ] The C++ server has not been run with the page for a full session
 
 **3. HTTPS and opening with no board at all (once the ESP32 build exists)**
@@ -235,9 +242,17 @@ Not yet checked on real devices: installing the authority on an iPhone and an An
 - [x] Thick keyboard focus outline; file rows and tabs reachable with Tab and Enter
 - [ ] Keyboard shortcuts (toggle sidebar, focus mode, next/previous heading)
 - [ ] Check every theme's contrast; Eva and Triple-M muted text has not been measured
-- [ ] Screen-reader pass (labels on grips, live region when a note is saved)
-- [ ] Dyslexia-friendly font option; line-by-line reading ruler
-- [ ] Session aids: "where I stopped" bookmark per document, optional timer
+- [ ] Screen-reader pass (labels on grips, live region when a note is saved). [x] The saved line is a live region; PDF pages carry their text
+- [x] Two reading typefaces beside the serif and the sans, in the settings' typeface menu: Atkinson Hyperlegible and OpenDyslexic (SIL Open Font License, from @fontsource, served by the hub; a book's page takes them too; 9 October 2026). [ ] A line-by-line reading ruler
+- [x] Notes counted in the margin beside each paragraph that has notes written on it (replies included), in documents and on a book's pages; pressing the number opens the notes at them (an idea from `grounds-cc`; 9 October 2026)
+- [x] A book's next page is read ahead while the one before is shown, so turning to it does not wait on the hub (`grounds-cc`'s idea; it shows on books with long chapters, which the engine's few cached blocks do not hold)
+- [x] Covers shown small (a tab's, a page's corner, a folder's line and card) are read once and kept small for the visit: they were read whole again on every page turned and every redraw of the file list
+- [ ] Bookmarks that are not highlights (`grounds-cc`): not built; "where was I" and the kept reading places cover most of it
+- [x] A document has one tab at most: pressing it, its +, or "side" goes to the tab it has, in either pane (a book's tab is turned to the page), and never takes the place of another tab (9 October 2026). Checked in headless Chromium, computer and phone; in the browser suite
+- [x] Names too long for the hub's system (Windows: 259 characters for the whole path) are shortened on upload instead of refused, the same way each time, and listed by the name given (9 October 2026). [ ] Not yet built on Windows. [ ] Windows' own long paths (manifest and registry), if a test there shows every file call honours them
+- [x] The file list opens short every time: only the way to the folder being read in, the rest of each folder on the way behind "Show N more" (9 October 2026). Checked in headless Chromium, computer and phone. [ ] On a computer, where the sidebar stays open, it is shortened only when the reader starts and when the sidebar is brought back or peeked at, not each time something else is opened
+- [ ] Session aids: "where I stopped" bookmark per document, optional timer. [x] "Where was I": the last place read and the last note, on the main front page and, coming back after two hours or more, in a card that closes by itself (9 October 2026)
+- [x] The tab bar's back button remembers places (a document, its section, how far down) and keeps at most two per document, the first and the latest, so back crosses documents instead of walking through every section of one (board branch). Holding it down lists the latest opened
 
 ## The C++ server (branch `c-server`, folder `server-cpp/`)
 
@@ -257,9 +272,12 @@ Still to do:
 - [x] Send and receive files in pieces instead of reading them whole
 - [x] HTTP Range requests, so video can be played and a large PDF fetched a piece at a time. [ ] Cache headers: everything is still sent whole each time (review, 33)
 - [x] Keep connections open between requests
-- [x] ESP-IDF project in `server-cpp/esp32/` for the LilyGO T3 V1.6.1: Wi-Fi, SD card, a state partition in the board's own flash, then the same server as on a computer (its own HTTP and TLS code, not ESP-IDF's HTTP server). It builds with PlatformIO (`pio run -d server-cpp/esp32`: 1.3 MB of the 4 MB flash); never run on a board
+- [x] ESP-IDF project in `server-cpp/esp32/` for the LilyGO T3 V1.6.1: Wi-Fi, SD card, a state partition in the board's own flash, then the same server as on a computer (its own HTTP and TLS code, not ESP-IDF's HTTP server). It builds with ESP-IDF 5.4 (`idf.py build`: 1.37 MB with the screen, updates, mDNS and, since the merge with `marginalia-engine`, books, links and anchors, in a 1.75 MB update slot) and with PlatformIO (needs Arduino-ESP32 3.x); never run on a board. The board's own plan, review and guide: `server-cpp/esp32/TODO.md`, `REVIEW.md`, `README.md`
+- [x] A full 32 GB card on the board (branch `claude/esp32-32gb-memory-efficiency-n3dz1c`): no 3 GB quota, the card's free space is the limit (FatFS's own count); what the folder holds is measured once at start-up and then counted as the server writes, instead of walking every file for each upload and storage question; no watcher (only the server writes to the card, so it announces its own changes); the document list streamed to a file on the card, never held as a JSON tree, with folder names sorted in 32 KB (a bigger folder is read in passes); folders listed through FatFS directly (sizes come with the directory, no `stat` per file); files of 2 to 4 GB served correctly; fewer FatFS file slots and no per-file sector buffers (about 65 KB of heap back). On 20,000 files the list peaked at 180 KB of heap, against 26 to 35 MB before (review, 24 and 32)
 - [ ] Flash it: card prepared with `make card CARD=/Volumes/…`, Wi-Fi name and password in `HUB_WIFI_SSID` / `HUB_WIFI_PASSWORD`, then `pio run -d server-cpp/esp32 -t upload` and `pio device monitor`
-- [ ] Measure free memory with 1 to 4 HTTPS connections open; lower the connection limit if needed
+- [ ] Measure free memory with 1 to 4 HTTPS connections open; lower the connection limit if needed. `GET /api/device` on the board reports free memory, the least since start-up and the largest block
+- [ ] Titles survive a rebuild of the list: after any change the board reads the start of every markdown and HTML file again (fine for hundreds, slow for thousands on SPI)
+- [ ] Upload limit on the board: 4 MB, though uploads go to the card in pieces and memory is not what limits them; time and the 4 connection places are
 - [ ] Show the address, the certificate fingerprint and the pairing code on the board's screen (they go to the serial monitor for now)
 - [ ] Answer to `hub.local` (mDNS component)
 - [ ] One hub on two computers (Windows and the Mac, one running at a time), so a phone keeps the one installed reader and what it saved to the device. Three parts:
@@ -273,6 +291,14 @@ Still to do:
 - [x] Copy the page and its scripts to the card (`hub/www/`): `make card CARD=/Volumes/…`. [ ] Serve them gzipped
 - [ ] Run the page against `hubd` in a browser for a full session (only the API has been compared so far)
 - [x] `hub/server.js` deleted. The last commit that has it is `d8d878f`, if it is ever needed for comparison
+
+## Hardware for the board (9 October 2026)
+
+The board code (`server-cpp/esp32/`) targets a LilyGO T3 V1.6.1: ESP32-PICO-D4, 4 MB flash, no PSRAM, microSD on SPI. It has not been flashed yet.
+
+- [ ] **ESP32-S3 N16R8** (16 MB flash, 8 MB octal PSRAM): the board to move to. The PSRAM lifts the tightest limits (about 4 TLS connections at once; 1 MB for anything read into memory, such as a book's entry), and 16 MB leaves room for the program and the certificate partition. Needs a build target of its own: flash size 16 MB, PSRAM on (octal), a partition table, and the card's pins. GPIO 35 to 37 are taken by the PSRAM on these modules; most S3 dev boards have no card slot, so a microSD breakout (SPI, 6 wires) goes with it. The S3 can also drive the card in SD mode (SDMMC), faster than SPI. Check a clone's boot log for 16 MB flash and 8 MB PSRAM.
+- [ ] **The card:** 16 or 32 GB microSDHC, FAT32 (the board cannot read exFAT, which cards of 64 GB and more come formatted with). The documents are capped at 3 GB by the `esp32` profile (`hub.cpp`, the profile table), uploads at 4 MB each through the reader; the page's own files take about 8 MB.
+- [ ] **An e-ink display**, two ways. As the hub's screen: its address, a QR code, the authority's fingerprint and the pairing code (review, 23), held with the power off; a small SPI panel (2.9 to 4.2 inch) on the N16R8. As a reader on the board itself: `grounds-cc`'s plan (its REVIEW §12; the engine built for the S3, its own layout and fonts, books only), on the LilyGO T5-4.7 S3 (the same N16R8 module, a 4.7 inch 960×540 touch panel and a card slot); a large project.
 
 ## Idea: a C/C++ document parser for highlight continuity (EPUB and PDF)
 
@@ -290,6 +316,7 @@ Parse EPUB and PDF into a stable structure of pages / sections / paragraphs with
 
 - [ ] Decide whether the hub becomes its own code project (own branch or repo), using this repo's markdown files and folders as example content to develop with
 - [ ] Possible front-end rewrite in Preact with no build step, keeping the server as it is
+- [ ] Split `server-cpp/src/hub.cpp` (2,100 lines) into routes, auth, store, docs, usage and status: `server-cpp/esp32/ARCHITECTURE.md`, which also weighs other ways to build the board's server and recommends keeping this one
 
 ## Carried over from the first brainstorm
 

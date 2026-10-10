@@ -27,6 +27,13 @@ self.addEventListener('activate', (e) => e.waitUntil((async () => {
 
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
+  // PDF.js's character maps and standard typefaces: many small files, of which a PDF needs one or two. Each is kept the
+  // first time it is fetched, so a PDF kept on the device that needs it is drawn right without the server. The two
+  // reading typefaces likewise (/vendor/fonts/): the one chosen is kept once it has been used.
+  if (e.request.method === 'GET' && url.origin === location.origin && (url.pathname.startsWith('/vendor/pdfjs/') || url.pathname.startsWith('/vendor/fonts/'))) {
+    e.respondWith(caches.open(CACHE).then(async (cache) => (await cache.match(url.pathname)) || fetch(url.pathname).then((r) => { if (r.ok) cache.put(url.pathname, r.clone()); return r; })));
+    return;
+  }
   if (e.request.method !== 'GET' || url.origin !== location.origin || !(SHELL.includes(url.pathname) || LATER.includes(url.pathname))) return;
   e.respondWith((async () => {
     const cache = await caches.open(CACHE), held = await cache.match(url.pathname);
