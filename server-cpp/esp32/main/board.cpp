@@ -1,8 +1,12 @@
-// The board-specific part of the hub: LilyGO T3 V1.6.1 (ESP32-PICO-D4, 4 MB
-// flash, no extra RAM, microSD on its own SPI pins). It brings up what the
-// server needs and then runs the same server as on a computer:
+// The board-specific part of the hub: LilyGO T3 LoRa32 V1.6.1 (ESP32-PICO-D4,
+// 4 MB flash, no extra RAM, microSD on its own SPI pins). Boards sold as V1.6.2,
+// and the clones, use the same wiring as far as LilyGO's own pin tables show; if
+// the card does not mount, check SD_* below against the board's silkscreen. It
+// brings up what the server needs and then runs the same server as on a computer:
 //
-//   /sdcard/hub   the documents (what `hubd <folder>` is given on a computer)
+//   /sdcard/hub   the documents (what `hubd <folder>` is given on a computer).
+//                 A FAT32 card of up to 32 GB; the server lets the folder fill
+//                 it, keeping 16 MB free.
 //   /sdcard/hub/www   the page: index.html, app.js, local.js, vault.js, trust.html,
 //                 trust.js and vendor/{marked,highlight,purify}.js. The server
 //                 leaves this folder out of the document list.
@@ -23,6 +27,7 @@
 #include "esp_netif_sntp.h"
 #include "esp_pthread.h"
 #include "esp_vfs_fat.h"
+#include "diskio_sdmmc.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
@@ -48,9 +53,22 @@ int hub_main(int argc, char **argv);
 static const int SD_MOSI = 15, SD_MISO = 2, SD_CLK = 14, SD_CS = 13;
 
 static const char *TAG = "hub";
+static const char CARD[] = "/sdcard";
 static EventGroupHandle_t wifi_events;
 static char ip_text[16] = "";
 extern "C" const char *board_ip() { return ip_text[0] ? ip_text : nullptr; }
+
+// The card's drive as FatFS names it ("1:"; the state partition is mounted first).
+// The server reads the card's folders and large files with FatFS itself (see
+// ../src/fs.hpp), so it needs to turn a path into the drive's own form:
+// "/sdcard/hub/a.md" -> "1:/hub/a.md".
+static char card_drive[4] = "";
+extern "C" bool board_fat_path(const char *path, char *out, size_t size) {
+  const size_t m = sizeof CARD - 1;
+  if (!card_drive[0] || std::strncmp(path, CARD, m) != 0 || (path[m] != '/' && path[m] != '\0')) return false;
+  int n = std::snprintf(out, size, "%s%s", card_drive, path[m] ? path + m : "/");
+  return n > 0 && static_cast<size_t>(n) < size;
+}
 
 static void on_event(void *, esp_event_base_t base, int32_t id, void *data) {
   if (base == WIFI_EVENT && (id == WIFI_EVENT_STA_START || id == WIFI_EVENT_STA_DISCONNECTED)) esp_wifi_connect();
@@ -96,8 +114,12 @@ static void set_clock() {
 }
 
 static bool mount_storage() {
+  // Each file that may be open at once costs a slot made at mount time, and
+  // with ESP-IDF's per-file cache each slot holds a sector buffer of its own
+  // (4 KB here, because the state partition uses 4 KB sectors). The state
+  // partition is a few small files read at start and rarely written.
   esp_vfs_fat_mount_config_t mount = {};
-  mount.max_files = 8;
+  mount.max_files = 3;
   mount.format_if_mount_failed = true; // the state partition is formatted on first boot
   wl_handle_t wl;
   if (esp_vfs_fat_spiflash_mount_rw_wl("/state", "state", &mount, &wl) != ESP_OK) { ESP_LOGE(TAG, "cannot mount the state partition"); return false; }
@@ -114,8 +136,15 @@ static bool mount_storage() {
   slot.gpio_cs = static_cast<gpio_num_t>(SD_CS);
   slot.host_id = static_cast<spi_host_device_t>(host.slot);
   mount.format_if_mount_failed = false; // never format the card: it holds the documents
+  // On the card: an upload, a notes or settings save and a title being read can
+  // be open together, on each of the 4 connections at most. Files being sent
+  // are opened through FatFS directly and take no slot.
+  mount.max_files = 6;
   sdmmc_card_t *card;
-  if (esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot, &mount, &card) != ESP_OK) { ESP_LOGE(TAG, "no SD card, or it is not FAT32"); return false; }
+  if (esp_vfs_fat_sdspi_mount(CARD, &host, &slot, &mount, &card) != ESP_OK) { ESP_LOGE(TAG, "no SD card, or it is not FAT32"); return false; }
+  BYTE drive = ff_diskio_get_pdrv_card(card);
+  if (drive < 10) { card_drive[0] = static_cast<char>('0' + drive); card_drive[1] = ':'; card_drive[2] = '\0'; }
+  ESP_LOGI(TAG, "card: %llu MB, FatFS drive %s", static_cast<unsigned long long>(card->csd.capacity) * card->csd.sector_size >> 20, card_drive);
   return true;
 }
 

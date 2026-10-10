@@ -26,6 +26,8 @@
 #include <atomic>
 #include <cctype>
 #include <cerrno>
+#include <climits>
+#include <cstdint>
 #include <chrono>
 #include <csignal>
 #include <cstdio>
@@ -38,6 +40,7 @@
 #include <thread>
 #include <vector>
 
+#include "fs.hpp"
 #include "secure.hpp"
 
 namespace http {
@@ -170,6 +173,17 @@ class Conn {
   }
   bool write_all(const std::string &s) { return write_all(s.data(), s.size()); }
 
+  // For a connection kept open to send events: whether the other side has
+  // closed it. A page listening for events never sends anything after its
+  // request, so anything to read (a TLS close notice, the end of the stream)
+  // means it has gone. Does not wait.
+  bool gone() {
+    if (!ahead.empty()) return true;
+    pollfd p{fd, POLLIN, 0};
+    int rc = ::poll(&p, 1, 0);
+    return rc > 0 || (rc < 0 && errno != EINTR);
+  }
+
  private:
   bool wait(short events) {
     auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - Clock::now()).count();
@@ -283,6 +297,7 @@ struct Response {
   // When `file` is set the body is that file's bytes [offset, offset + length), sent in pieces.
   std::string file;
   unsigned long long offset = 0, length = 0;
+  std::shared_ptr<void> keep; // whatever must outlive the sending (the file of a cached document list)
   bool hold = false;  // the handler wrote its own response and keeps the connection (event stream)
   bool close = false; // do not reuse the connection after this
 };
@@ -356,16 +371,15 @@ inline bool write_response(Conn &conn, const Response &r, bool keep, size_t piec
   conn.within(30000 + static_cast<long>(length / 8)); // at least 8 KB a second
   if (!conn.write_all(head)) return false;
   if (r.file.empty()) return conn.write_all(r.body);
-  FILE *f = std::fopen(r.file.c_str(), "rb");
-  bool ok = f && ::fseeko(f, static_cast<off_t>(r.offset), SEEK_SET) == 0;
+  fs::Reader f;
+  bool ok = f.open(r.file) && f.seek(r.offset);
   std::vector<char> chunk(piece);
   unsigned long long left = r.length;
   while (ok && left > 0) {
-    size_t n = std::fread(chunk.data(), 1, static_cast<size_t>(std::min<unsigned long long>(chunk.size(), left)), f);
+    size_t n = f.read(chunk.data(), static_cast<size_t>(std::min<unsigned long long>(chunk.size(), left)));
     if (n == 0) ok = false; // the file shrank after its size was announced
     else { ok = conn.write_all(chunk.data(), n); left -= n; }
   }
-  if (f) std::fclose(f);
   return ok && left == 0;
 }
 
@@ -433,8 +447,11 @@ inline int read_head(const std::shared_ptr<Conn> &conn, Request &req) {
   auto cl = req.headers.find("content-length");
   if (cl != req.headers.end()) {
     char *end = nullptr;
+    errno = 0;
     unsigned long long v = std::strtoull(cl->second.c_str(), &end, 10);
     if (end == cl->second.c_str() || *end != '\0' || !std::isdigit(static_cast<unsigned char>(cl->second[0]))) return 400;
+    // On the board size_t is 32 bits: a larger length must not wrap round to a small one.
+    if (v > SIZE_MAX || (v == ULLONG_MAX && errno == ERANGE)) return 413;
     req.content_length = req.body_left = static_cast<size_t>(v);
   } else if (req.headers.count("transfer-encoding")) {
     return 400;
@@ -466,7 +483,7 @@ inline void handle_connection(std::shared_ptr<Conn> conn, const Handler &handler
     int bad = read_head(conn, req);
     if (bad < 0) return;
     if (bad) {
-      const char *why = bad == 431 ? "headers too large" : bad == 408 ? "too slow" : "bad request";
+      const char *why = bad == 431 ? "headers too large" : bad == 408 ? "too slow" : bad == 413 ? "body too large" : "bad request";
       write_response(*conn, error(bad, why), false, opt.piece);
       return;
     }

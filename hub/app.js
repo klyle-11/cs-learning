@@ -731,7 +731,7 @@ function renderPrivacy() {
     if (!durable) d.title = 'Browsers keep an installed app\'s storage (Add to Home Screen, or Install) and that of sites you use often. Nothing here expires by itself.';
     rows.push(d);
   }
-  if (storage) rows.push(line('Server storage', mb(storage.used) + ' used' + (storage.quota ? ' of ' + mb(storage.quota) : '')));
+  if (storage) rows.push(line('Server storage', mb(storage.used) + ' used' + (storage.quota ? ' of ' + mb(storage.quota) : '') + (storage.free ? ', ' + mb(storage.free) + ' free on its disk' : '')));
   box.replaceChildren(...rows);
   // How full the server is: asked for at most twice a minute.
   if (session && net.online && Date.now() - storageAt > 30000) {
@@ -2621,14 +2621,28 @@ function listen() {
   events.onopen = () => setOnline(true);
   events.onmessage = onFileChange;
 }
-async function onFileChange(e) {
-  const { file } = JSON.parse(e.data);
-  if (file.endsWith('notes.json')) return loadNotes();
-  if (file === 'hub.json' || file === config.front || file === 'FRONTPAGE.md') await loadConfig();
+// Changes come in bursts (a folder of files uploaded, a notes file rewritten
+// twice), and every list fetched means the server walks the whole folder; on
+// the board that takes seconds. So changes are gathered until a quarter of a
+// second passes without one, and then dealt with once.
+const changedFiles = new Set();
+let changeTimer = 0;
+function onFileChange(e) {
+  changedFiles.add(JSON.parse(e.data).file);
+  clearTimeout(changeTimer);
+  changeTimer = setTimeout(applyChanges, 250);
+}
+async function applyChanges() {
+  const files = [...changedFiles];
+  changedFiles.clear();
+  if (files.some((f) => f.endsWith('notes.json'))) await loadNotes();
+  const others = files.filter((f) => !f.endsWith('notes.json'));
+  if (!others.length) return;
+  if (others.some((f) => f === 'hub.json' || f === config.front || f === 'FRONTPAGE.md')) await loadConfig();
   await loadDocs();
   if (editing) return;
   for (let i = 0; i < state.panes.length; i++) {
-    if (state.panes[i].active !== file) continue;
+    if (!others.includes(state.panes[i].active)) continue;
     renderTabs(i);
     await showDoc(i, null, true);
     if (i === state.active) renderOutline();

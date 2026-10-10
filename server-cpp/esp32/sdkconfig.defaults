@@ -7,6 +7,10 @@ CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 CONFIG_FATFS_LFN_HEAP=y
 CONFIG_FATFS_MAX_LFN=255
 CONFIG_WL_SECTOR_SIZE_4096=y
+# Open files share one sector buffer per drive instead of holding one each.
+# With 4 KB sectors (above) that is 4 KB saved for every file slot and every
+# file being sent; files are mostly read in 4 KB pieces straight past it anyway.
+CONFIG_FATFS_PER_FILE_CACHE=n
 # TLS: the board has no spare memory, so the outgoing buffer is small and
 # buffers are only held while in use. About 4 connections fit.
 CONFIG_MBEDTLS_TLS_SERVER=y
@@ -16,6 +20,8 @@ CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=4096
 CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
 CONFIG_MBEDTLS_THREADING_C=y
 CONFIG_MBEDTLS_THREADING_PTHREAD=y
+# ESP-IDF turns the "alternate" threading on by default; mbedTLS takes one or the other
+# CONFIG_MBEDTLS_THREADING_ALT is not set
 CONFIG_MBEDTLS_HARDWARE_AES=y
 CONFIG_MBEDTLS_HARDWARE_SHA=y
 CONFIG_MBEDTLS_HARDWARE_MPI=y

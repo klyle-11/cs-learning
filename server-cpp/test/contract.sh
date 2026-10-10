@@ -2,6 +2,8 @@
 # Runs the same requests against the Node server and the C++ server, each on its
 # own copy of a small fixture folder, and compares the answers.
 #   ./test/contract.sh        (from server-cpp/, after `make`)
+#   HUBD_ARGS="--profile esp32" HUB_QUOTA_MB=0 ./test/contract.sh
+#                             the same against the board's limits (no quota on either side)
 set -u
 cd "$(dirname "$0")/.."
 REPO="$(cd .. && pwd)"
@@ -34,7 +36,7 @@ fixture "$WORK/cpp/ws"
 # that nothing is answered without a paired device's token.
 PORT=$NODE_PORT HUB_STATE="$WORK/node/state" HUB_PAIR_LOCAL=1 node "$REPO/hub/server.js" "$WORK/node/ws" > "$WORK/node.log" 2>&1 &
 NODE_PID=$!
-./hubd "$WORK/cpp/ws" --port $CPP_PORT --www "$REPO/hub" --state "$WORK/cpp/state" --pair-local > "$WORK/cpp.log" 2>&1 &
+./hubd "$WORK/cpp/ws" --port $CPP_PORT --www "$REPO/hub" --state "$WORK/cpp/state" --pair-local ${HUBD_ARGS:-} > "$WORK/cpp.log" 2>&1 &
 CPP_PID=$!
 # wait until both answer (the memory-checked build starts slowly)
 for port in $NODE_PORT $CPP_PORT; do

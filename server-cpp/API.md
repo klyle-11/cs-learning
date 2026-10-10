@@ -80,7 +80,7 @@ Node only, for now: `POST /api/upload?...&workspace=<name>` (upload into a works
 data: {"file":"relative/path.md"}
 ```
 
-Node uses the operating system's file-change notifications; the C++ server compares modification times at an interval set by the device profile, because the ESP32 has no notification API.
+Node uses the operating system's file-change notifications. The C++ server on a computer looks the folder over at an interval set by the device profile and compares modification times and sizes, because there is no portable notification API (and the ESP32 has none). On the board nothing but the server writes to the card, so it does not look at all: it sends each change as it makes it, the moment it is saved.
 
 ## Device profile (C++ server only)
 
@@ -91,13 +91,15 @@ Node uses the operating system's file-change notifications; the C++ server compa
   "watchMs": 500, "cacheAssets": true, "cacheListing": true }
 ```
 
-| Profile | Chosen when | Upload limit | Folder checked every | Page and scripts kept in memory |
-|---|---|---|---|---|
-| `desktop` | 1 GB of memory or more | 200 MB | 0.5 s | yes |
-| `small` | under 1 GB (Raspberry Pi Zero class) | 50 MB | 1 s | yes |
-| `esp32` | built with ESP-IDF | 4 MB | 5 s | no |
+On the board it also reports memory in bytes: `heapFree` now, `heapLeast` (the lowest since start-up) and `heapLargest` (the largest single block, which is what a large allocation can get).
 
-All three keep the document list until a file in the folder changes. `--profile <name>` forces one, which is how the ESP32 limits are tried on a computer.
+| Profile | Chosen when | Upload limit | Changes found by | Document list kept | Quota | Page and scripts kept in memory |
+|---|---|---|---|---|---|---|
+| `desktop` | 1 GB of memory or more | 200 MB | looking the folder over every 0.5 s | in memory | 20 GB | yes |
+| `small` | under 1 GB (Raspberry Pi Zero class) | 50 MB | looking it over every 1 s | in memory | 8 GB | yes |
+| `esp32` | built with ESP-IDF | 4 MB | the server's own writes (nothing else writes to the card) | in a file on the card, `.hub-cache/` | none: the card's free space, less 16 MB | no |
+
+All three keep the document list until something listed changes, and keep a running count of what the folder holds rather than measuring it for each request (see Storage). On the board the list is written out as it is made, never held whole in memory, and sorting a folder's names may use 32 KB: a larger folder is read again as many times as needed, each pass listing the next run of names in order. `--profile <name>` forces one, which is how the ESP32 limits are tried on a computer; `--profile esp32` then also assumes nothing else changes the folder while the server runs.
 
 ## Security
 
@@ -132,7 +134,7 @@ The one exception is a reader that was loaded from another hub and is paired wit
 | `POST /api/pair/code` | `{ "code": "ABCD-EFGH", "minutes": 10 }`: a code for the next device |
 | `GET /api/devices` | `[{ "id", "name", "created", "seen", "current" }]` |
 | `DELETE /api/devices/<id>` | `{ "ok": true }`; that device is locked out at once. 404 for an unknown id |
-| `GET /api/storage` | `{ "used", "quota", "free" }` in bytes (`quota` 0: no limit) |
+| `GET /api/storage` | `{ "used", "quota", "free" }` in bytes (`quota` 0: no limit; `free` is what the disk has free, 0 if unknown) |
 
 With no device paired yet and the server reachable from the network (or `--pair-local`), a first code is printed on the terminal at start-up.
 
@@ -142,15 +144,17 @@ With no device paired yet and the server reachable from the network (or `--pair-
 - `/raw/…`: `sandbox allow-same-origin` and no script source at all, so a saved HTML page or an SVG never runs code, whether shown in the reader's frame or opened in a tab of its own; pictures, styles and fonts from this server only. (PDFs are sent without it: a browser's PDF viewer does not start in a sandbox.)
 - everything else: `default-src 'none'; sandbox`.
 
-**6. Storage.** Uploads and new notes are refused with 507 `storage is full` when the folder would pass its quota (`--quota-mb`, `HUB_QUOTA_MB`; default by profile, 20 GB on a computer) or the disk would be left with under 16 MB.
+**6. Storage.** Uploads and new notes are refused with 507 `storage is full` when the folder would pass its quota (`--quota-mb`, `HUB_QUOTA_MB`; default by profile: 20 GB on a computer, none on the board) or the disk would be left with under 16 MB. On the board the disk is the card, and its free space comes from FatFS's own count.
+
+The C++ server measures the folder once and then keeps count as it writes (uploads, notes, settings, removed folders). On the board that count stays exact, because nothing else writes to the card. On a computer, where other programs do, the count is refreshed by every look over the folder (the change watcher, the document list) and redone when older than 3 seconds.
 
 ## Limits the C++ server enforces
 
 - 16 KB of request headers (431 beyond that), which must arrive within 15 seconds in all
 - 1 MB for JSON bodies (both servers), and the profile's upload limit for uploads (413), decided from `Content-Length` before the body is read
-- `Content-Length` only; chunked request bodies are refused (400)
+- `Content-Length` only; chunked request bodies are refused (400), and so is a length larger than the machine can count (413; on the board sizes are 32 bits)
 - a body gets 30 seconds plus its size at 32 KB a second; an answer gets 30 seconds plus its size at 8 KB a second
 - a fixed number of connections at once (64 on a computer, 4 on the ESP32); the rest are turned away. An idle connection is kept for its next request for 5 seconds (2 on the ESP32)
-- files are sent and received a piece at a time, never held whole in memory
+- files are sent and received a piece at a time, never held whole in memory; on the board files of 2 to 4 GB (the most FAT32 holds) are read through FatFS, past the 2 GB limit of the board's `off_t`
 - an error in one connection ends that connection only
 - listens on `127.0.0.1` unless started with `--host 0.0.0.0`

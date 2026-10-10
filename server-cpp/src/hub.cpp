@@ -10,22 +10,24 @@
 // from this machine itself, must carry the token of a paired device. Beyond
 // this machine the server only speaks HTTPS.
 //
-// File access goes through dirent/stat/stdio only, which ESP-IDF maps onto an
-// SD card, so these handlers are meant to move to the ESP32 unchanged.
+// File access goes through dirent/stat/stdio, which ESP-IDF maps onto an SD
+// card, and through fs.hpp where the card needs FatFS itself (listing folders,
+// files over 2 GB), so these handlers run on the ESP32 unchanged.
 #include <dirent.h>
 #include <sys/stat.h>
 #ifndef ESP_PLATFORM
 #include <ifaddrs.h>
-#include <sys/statvfs.h>
 #endif
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <cstring>
 #include <ctime>
-#include <fstream>
 #include <mutex>
 #include <set>
 #include <sstream>
+#include <string_view>
 #include <vector>
 
 #include "../vendor/cJSON.h"
@@ -45,19 +47,27 @@ static const size_t MAX_JSON = 1 << 20;          // 1 MB for API bodies
 struct Profile {
   const char *name;
   size_t max_upload;   // largest file accepted by /api/upload
-  int watch_ms;        // how often the folder is checked for changes
+  // Nothing but this server changes the folder (a card in the board). It then
+  // tells open pages about its own changes and keeps its own count of what is
+  // stored, and never looks the folder over for changes made by others.
+  bool sole_writer;
+  int watch_ms;        // otherwise: how often the folder is looked over for changes
   bool cache_assets;   // keep index.html and the scripts in memory between requests
-  bool cache_listing;  // keep the document list until a file changes
+  bool cache_listing;  // keep the document list until a file changes...
+  bool listing_on_disk;// ...in a file beside the documents instead of in memory
   int max_conns;       // connections served at once (each TLS connection costs tens of KB)
   int max_streams;     // open pages listening for changes
   size_t piece;        // bytes moved at a time when sending or receiving a file
   long keepalive_ms;   // how long an idle connection is kept
-  unsigned long long quota_mb; // most the folder may hold in total
+  unsigned long long quota_mb; // most the folder may hold in total; 0: whatever the disk has free
+  size_t sort_budget;  // most memory spent on names to sort the folders for the list; 0: no limit
 };
 static const Profile PROFILES[] = {
-    {"desktop", 200u << 20, 500, true, true, 64, 16, 64 * 1024, 5000, 20480},  // a computer: plenty of memory, fast disk
-    {"small", 50u << 20, 1000, true, true, 24, 8, 16 * 1024, 5000, 8192},      // a Raspberry Pi class board: under 1 GB of memory
-    {"esp32", 4u << 20, 5000, false, true, 4, 2, 4 * 1024, 2000, 3072},        // a microcontroller: SD card, a few hundred KB free
+    {"desktop", 200u << 20, false, 500, true, true, false, 64, 16, 64 * 1024, 5000, 20480, 0}, // a computer: plenty of memory, fast disk
+    {"small", 50u << 20, false, 1000, true, true, false, 24, 8, 16 * 1024, 5000, 8192, 0},     // a Raspberry Pi class board: under 1 GB of memory
+    // A microcontroller with a microSD card (FAT32, up to 32 GB) and a few hundred KB of memory.
+    // The card is the limit: no quota of its own.
+    {"esp32", 4u << 20, true, 0, false, true, true, 4, 2, 4 * 1024, 2000, 0, 32 * 1024},
 };
 static Profile profile = PROFILES[0];
 static unsigned device_cores = 1;
@@ -93,44 +103,63 @@ static string squeeze(const string &s) {
 static bool is_file(const string &p) { struct stat st; return ::stat(p.c_str(), &st) == 0 && S_ISREG(st.st_mode); }
 static bool is_dir(const string &p) { struct stat st; return ::stat(p.c_str(), &st) == 0 && S_ISDIR(st.st_mode); }
 
+// A whole file as a string. The size is asked first so the text is held once,
+// not grown and copied (the notes file is read on every note saved).
 static bool read_file(const string &p, string &out) {
-  std::ifstream f(p, std::ios::binary);
-  if (!f) return false;
-  std::ostringstream ss;
-  ss << f.rdbuf();
-  out = ss.str();
-  return true;
-}
-// The first `max` bytes of a file: enough to find a title without reading a large file whole.
-static bool read_start(const string &p, string &out, size_t max) {
   FILE *f = std::fopen(p.c_str(), "rb");
   if (!f) return false;
-  out.resize(max);
-  out.resize(std::fread(&out[0], 1, max, f));
+  out.clear();
+  if (std::fseek(f, 0, SEEK_END) == 0) {
+    long n = std::ftell(f);
+    if (n > 0) out.reserve(static_cast<size_t>(n));
+    std::rewind(f);
+  }
+  char chunk[1024];
+  size_t n;
+  while ((n = std::fread(chunk, 1, sizeof chunk, f)) > 0) out.append(chunk, n);
+  bool ok = !std::ferror(f);
   std::fclose(f);
-  return true;
+  return ok;
 }
 static void make_dirs(const string &dir) {
   for (size_t i = 1; i <= dir.size(); i++) {
     if (i == dir.size() || dir[i] == '/') ::mkdir(dir.substr(0, i).c_str(), 0755);
   }
 }
+// Every change this server makes to the folder is reported here: it keeps the
+// count of what is stored and, on the board, tells open pages (see "how much is
+// stored" and "live reload" below).
+static void changed(const string &abs, long long delta);
+
 // Write to a temporary file and rename, so a crash or power cut never leaves a
-// half-written file behind.
-static bool write_file(const string &p, const string &data) {
+// half-written file behind. `tail` is written after `data`.
+static bool write_file(const string &p, const char *data, size_t len, const char *tail = "") {
   make_dirs(dirname_of(p));
+  uint64_t before = 0;
+  fs::file_size(p, before);
   string tmp = p + ".tmp";
-  {
-    std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
-    if (!f) return false;
-    f.write(data.data(), static_cast<std::streamsize>(data.size()));
-    if (!f) return false;
-  }
-  return secure::replace(tmp, p);
+  FILE *f = std::fopen(tmp.c_str(), "wb");
+  if (!f) return false;
+  const size_t more = std::strlen(tail);
+  bool ok = std::fwrite(data, 1, len, f) == len && std::fwrite(tail, 1, more, f) == more;
+  ok = std::fclose(f) == 0 && ok;
+  if (!ok || !secure::replace(tmp, p)) { ::unlink(tmp.c_str()); return false; }
+  changed(p, static_cast<long long>(len + more) - static_cast<long long>(before));
+  return true;
+}
+static bool write_file(const string &p, const string &data) { return write_file(p, data.data(), data.size()); }
+// A JSON tree saved as text, the text held once (not also copied into a string).
+static bool write_json(const string &p, const cJSON *node) {
+  char *text = cJSON_Print(node);
+  if (!text) return false;
+  bool ok = write_file(p, text, std::strlen(text), "\n");
+  cJSON_free(text);
+  return ok;
 }
 
 // Delete a folder and everything in it. Links are removed, never followed.
-static bool remove_tree(const string &dir) {
+// What the removed files held is added to `freed`.
+static bool remove_tree(const string &dir, unsigned long long &freed) {
   DIR *d = ::opendir(dir.c_str());
   if (!d) return false;
   bool ok = true;
@@ -139,9 +168,10 @@ static bool remove_tree(const string &dir) {
     if (name == "." || name == "..") continue;
     string abs = dir + "/" + name;
     struct stat st;
-    if (::lstat(abs.c_str(), &st) != 0) { ok = false; continue; }
-    if (S_ISDIR(st.st_mode)) ok = remove_tree(abs) && ok;
-    else ok = ::unlink(abs.c_str()) == 0 && ok;
+    if (fs::lstat(abs.c_str(), &st) != 0) { ok = false; continue; }
+    if (S_ISDIR(st.st_mode)) ok = remove_tree(abs, freed) && ok;
+    else if (::unlink(abs.c_str()) == 0) freed += S_ISREG(st.st_mode) ? fs::size_of(st) : 0;
+    else ok = false;
   }
   ::closedir(d);
   return ::rmdir(dir.c_str()) == 0 && ok;
@@ -266,6 +296,53 @@ static bool first_h1(const string &md, string &title, size_t *line_start = nullp
   return false;
 }
 
+// Titles come from the start of a file only (its first 64 KB), read through a
+// small buffer: a 64 KB block at once is more than the board can count on
+// finding free, and most titles are in the first line anyway.
+static const size_t TITLE_SCAN = 64 * 1024;
+
+// The first "# Heading" among the lines that start in the first 64 KB. A line
+// longer than the buffer is judged by its first kilobyte.
+static bool md_title(FILE *f, string &title) {
+  char line[1024];
+  size_t seen = 0;
+  while (seen < TITLE_SCAN && std::fgets(line, sizeof line, f)) {
+    size_t n = std::strlen(line);
+    seen += n;
+    if (line[0] == '#' && first_h1(string(line, n), title)) return true;
+    if (n > 0 && line[n - 1] != '\n') {
+      int c;
+      while (seen < TITLE_SCAN && (c = std::fgetc(f)) != EOF && c != '\n') seen++;
+    }
+  }
+  return false;
+}
+
+// <title>…</title> in the first 64 KB, in any case.
+static bool html_title(FILE *f, string &title) {
+  string window; // the tail of what was read, which may hold the start of the tag; then the tag onwards
+  bool open = false;
+  char chunk[1024];
+  size_t seen = 0, n;
+  while (seen < TITLE_SCAN && (n = std::fread(chunk, 1, std::min(sizeof chunk, TITLE_SCAN - seen), f)) > 0) {
+    seen += n;
+    window.append(chunk, n);
+    string low = lower(window);
+    if (!open) {
+      size_t at = low.find("<title");
+      if (at == string::npos) { window.erase(0, window.size() > 5 ? window.size() - 5 : 0); continue; }
+      window.erase(0, at);
+      low.erase(0, at);
+      open = true;
+    }
+    size_t start = low.find('>');
+    size_t end = start == string::npos ? string::npos : low.find("</title>", start);
+    if (end != string::npos) { title = trim(window.substr(start + 1, end - start - 1)); return !title.empty(); }
+    if (window.size() > 8 * 1024) return false; // that long, it is not a title
+  }
+  return false;
+}
+
 static cJSON *default_highlights() {
   static const char *types[][3] = {{"important", "Important", "#fbeeb0"}, {"definition", "Definition", "#cfe8c6"},
                                    {"question", "Question", "#cfe0f5"}, {"unclear", "Unclear", "#f6d0d6"}};
@@ -306,10 +383,11 @@ static cJSON *read_config() {
   }
   cJSON_DeleteItemFromObjectCaseSensitive(cfg, "front");
   cJSON_DeleteItemFromObjectCaseSensitive(cfg, "root");
-  string md, title;
-  if (read_file(ROOT + "/" + FRONT, md)) {
+  string title;
+  if (FILE *f = std::fopen((ROOT + "/" + FRONT).c_str(), "rb")) {
     cJSON_AddStringToObject(cfg, "front", FRONT);
-    if (first_h1(md, title)) set_str(cfg, "title", title);
+    if (md_title(f, title)) set_str(cfg, "title", title);
+    std::fclose(f);
   } else {
     cJSON_AddNullToObject(cfg, "front");
   }
@@ -329,16 +407,16 @@ static bool matches(const string &rel, const Strings &list) {
 // ---- the document list -----------------------------------------------------------
 
 // Names sort the way a person expects: case-insensitive, digit runs as numbers.
-static bool natural_less(const string &a, const string &b) {
+static bool natural_less(std::string_view a, std::string_view b) {
   size_t i = 0, j = 0;
   while (i < a.size() && j < b.size()) {
     if (std::isdigit(static_cast<unsigned char>(a[i])) && std::isdigit(static_cast<unsigned char>(b[j]))) {
       size_t i2 = i, j2 = j;
       while (i2 < a.size() && std::isdigit(static_cast<unsigned char>(a[i2]))) i2++;
       while (j2 < b.size() && std::isdigit(static_cast<unsigned char>(b[j2]))) j2++;
-      string na = a.substr(i, i2 - i), nb = b.substr(j, j2 - j);
-      na.erase(0, std::min(na.find_first_not_of('0'), na.size() - 1));
-      nb.erase(0, std::min(nb.find_first_not_of('0'), nb.size() - 1));
+      std::string_view na = a.substr(i, i2 - i), nb = b.substr(j, j2 - j);
+      na.remove_prefix(std::min(na.find_first_not_of('0'), na.size() - 1));
+      nb.remove_prefix(std::min(nb.find_first_not_of('0'), nb.size() - 1));
       if (na.size() != nb.size()) return na.size() < nb.size();
       if (na != nb) return na < nb;
       i = i2;
@@ -353,45 +431,195 @@ static bool natural_less(const string &a, const string &b) {
   return a.size() - i < b.size() - j;
 }
 
-static string title_of(const string &abs) {
-  string name = basename_of(abs), text, title;
-  if (is_html(name)) {
-    if (read_start(abs, text, 64 * 1024)) {
-      string low = lower(text);
-      size_t open = low.find("<title");
-      size_t start = open == string::npos ? string::npos : low.find('>', open);
-      size_t end = start == string::npos ? string::npos : low.find("</title>", start);
-      if (end != string::npos && !trim(text.substr(start + 1, end - start - 1)).empty()) return trim(text.substr(start + 1, end - start - 1));
-    }
-    return name;
+static string title_of(const string &abs, const string &name) {
+  const bool html = is_html(name), md = ends_with(name, ".md");
+  if (!html && !md) return name;
+  string title;
+  if (FILE *f = std::fopen(abs.c_str(), "rb")) {
+    bool found = html ? html_title(f, title) : md_title(f, title);
+    std::fclose(f);
+    if (found) return title;
   }
-  if (!ends_with(name, ".md")) return name;
-  if (read_start(abs, text, 64 * 1024) && first_h1(text, title)) return title;
-  return name.substr(0, name.size() - 3);
+  return html ? name : name.substr(0, name.size() - 3);
 }
 
-static void walk(const string &dir, const string &rel, const Strings &ignore, const Strings &side, cJSON *out) {
-  DIR *d = ::opendir(dir.c_str());
-  if (!d) return;
-  Strings names;
-  while (dirent *e = ::readdir(d)) names.push_back(e->d_name);
-  ::closedir(d);
-  std::sort(names.begin(), names.end(), natural_less);
-  for (const string &name : names) {
-    string r = rel.empty() ? name : rel + "/" + name, abs = dir + "/" + name;
-    if (name[0] == '.' || matches(r, ignore)) continue;
-    if (is_dir(abs)) {
-      if (name == "node_modules" || name == "notes" || abs == WWW) continue;
-      walk(abs, r, ignore, side, out);
-    } else if (readable(name) || is_media(name)) {
-      cJSON *doc = cJSON_CreateObject();
-      cJSON_AddStringToObject(doc, "path", r.c_str());
-      cJSON_AddStringToObject(doc, "group", rel.c_str());
-      cJSON_AddStringToObject(doc, "title", title_of(abs).c_str());
-      cJSON_AddBoolToObject(doc, "side", matches(r, side));
-      cJSON_AddBoolToObject(doc, "front", r == FRONT);
-      cJSON_AddItemToArray(out, doc);
+// The list is written out as it is made, to memory or to a file, never held as
+// a tree of JSON objects: for a few thousand documents that tree alone would be
+// several times what the board has free.
+struct Sink {
+  string *mem = nullptr; // either this...
+  FILE *file = nullptr;  // ...or this, written a few KB at a time
+  string buf;
+  bool ok = true;
+  void put(const char *s, size_t n) {
+    if (mem) { mem->append(s, n); return; }
+    buf.append(s, n);
+    if (buf.size() >= 4096) flush();
+  }
+  void put(const char *s) { put(s, std::strlen(s)); }
+  void flush() {
+    if (file && !buf.empty()) ok = std::fwrite(buf.data(), 1, buf.size(), file) == buf.size() && ok;
+    buf.clear();
+  }
+  // A JSON string, escaped the way cJSON escapes it.
+  void str(const string &s) {
+    put("\"", 1);
+    size_t from = 0;
+    for (size_t i = 0; i < s.size(); i++) {
+      const unsigned char c = static_cast<unsigned char>(s[i]);
+      if (c >= 0x20 && c != '"' && c != '\\') continue;
+      put(s.data() + from, i - from);
+      from = i + 1;
+      switch (c) {
+        case '"': put("\\\"", 2); break;
+        case '\\': put("\\\\", 2); break;
+        case '\b': put("\\b", 2); break;
+        case '\f': put("\\f", 2); break;
+        case '\n': put("\\n", 2); break;
+        case '\r': put("\\r", 2); break;
+        case '\t': put("\\t", 2); break;
+        default: { char esc[8]; std::snprintf(esc, sizeof esc, "\\u%04x", c); put(esc, 6); }
+      }
     }
+    put(s.data() + from, s.size() - from);
+    put("\"", 1);
+  }
+};
+
+struct Listing {
+  Strings ignore, side;
+  Sink *out;
+  size_t budget;     // the profile's sort_budget
+  size_t held = 0;   // what the folders being walked hold now, outer ones included
+  bool first = true;
+};
+
+static void walk(const string &dir, const string &rel, Listing &ls);
+
+// Whether an entry is in the list (a folder: whether it is walked).
+static bool listed(bool is_dir, const string &name, const string &r, const string &abs, const Listing &ls) {
+  if (name[0] == '.' || matches(r, ls.ignore)) return false;
+  if (is_dir) return name != "node_modules" && name != "notes" && abs != WWW;
+  return readable(name) || is_media(name);
+}
+static void list_entry(const string &dir, const string &rel, const string &name, bool is_dir, Listing &ls) {
+  string r = rel.empty() ? name : rel + "/" + name, abs = dir + "/" + name;
+  if (is_dir) { walk(abs, r, ls); return; }
+  Sink &o = *ls.out;
+  o.put(ls.first ? "{\"path\":" : ",{\"path\":");
+  ls.first = false;
+  o.str(r);
+  o.put(",\"group\":");
+  o.str(rel);
+  o.put(",\"title\":");
+  o.str(title_of(abs, name));
+  o.put(matches(r, ls.side) ? ",\"side\":true" : ",\"side\":false");
+  o.put(r == FRONT ? ",\"front\":true}" : ",\"front\":false}");
+}
+
+// The order of the list: natural_less, with names it finds equal ("a01",
+// "a1") put in byte order so the order is total and the same on every disk.
+static bool name_less(std::string_view a, std::string_view b) { return natural_less(a, b) || (!natural_less(b, a) && a < b); }
+
+// Some of one folder's names, held compactly: one buffer of entries ("d" or
+// "f", the name, a 0 byte) and an offset per entry. A vector rather than a
+// string because its reserve() allocates exactly what is asked (a string's may
+// double), which is what keeps the budget a budget.
+struct Names {
+  std::vector<char> text;
+  std::vector<uint32_t> at;
+  std::string_view name(size_t i) const { return std::string_view(text.data() + at[i] + 1); }
+  bool is_dir(size_t i) const { return text[at[i]] == 'd'; }
+  size_t bytes() const { return text.capacity() + at.capacity() * sizeof(uint32_t); }
+  // Room for one more name of `len` bytes within `budget` (0: no limit), less
+  // what is `held` elsewhere. Two names always fit, so a pass always gets somewhere.
+  bool room(size_t len, size_t budget, size_t held) {
+    size_t need_t = text.size() + len + 2, need_a = at.size() + 1;
+    size_t cap_t = text.capacity() >= need_t ? text.capacity() : std::max(need_t, text.capacity() + text.capacity() / 2);
+    size_t cap_a = at.capacity() >= need_a ? at.capacity() : std::max(need_a, at.capacity() + at.capacity() / 2);
+    if (budget && at.size() >= 2 && held + cap_t + cap_a * sizeof(uint32_t) > budget) return false;
+    text.reserve(cap_t);
+    at.reserve(cap_a);
+    return true;
+  }
+  void add(bool dir, const string &name) {
+    at.push_back(static_cast<uint32_t>(text.size()));
+    text.push_back(dir ? 'd' : 'f');
+    text.insert(text.end(), name.begin(), name.end());
+    text.push_back('\0');
+  }
+  void sort() { std::sort(at.begin(), at.end(), [&](uint32_t x, uint32_t y) { return name_less(text.data() + x + 1, text.data() + y + 1); }); }
+  // Keep the first `n` (by name, after sort()), moving them down in place.
+  void keep_first(size_t n) {
+    at.resize(n);
+    std::sort(at.begin(), at.end());
+    size_t w = 0;
+    for (uint32_t &x : at) {
+      size_t len = std::strlen(text.data() + x + 1) + 2;
+      std::memmove(text.data() + w, text.data() + x, len);
+      x = static_cast<uint32_t>(w);
+      w += len;
+    }
+    text.resize(w);
+    sort();
+  }
+};
+
+// One folder, in name order, each folder inside walked in its place. When the
+// folder has more names than the budget leaves room for (a few thousand
+// pictures, on the board), it is read more than once: each pass keeps the
+// lowest names it can hold, after those already listed, and lists them. Reading
+// a folder again costs far less than memory the board does not have.
+static void walk(const string &dir, const string &rel, Listing &ls) {
+  Names b;
+  string after;       // the last name listed by an earlier pass
+  bool more = true, first_pass = true;
+  while (more) {
+    string below;     // names from here on are left to the next pass
+    more = false;
+    b.text.clear();
+    b.at.clear();
+    fs::each(dir, [&](const fs::Entry &e) {
+      string name = e.name;
+      if ((!first_pass && !name_less(after, name)) || (more && !name_less(name, below))) return;
+      if (!listed(e.dir, name, rel.empty() ? name : rel + "/" + name, dir + "/" + name, ls)) return;
+      while (!b.room(name.size(), ls.budget, ls.held)) {
+        // Full: keep the lower half; the rest, from the first name let go, waits for the next pass.
+        b.sort();
+        size_t keep = b.at.size() / 2;
+        below = string(b.name(keep));
+        more = true;
+        b.keep_first(keep);
+        if (!name_less(name, below)) return;
+      }
+      b.add(e.dir, name);
+    });
+    b.sort();
+    const size_t mine = b.bytes();
+    ls.held += mine;
+    bool let_go = false;
+    for (size_t i = 0; i < b.at.size(); i++) {
+      string name(b.name(i));
+      // A folder inside one that holds most of the budget: let this folder's
+      // names go while that one is walked, so it has room of its own, then read
+      // on from it.
+      if (b.is_dir(i) && ls.budget && mine > ls.budget / 2) {
+        ls.held -= mine;
+        std::vector<char>().swap(b.text);
+        std::vector<uint32_t>().swap(b.at);
+        let_go = true;
+        list_entry(dir, rel, name, true, ls);
+        after = name;
+        more = true;
+        break;
+      }
+      list_entry(dir, rel, name, b.is_dir(i), ls);
+    }
+    if (!let_go) {
+      ls.held -= mine;
+      if (more) after = string(b.name(b.at.size() - 1));
+    }
+    first_pass = false;
   }
 }
 
@@ -403,7 +631,7 @@ static cJSON *read_notes() {
   if (!cJSON_IsArray(notes)) { cJSON_Delete(notes); notes = cJSON_CreateArray(); }
   return notes;
 }
-static bool write_notes(const cJSON *notes) { return write_file(ROOT + "/notes/notes.json", dump(notes, true) + "\n"); }
+static bool write_notes(const cJSON *notes) { return write_json(ROOT + "/notes/notes.json", notes); }
 
 static string new_id() {
   static const char digits[] = "0123456789abcdefghijklmnopqrstuvwxyz";
@@ -421,7 +649,7 @@ static string now_iso() {
   auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() % 1000;
   std::tm tm{};
   ::gmtime_r(&t, &tm);
-  char buf[40];
+  char buf[80]; // room for any int the compiler can imagine in each field (the board's build stops on a warning)
   std::snprintf(buf, sizeof buf, "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, static_cast<int>(ms));
   return buf;
 }
@@ -431,6 +659,8 @@ static string now_iso() {
 // each device's token is kept, so the file alone lets nobody in.
 
 #ifdef ESP_PLATFORM
+#include "esp_heap_caps.h"
+#include "esp_system.h"
 extern "C" const char *board_ip();
 #endif
 static bool pair_local = false;        // even this machine's own browser must pair
@@ -642,102 +872,145 @@ static string device_cookie(const string &value, bool tls, bool clear = false) {
 }
 
 // ---- how much is stored ---------------------------------------------------------------------
+// The folder is measured by looking it over once; from then on the count
+// follows the server's own writes (uploads, notes, settings, removed folders).
+// On the board nothing else writes to the card, so that count stays exact and
+// the folder is never walked again for it. On a computer other programs write
+// too: every look over the folder made for another reason (the change watcher,
+// the document list) refreshes the count, and one older than 3 seconds is
+// redone when it is needed.
 
-static unsigned long long quota_bytes = 0;      // 0: no limit
+static unsigned long long quota_bytes = 0;      // 0: no limit but the disk's free space
 static std::mutex usage_lock;
-static unsigned long long usage_cache = 0;
-static http::Clock::time_point usage_at;
+static long long usage_count = 0;
 static bool usage_known = false;
+static http::Clock::time_point usage_at;
+// Moves on whenever something that can change the document list changes.
+static std::atomic<unsigned long long> generation{1};
 
-static unsigned long long tree_size(const string &dir) {
-  unsigned long long total = 0;
-  DIR *d = ::opendir(dir.c_str());
-  if (!d) return 0;
-  while (dirent *e = ::readdir(d)) {
-    string name = e->d_name;
-    if (name == "." || name == "..") continue;
-    string abs = dir + "/" + name;
-    struct stat st;
-    if (::stat(abs.c_str(), &st) != 0) continue;
-    if (S_ISDIR(st.st_mode)) { if (abs != WWW) total += tree_size(abs); }
-    else if (S_ISREG(st.st_mode)) total += static_cast<unsigned long long>(st.st_size);
-  }
-  ::closedir(d);
-  return total;
+// What one look over the folder finds. `stamp` changes when a file pages care
+// about (not hidden, not in node_modules, not a .tmp being written) is added,
+// removed, resized or rewritten. It is a sum, so it needs no list of paths and
+// does not depend on the order the disk gives them in.
+struct Scan {
+  unsigned long long bytes = 0, files = 0, stamp = 0;
+  std::map<string, long long> *each = nullptr; // when wanted: every such file with its own stamp
+};
+static unsigned long long mix(unsigned long long x) { // the last step of splitmix64
+  x ^= x >> 30; x *= 0xbf58476d1ce4e5b9ULL;
+  x ^= x >> 27; x *= 0x94d049bb133111ebULL;
+  return x ^ (x >> 31);
+}
+static void scan(const string &dir, const string &rel, bool watched, Scan &s) {
+  fs::each(dir, [&](const fs::Entry &e) {
+    string name = e.name, abs = dir + "/" + name, r = rel.empty() ? name : rel + "/" + name;
+    const bool w = watched && name[0] != '.' && name != "node_modules";
+    if (e.dir) { if (abs != WWW) scan(abs, r, w, s); return; }
+    s.bytes += e.size;
+    s.files++;
+    if (!w || ends_with(name, ".tmp")) return;
+    const long long own = e.time * 1000003LL + static_cast<long long>(e.size);
+    unsigned long long h = 1469598103934665603ULL;
+    for (char ch : r) h = (h ^ static_cast<unsigned char>(ch)) * 1099511628211ULL;
+    s.stamp += mix(h ^ static_cast<unsigned long long>(own));
+    if (s.each) (*s.each)[r] = own;
+  });
+}
+static Scan look_over(std::map<string, long long> *each = nullptr) {
+  Scan s;
+  s.each = each;
+  scan(ROOT, "", true, s);
+  std::lock_guard<std::mutex> g(usage_lock);
+  usage_count = static_cast<long long>(s.bytes);
+  usage_at = http::Clock::now();
+  usage_known = true;
+  return s;
 }
 static unsigned long long used_bytes() {
-  std::lock_guard<std::mutex> g(usage_lock);
-  if (!usage_known || http::Clock::now() - usage_at > std::chrono::seconds(3)) {
-    usage_cache = tree_size(ROOT);
-    usage_at = http::Clock::now();
-    usage_known = true;
+  {
+    std::lock_guard<std::mutex> g(usage_lock);
+    const bool stale = !usage_known || (!profile.sole_writer && http::Clock::now() - usage_at > std::chrono::seconds(3));
+    if (!stale) return usage_count > 0 ? static_cast<unsigned long long>(usage_count) : 0;
   }
-  return usage_cache;
+  return look_over().bytes;
 }
+static void used_more(long long n) { std::lock_guard<std::mutex> g(usage_lock); if (usage_known) usage_count += n; }
+// What the disk has free (on the board: the card, from FatFS's own count). ~0 if unknown.
 static unsigned long long free_bytes() {
-#ifndef ESP_PLATFORM
-  struct statvfs v;
-  if (::statvfs(ROOT.c_str(), &v) == 0) return static_cast<unsigned long long>(v.f_bavail) * static_cast<unsigned long long>(v.f_frsize);
-#endif
-  return ~0ULL;
+  uint64_t total, free;
+  return fs::space(ROOT, total, free) ? free : ~0ULL;
 }
 // Whether `more` bytes may be added: under the quota, and leaving the disk 16 MB to breathe.
 static bool room_for(unsigned long long more) {
   if (free_bytes() < more + (16ULL << 20)) return false;
   return quota_bytes == 0 || used_bytes() + more <= quota_bytes;
 }
-static void used_more(unsigned long long n) { std::lock_guard<std::mutex> g(usage_lock); usage_cache += n; }
 
 // ---- live reload: tell open pages which file changed --------------------------------
-// No file-watching API is assumed (the ESP32 has none): the tree's modification
-// times are compared once a second.
+// There is no portable file-watching API (and the ESP32 has none). On the
+// board none is needed: the server announces its own changes as it makes them.
+// Elsewhere the folder is looked over every watch_ms and compared.
 
 static std::mutex clients_lock;
 static std::vector<std::shared_ptr<http::Conn>> clients;
 
-static void snapshot(const string &dir, const string &rel, std::map<string, long long> &out) {
-  DIR *d = ::opendir(dir.c_str());
-  if (!d) return;
-  while (dirent *e = ::readdir(d)) {
-    string name = e->d_name;
-    if (name[0] == '.' || name == "node_modules" || ends_with(name, ".tmp")) continue;
-    string abs = dir + "/" + name, r = rel.empty() ? name : rel + "/" + name;
-    struct stat st;
-    if (::stat(abs.c_str(), &st) != 0) continue;
-    if (S_ISDIR(st.st_mode)) { if (abs != WWW) snapshot(abs, r, out); }
-    else out[r] = static_cast<long long>(st.st_mtime) * 1000003LL + static_cast<long long>(st.st_size);
-  }
-  ::closedir(d);
-}
-// Send one line to every open page; a page that cannot take it is dropped.
+// Send one line to every open page; a page that cannot take it, or has gone, is dropped.
 static void tell_clients(const string &line) {
   std::lock_guard<std::mutex> g(clients_lock);
   for (size_t i = 0; i < clients.size();) {
     clients[i]->within(2000);
-    if (clients[i]->write_all(line)) i++;
+    if (!clients[i]->gone() && clients[i]->write_all(line)) i++;
     else clients.erase(clients.begin() + static_cast<long>(i));
   }
 }
+static void announce(const string &rel) {
+  Json msg(cJSON_CreateObject());
+  cJSON_AddStringToObject(msg.p, "file", rel.c_str());
+  tell_clients("data: " + dump(msg.p) + "\n\n");
+}
+// Whether a change to `rel` is one pages hear about, and whether it can change the list.
+static bool watched_path(const string &rel, bool &in_list) {
+  in_list = true;
+  size_t pos = 0;
+  while (pos <= rel.size()) {
+    size_t end = rel.find('/', pos);
+    if (end == string::npos) end = rel.size();
+    std::string_view part(rel.data() + pos, end - pos);
+    if (part.empty() || part[0] == '.' || part == "node_modules") return false;
+    if (part == "notes") in_list = false; // the notes folder is never listed
+    pos = end + 1;
+  }
+  return !ends_with(rel, ".tmp");
+}
+static void changed(const string &abs, long long delta) {
+  used_more(delta);
+  if (!starts_with(abs, ROOT + "/")) return;
+  const string rel = abs.substr(ROOT.size() + 1);
+  bool in_list;
+  if (!watched_path(rel, in_list)) return;
+  if (in_list) generation++;
+  if (profile.sole_writer) announce(rel); // elsewhere the watcher reports it
+}
 static void watch_loop() {
   std::map<string, long long> before;
-  snapshot(ROOT, "", before);
+  try { look_over(&before); } catch (...) {}
   auto pinged = http::Clock::now();
   for (;;) {
     std::this_thread::sleep_for(std::chrono::milliseconds(profile.watch_ms));
     { std::lock_guard<std::mutex> g(clients_lock); if (clients.empty()) continue; }
-    // A comment line now and then finds pages that have gone away, freeing their place.
-    if (http::Clock::now() - pinged > std::chrono::seconds(20)) { tell_clients(": ping\n\n"); pinged = http::Clock::now(); }
-    std::map<string, long long> after;
-    snapshot(ROOT, "", after);
-    Strings changed;
-    for (const auto &kv : after) { auto it = before.find(kv.first); if (it == before.end() || it->second != kv.second) changed.push_back(kv.first); }
-    for (const auto &kv : before) if (!after.count(kv.first)) changed.push_back(kv.first);
-    before.swap(after);
-    for (const string &file : changed) {
-      Json msg(cJSON_CreateObject());
-      cJSON_AddStringToObject(msg.p, "file", file.c_str());
-      tell_clients("data: " + dump(msg.p) + "\n\n");
-    }
+    // Running out of memory here gives up this turn, not the server.
+    try {
+      // A comment line now and then finds pages that have gone away, freeing their place.
+      if (http::Clock::now() - pinged > std::chrono::seconds(20)) { tell_clients(": ping\n\n"); pinged = http::Clock::now(); }
+      std::map<string, long long> after;
+      look_over(&after);
+      Strings files;
+      for (const auto &kv : after) { auto it = before.find(kv.first); if (it == before.end() || it->second != kv.second) files.push_back(kv.first); }
+      for (const auto &kv : before) if (!after.count(kv.first)) files.push_back(kv.first);
+      before.swap(after);
+      if (!files.empty()) generation++;
+      for (const string &file : files) announce(file);
+    } catch (...) {}
   }
 }
 
@@ -748,8 +1021,6 @@ static void watch_loop() {
 struct CachedFile { long long stamp; string body; };
 static std::mutex cache_lock;
 static std::map<string, CachedFile> asset_cache;
-static string listing_cache;
-static unsigned long long listing_stamp = 0;
 
 static long long stamp_of(const string &abs) {
   struct stat st;
@@ -757,12 +1028,13 @@ static long long stamp_of(const string &abs) {
 }
 // A file sent a piece at a time, straight from disk.
 static http::Response file_response(const string &abs, const char *type) {
-  struct stat st;
-  if (::stat(abs.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) return http::error(404, "no such file");
+  bool dir;
+  uint64_t size;
+  if (!fs::info(abs, dir, size) || dir) return http::error(404, "no such file");
   http::Response r;
   r.type = type;
   r.file = abs;
-  r.length = static_cast<unsigned long long>(st.st_size);
+  r.length = size;
   return r;
 }
 static http::Response asset_response(const string &abs, const char *type) {
@@ -777,17 +1049,43 @@ static http::Response asset_response(const string &abs, const char *type) {
   r.body = c.body;
   return r;
 }
-// One number that changes whenever any file in the folder is added, removed,
-// resized or modified. Costs one stat per file and reads none of them.
-static unsigned long long tree_stamp() {
-  std::map<string, long long> snap;
-  snapshot(ROOT, "", snap);
-  unsigned long long h = 1469598103934665603ULL;
-  for (const auto &kv : snap) {
-    for (char ch : kv.first) h = (h ^ static_cast<unsigned char>(ch)) * 1099511628211ULL;
-    h = (h ^ static_cast<unsigned long long>(kv.second)) * 1099511628211ULL;
-  }
-  return h;
+// The document list, kept between requests until something listed changes.
+// On the board it may be larger than the free memory, so it is kept in a file
+// in a hidden folder beside the documents (CACHE). Each new list is a new file;
+// an old one is deleted once the last answer still sending it has finished.
+static string CACHE;
+struct ListFile {
+  string path;
+  uint64_t size = 0;
+  ~ListFile() { if (::unlink(path.c_str()) == 0) used_more(-static_cast<long long>(size)); }
+};
+static std::mutex listing_lock;  // one list made at a time: two pages asking at once share the work
+static string listing_mem;
+static std::shared_ptr<ListFile> listing_file;
+static unsigned long long listing_gen = 0, listing_stamp = 0, listing_made = 0;
+static bool listing_ok = false;
+
+static void make_list(Sink &out) {
+  Json cfg(read_config());
+  Listing ls{list_of(cfg.p, "ignore"), list_of(cfg.p, "side"), &out, profile.sort_budget};
+  out.put("[");
+  walk(ROOT, "", ls);
+  out.put("]");
+  out.flush();
+}
+// Into a new file in CACHE; null if it could not be written (a full disk).
+static std::shared_ptr<ListFile> make_list_file() {
+  auto file = std::make_shared<ListFile>();
+  file->path = CACHE + "/docs-" + std::to_string(++listing_made) + ".json";
+  make_dirs(CACHE);
+  std::unique_ptr<FILE, int (*)(FILE *)> f(std::fopen(file->path.c_str(), "wb"), std::fclose);
+  if (!f) return nullptr;
+  Sink out;
+  out.file = f.get();
+  make_list(out);
+  if (std::fclose(f.release()) != 0 || !out.ok || !fs::file_size(file->path, file->size)) return nullptr;
+  used_more(static_cast<long long>(file->size));
+  return file;
 }
 
 // What each kind of answer is allowed to do once a browser has it.
@@ -976,7 +1274,8 @@ static http::Response answer(http::Request &req) {
     Json out(cJSON_CreateObject());
     cJSON_AddNumberToObject(out.p, "used", static_cast<double>(used_bytes()));
     cJSON_AddNumberToObject(out.p, "quota", static_cast<double>(quota_bytes));
-    cJSON_AddNumberToObject(out.p, "free", static_cast<double>(free_bytes() == ~0ULL ? 0 : free_bytes()));
+    const unsigned long long free = free_bytes();
+    cJSON_AddNumberToObject(out.p, "free", static_cast<double>(free == ~0ULL ? 0 : free));
     return json_response(out.p);
   }
 
@@ -985,9 +1284,10 @@ static http::Response answer(http::Request &req) {
     Strings parts;
     if (!clean_parts(p.substr(5), parts, false)) return http::error(404, "not found");
     string abs = ROOT + "/" + join(parts);
-    struct stat st;
-    if (::stat(abs.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) return http::error(404, "no such file");
-    const unsigned long long size = static_cast<unsigned long long>(st.st_size);
+    bool dir;
+    uint64_t size64;
+    if (!fs::info(abs, dir, size64) || dir) return http::error(404, "no such file");
+    const unsigned long long size = size64;
     http::Response r;
     r.type = mime_of(parts.back());
     r.extra = "Accept-Ranges: bytes\r\n";
@@ -1030,6 +1330,8 @@ static http::Response answer(http::Request &req) {
   // The event stream: answer the headers here and keep the connection for watch_loop.
   if (p == "/api/events") {
     std::lock_guard<std::mutex> g(clients_lock);
+    // Places held by pages that have since closed are freed first.
+    clients.erase(std::remove_if(clients.begin(), clients.end(), [](const std::shared_ptr<http::Conn> &c) { return c->gone(); }), clients.end());
     if (static_cast<int>(clients.size()) >= profile.max_streams) return http::error(503, "too many open pages");
     http::Response r;
     req.conn->within(5000);
@@ -1040,17 +1342,27 @@ static http::Response answer(http::Request &req) {
   }
 
   if (p == "/api/docs") {
-    // Building the list reads every file for its title, so keep the answer
-    // until something in the folder changes.
-    unsigned long long stamp = profile.cache_listing ? tree_stamp() : 0;
-    if (profile.cache_listing) {
-      std::lock_guard<std::mutex> g(cache_lock);
-      if (stamp == listing_stamp && !listing_cache.empty()) { http::Response r; r.body = listing_cache; return r; }
+    // Making the list reads the start of every document for its title, so it
+    // is kept until something listed changes. On the board only this server
+    // changes the card and counts its own changes (generation); elsewhere the
+    // folder is also looked over (one stat per file, nothing read).
+    http::Response r;
+    Sink out;
+    if (!profile.cache_listing) { out.mem = &r.body; make_list(out); return r; }
+    std::lock_guard<std::mutex> g(listing_lock);
+    const unsigned long long gen = generation.load(), stamp = profile.sole_writer ? 0 : look_over().stamp;
+    if (!listing_ok || gen != listing_gen || stamp != listing_stamp) {
+      std::shared_ptr<ListFile> file = profile.listing_on_disk ? make_list_file() : nullptr;
+      listing_mem.clear();
+      if (!file) { out.mem = &listing_mem; make_list(out); listing_mem.shrink_to_fit(); } // in memory, also when the card is too full for the file
+      listing_file = file;
+      listing_gen = gen;
+      listing_stamp = stamp;
+      listing_ok = true;
     }
-    Json cfg(read_config()), docs(cJSON_CreateArray());
-    walk(ROOT, "", list_of(cfg.p, "ignore"), list_of(cfg.p, "side"), docs.p);
-    http::Response r = json_response(docs.p);
-    if (profile.cache_listing) { std::lock_guard<std::mutex> g(cache_lock); listing_cache = r.body; listing_stamp = stamp; }
+    if (!listing_file) { r.body = listing_mem; return r; }
+    r = file_response(listing_file->path, "application/json");
+    r.keep = listing_file;
     return r;
   }
 
@@ -1066,6 +1378,13 @@ static http::Response answer(http::Request &req) {
     cJSON_AddBoolToObject(d.p, "cacheListing", profile.cache_listing);
     cJSON_AddNumberToObject(d.p, "maxConnections", profile.max_conns);
     cJSON_AddNumberToObject(d.p, "quotaMB", static_cast<double>(quota_bytes >> 20));
+#ifdef ESP_PLATFORM
+    // Memory now, the least there has been since start-up, and the largest
+    // single block (what a large allocation can actually get).
+    cJSON_AddNumberToObject(d.p, "heapFree", esp_get_free_heap_size());
+    cJSON_AddNumberToObject(d.p, "heapLeast", esp_get_minimum_free_heap_size());
+    cJSON_AddNumberToObject(d.p, "heapLargest", static_cast<double>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
+#endif
     return json_response(d.p);
   }
 
@@ -1152,7 +1471,7 @@ static http::Response answer(http::Request &req) {
       cJSON_DeleteItemFromObjectCaseSensitive(file.p, "locks");
       cJSON_AddItemToObject(file.p, "locks", clean);
     }
-    if (!write_file(ROOT + "/hub.json", dump(file.p, true) + "\n")) return http::error(500, "could not save");
+    if (!write_json(ROOT + "/hub.json", file.p)) return http::error(500, "could not save");
     Json cfg(read_config());
     return json_response(cfg.p);
   }
@@ -1164,10 +1483,13 @@ static http::Response answer(http::Request &req) {
     auto it = req.query.find("path");
     struct stat st;
     if (it == req.query.end() || !clean_parts(it->second, parts, true) || parts[0] == "notes" ||
-        ::lstat((ROOT + "/" + join(parts)).c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) return http::error(400, "no such folder");
+        fs::lstat((ROOT + "/" + join(parts)).c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) return http::error(400, "no such folder");
     std::lock_guard<std::mutex> g(store_lock);
     string key = join(parts);
-    if (!remove_tree(ROOT + "/" + key)) return http::error(500, "could not remove");
+    unsigned long long freed = 0;
+    const bool removed = remove_tree(ROOT + "/" + key, freed);
+    changed(ROOT + "/" + key, -static_cast<long long>(freed));
+    if (!removed) return http::error(500, "could not remove");
     Json file(read_settings_file());
     cJSON *locks = cJSON_GetObjectItemCaseSensitive(file.p, "locks");
     if (cJSON_IsObject(locks)) {
@@ -1175,7 +1497,7 @@ static http::Response answer(http::Request &req) {
       const cJSON *l;
       cJSON_ArrayForEach(l, locks) { string k = l->string ? l->string : ""; if (k == key || k.compare(0, key.size() + 1, key + "/") == 0) gone.push_back(k); }
       for (const string &k : gone) cJSON_DeleteItemFromObjectCaseSensitive(locks, k.c_str());
-      if (!write_file(ROOT + "/hub.json", dump(file.p, true) + "\n")) return http::error(500, "could not save");
+      if (!write_json(ROOT + "/hub.json", file.p)) return http::error(500, "could not save");
     }
     Json out(cJSON_CreateObject());
     cJSON_AddStringToObject(out.p, "removed", key.c_str());
@@ -1302,7 +1624,7 @@ static http::Response answer(http::Request &req) {
     string tmp = abs + "." + secure::random_hex(4) + ".tmp";
     if (int bad = req.save_body(tmp, profile.max_upload, profile.piece)) return bad == 507 ? http::error(507, "storage is full") : bad == 500 ? http::error(500, "could not save") : body_error(bad);
     if (::rename(tmp.c_str(), abs.c_str()) != 0) { ::unlink(tmp.c_str()); return http::error(500, "could not save"); }
-    used_more(req.content_length);
+    changed(abs, static_cast<long long>(req.content_length));
     cJSON_AddBoolToObject(out.p, "saved", true);
     cJSON_AddStringToObject(out.p, "root", ROOT.c_str());
     return json_response(out.p);
@@ -1429,10 +1751,28 @@ int main(int argc, char **argv) {
 
   detect_profile(forced);
   quota_bytes = (quota_mb >= 0 ? static_cast<unsigned long long>(quota_mb) : profile.quota_mb) << 20;
+  CACHE = ROOT + "/.hub-cache";
+  if (is_dir(CACHE)) { unsigned long long freed = 0; remove_tree(CACHE, freed); } // lists left by an earlier run
   load_devices();
-  std::thread(watch_loop).detach();
   std::printf("hubd: %s://%s:%d  (reading %s)\n", tls_on ? "https" : "http", host == "0.0.0.0" ? "localhost" : host.c_str(), port, ROOT.c_str());
-  std::printf("device: %s profile, %u cores, %llu MB memory; uploads up to %zu MB, folder checked every %d ms, %d connections at once\n", profile.name, device_cores, device_memory_mb, profile.max_upload >> 20, profile.watch_ms, profile.max_conns);
+  std::printf("device: %s profile, %u cores, %llu MB memory; uploads up to %zu MB, %d connections at once\n", profile.name, device_cores, device_memory_mb, profile.max_upload >> 20, profile.max_conns);
+  if (profile.sole_writer) {
+    // Nothing else writes here: measure once now, then keep count as files are written.
+    Scan s = look_over();
+    std::printf("folder: %llu files, %llu MB; only this server changes it, so it is not watched\n", s.files, s.bytes >> 20);
+  } else {
+    std::thread(watch_loop).detach();
+    std::printf("folder: checked for changes every %d ms\n", profile.watch_ms);
+  }
+  // On the board this is also when FatFS counts the card's free space (once; a few seconds at most).
+  uint64_t disk_total = 0, disk_free = 0;
+  if (fs::space(ROOT, disk_total, disk_free)) std::printf("disk: %llu MB free of %llu MB", static_cast<unsigned long long>(disk_free >> 20), static_cast<unsigned long long>(disk_total >> 20));
+  else std::printf("disk: free space unknown");
+  if (quota_bytes) std::printf("; the folder may hold up to %llu MB\n", quota_bytes >> 20);
+  else std::printf("; the folder may fill it, less 16 MB\n");
+#ifdef ESP_PLATFORM
+  std::printf("memory: %u bytes free, largest block %u (also at /api/device)\n", static_cast<unsigned>(esp_get_free_heap_size()), static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
+#endif
   std::printf("%zu paired device%s%s\n", devices.size(), devices.size() == 1 ? "" : "s", pair_local ? "" : "; this machine's own browser needs no pairing");
   // With nobody paired yet, someone has to be let in: offer a code on the terminal.
   if (devices.empty() && (pair_local || !loopback(host))) { std::lock_guard<std::mutex> g(auth_lock); offer_code(true); }
