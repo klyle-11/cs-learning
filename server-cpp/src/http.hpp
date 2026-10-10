@@ -242,7 +242,7 @@ struct Request {
     return it == headers.end() ? none : it->second;
   }
   // How long a body of this size may take: half a minute, plus its size at 32 KB a second.
-  void body_deadline() const { conn->within(30000 + static_cast<long>(content_length / 32)); }
+  void body_deadline() const { conn->deadline = Clock::now() + std::chrono::milliseconds(30000 + static_cast<long long>(content_length / 32)); }
 
   // The body as a string. Returns 0, or the status to answer with.
   int read_body(std::string &out, size_t max) {
@@ -259,15 +259,20 @@ struct Request {
     }
     return 0;
   }
-  // The body written straight to a file, a piece at a time.
+  // The body written straight to a file, a piece at a time. Besides the time
+  // for the whole body, each piece must arrive within 30 seconds of the last,
+  // so an upload of gigabytes that stalls frees its connection in half a minute
+  // rather than at the end of its many hours.
   int save_body(const std::string &file, size_t max, size_t piece) {
     if (content_length > max) return 413;
     body_deadline();
+    const Clock::time_point end = conn->deadline;
     FILE *f = std::fopen(file.c_str(), "wb");
     if (!f) return 500;
     std::vector<char> chunk(piece);
     int status = 0;
     while (body_left > 0 && !status) {
+      conn->deadline = std::min(end, Clock::now() + std::chrono::seconds(30));
       long n = conn->read(chunk.data(), std::min(chunk.size(), body_left));
       if (n <= 0) status = 408;
       else if (std::fwrite(chunk.data(), 1, static_cast<size_t>(n), f) != static_cast<size_t>(n)) status = 507;

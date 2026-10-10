@@ -94,6 +94,11 @@ int main(int argc, char **argv) {
   s.peer_count = 6;
   draw_screen(c, s, b, 60);
   save_png(dir + "/devices-page2.png", c);
+  std::snprintf(s.peers[1].ip, sizeof s.peers[1].ip, "10.8.0.6"); // one from elsewhere (a VPN): all shown whole
+  s.peer_count = 3;
+  draw_screen(c, s, b, 10);
+  save_png(dir + "/devices-mixed.png", c);
+  std::snprintf(s.peers[1].ip, sizeof s.peers[1].ip, "192.168.1.40");
 
   std::snprintf(s.notice, sizeof s.notice, "Paired: Kai's iPhone");
   s.peer_count = 2;

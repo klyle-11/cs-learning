@@ -48,6 +48,7 @@ static const size_t MAX_JSON = 1 << 20;          // 1 MB for API bodies
 
 // What the server allows itself depends on what it is running on. The profile
 // is picked once at start-up (see detect_profile) and can be forced with --profile.
+static const size_t FAT32_MAX = 0xFFFFFFFFu; // the largest file FAT32 holds: 4 GB less a byte
 struct Profile {
   const char *name;
   size_t max_upload;   // largest file accepted by /api/upload
@@ -70,10 +71,15 @@ struct Profile {
 static const Profile PROFILES[] = {
     {"desktop", 200u << 20, false, 500, true, true, false, 64, 16, 64 * 1024, 5000, 20480, 0, 64}, // a computer: plenty of memory, fast disk
     {"small", 50u << 20, false, 1000, true, true, false, 24, 8, 16 * 1024, 5000, 8192, 0, 64},     // a Raspberry Pi class board: under 1 GB of memory
-    // A microcontroller with a microSD card (FAT32, up to 32 GB) and a few hundred KB of memory.
-    // The card is the limit: no quota of its own.
-    // Pages left open cost little once loaded (a socket and an idle TLS session), so six may listen.
-    {"esp32", 4u << 20, true, 0, false, true, true, 4, 6, 4 * 1024, 2000, 0, 32 * 1024, 10},
+    // A microcontroller with a microSD card (FAT32, up to 32 GB) and a few hundred KB of memory
+    // (the T3 V1.6.1). The card is the limit: no quota of its own. Uploads may be as large as
+    // FAT32 allows: they go to the card in pieces, so the cost is time, not memory. Pages left
+    // open cost little once loaded (a socket and an idle TLS session), so six may listen.
+    {"esp32", FAT32_MAX, true, 0, false, true, true, 4, 6, 4 * 1024, 2000, 0, 32 * 1024, 10},
+    // The same with 2 MB or more of PSRAM (the T3-S3): TLS keeps its buffers there (mbedTLS
+    // set to allocate outside), so only each connection's stack takes the internal memory;
+    // the page and scripts are kept in memory, and folders of thousands sort in one pass.
+    {"esp32-psram", FAT32_MAX, true, 0, true, true, true, 8, 12, 8 * 1024, 5000, 0, 512 * 1024, 10},
 };
 static Profile profile = PROFILES[0];
 
@@ -81,8 +87,12 @@ static Profile profile = PROFILES[0];
 // TLS connection needs a 16 KB block for an incoming record, and a thread
 // stack; without them a newcomer waits (http::serve) or is refused, rather than
 // failing halfway through and taking memory others need.
+// With PSRAM, TLS buffers go there and only the stack (12 KB) needs internal memory.
 static bool memory_for_one_more() {
 #ifdef ESP_PLATFORM
+  if (heap_caps_get_total_size(MALLOC_CAP_SPIRAM) > 0)
+    return heap_caps_get_free_size(MALLOC_CAP_INTERNAL) > 40 * 1024 && heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) > 16 * 1024 &&
+           heap_caps_get_free_size(MALLOC_CAP_SPIRAM) > 96 * 1024;
   return esp_get_free_heap_size() > 48 * 1024 && heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) > 20 * 1024;
 #else
   return true;
@@ -257,7 +267,8 @@ static const char *mime_of(const string &name) {
 static void detect_profile(const string &forced) {
   device_cores = std::max(1u, std::thread::hardware_concurrency());
 #ifdef ESP_PLATFORM
-  profile = PROFILES[2];
+  profile = heap_caps_get_total_size(MALLOC_CAP_SPIRAM) >= (1u << 20) ? PROFILES[3] : PROFILES[2];
+  device_memory_mb = (heap_caps_get_total_size(MALLOC_CAP_INTERNAL) + heap_caps_get_total_size(MALLOC_CAP_SPIRAM)) >> 20;
 #else
   long pages = ::sysconf(_SC_PHYS_PAGES), page_size = ::sysconf(_SC_PAGESIZE);
   if (pages > 0 && page_size > 0) device_memory_mb = static_cast<unsigned long long>(pages) * static_cast<unsigned long long>(page_size) >> 20;
@@ -1588,6 +1599,7 @@ static http::Response answer(http::Request &req) {
     cJSON_AddNumberToObject(d.p, "cores", device_cores);
     cJSON_AddNumberToObject(d.p, "memoryMB", static_cast<double>(device_memory_mb));
     cJSON_AddNumberToObject(d.p, "maxUploadMB", static_cast<double>(profile.max_upload >> 20));
+    cJSON_AddNumberToObject(d.p, "maxUpload", static_cast<double>(profile.max_upload));
     cJSON_AddNumberToObject(d.p, "watchMs", profile.watch_ms);
     cJSON_AddBoolToObject(d.p, "cacheAssets", profile.cache_assets);
     cJSON_AddBoolToObject(d.p, "cacheListing", profile.cache_listing);
@@ -1599,6 +1611,7 @@ static http::Response answer(http::Request &req) {
     cJSON_AddNumberToObject(d.p, "heapFree", esp_get_free_heap_size());
     cJSON_AddNumberToObject(d.p, "heapLeast", esp_get_minimum_free_heap_size());
     cJSON_AddNumberToObject(d.p, "heapLargest", static_cast<double>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
+    cJSON_AddNumberToObject(d.p, "psramFree", static_cast<double>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)));
 #endif
     return json_response(d.p);
   }
@@ -1848,13 +1861,14 @@ static http::Response answer(http::Request &req) {
       return json_response(out.p);
     }
     if (!room_for(req.content_length)) { notice("Storage is full"); return http::error(507, "storage is full"); }
-    make_dirs(dirname_of(abs));
     // On the board the file is written in the small cache folder and then moved
     // into place: FAT searches a folder from its start to add a name, so a
     // temporary name beside the file would cost a big folder a second search.
+    // Its folders are made once it has all arrived, so a failed upload leaves none.
     string tmp = profile.sole_writer ? CACHE + "/up-" + secure::random_hex(4) + ".tmp" : abs + "." + secure::random_hex(4) + ".tmp";
-    if (profile.sole_writer) make_dirs(CACHE);
+    make_dirs(profile.sole_writer ? CACHE : dirname_of(abs));
     if (int bad = req.save_body(tmp, profile.max_upload, profile.piece)) return bad == 507 ? http::error(507, "storage is full") : bad == 500 ? http::error(500, "could not save") : body_error(bad);
+    if (profile.sole_writer) make_dirs(dirname_of(abs));
     if (::rename(tmp.c_str(), abs.c_str()) != 0) { ::unlink(tmp.c_str()); return http::error(500, "could not save"); }
     changed(abs, static_cast<long long>(req.content_length));
     cJSON_AddBoolToObject(out.p, "saved", true);

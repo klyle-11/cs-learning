@@ -3,8 +3,9 @@
 // after start-up and then every HUB_UPDATE_HOURS.
 //
 // What makes it safe to install by itself:
-//  - Signed. Each release carries hub-firmware.json: the version, the image's
-//    SHA-256, and an ECDSA P-256 signature over both, made on your computer
+//  - Signed. Each release carries, for each kind of chip, hub-firmware-CHIP.json
+//    (CHIP: esp32 for the T3 V1.6.1, esp32s3 for the T3-S3): the chip, the
+//    version, the image's SHA-256, and an ECDSA P-256 signature over all three, made on your computer
 //    (tools/release.sh) with a key that never leaves it. The board holds only
 //    the public half (update_key.h). Someone who takes over the GitHub account
 //    or the connection can serve anything, but cannot make the board accept it.
@@ -132,7 +133,8 @@ static string hex(const unsigned char *p, size_t n) {
 static void check_once() {
   const string repo = CONFIG_HUB_UPDATE_REPO, base = "https://github.com/" + repo + "/releases";
   int64_t length = 0;
-  esp_http_client_handle_t c = open_url(base + "/latest/download/hub-firmware.json", length);
+  const string chip = CONFIG_IDF_TARGET; // "esp32", "esp32s3": a release has an image for each
+  esp_http_client_handle_t c = open_url(base + "/latest/download/hub-firmware-" + chip + ".json", length);
   if (!c) { ESP_LOGW(TAG, "no release information from %s", repo.c_str()); return; }
   char text[1024];
   int got = 0, n;
@@ -150,8 +152,8 @@ static void check_once() {
   const string file = f->valuestring, sha = h->valuestring, sig = g->valuestring;
   cJSON_Delete(m);
   if (version <= HUB_VERSION) { ESP_LOGI(TAG, "version %d is the latest", HUB_VERSION); return; }
-  // The signed sentence. Changing any of it (a different version, a different image) breaks the signature.
-  const string message = "hub-firmware " + std::to_string(version) + " " + sha;
+  // The signed sentence. Changing any of it (another chip's image, a different version, a different image) breaks the signature.
+  const string message = "hub-firmware " + chip + " " + std::to_string(version) + " " + sha;
   if (!signed_by_us(message, sig)) { ESP_LOGE(TAG, "release %d is not signed by this board's release key: not installed", version); return; }
   const esp_partition_t *slot = esp_ota_get_next_update_partition(nullptr);
   if (!slot || size <= 0 || size > static_cast<int64_t>(slot->size)) { ESP_LOGE(TAG, "release %d does not fit the update slot", version); return; }

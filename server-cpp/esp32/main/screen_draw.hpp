@@ -14,7 +14,9 @@
 // …") cover the bottom line for a few seconds.
 #pragma once
 
+#include <cctype>
 #include <cstdio>
+#include <cstring>
 
 #include "canvas.hpp"
 #include "status.hpp"
@@ -26,45 +28,64 @@ struct BoardView {
   char name[24] = "";              // the name on the network, "hub.local", if it has one
 };
 
-// The star, in thin lines: a hollow four-pointed one, out of which four
-// diagonal rays grow and fall back, so that for a moment it is an eight-pointed
-// compass star; a dotted diamond opens around it as the rays peak, and a spark
-// twinkles at its right. It stays upright: turned, an outline this small
-// stops looking like a star. One cycle takes 64 frames, about five seconds at
-// 80 ms a frame.
+// The star, in thin lines, tall and narrow (it reaches 7 pixels up and down
+// and under 4 to the sides): a hollow four-pointed star, out of which four
+// short diagonal rays grow and fall back; a dotted diamond, tall like the star,
+// opens around it as the rays peak, and a spark twinkles at its right. It stays
+// upright: turned, an outline this small stops looking like a star. One cycle
+// takes 64 frames, about five seconds at 80 ms a frame.
 inline void draw_star(Canvas &c, int cx, int cy, unsigned frame) {
   const float pi = 3.14159265f, t = static_cast<float>(frame % 64) / 64.0f;
-  const float turn = 0;
-  auto at = [&](float r, float a, int &x, int &y) {
-    x = cx + static_cast<int>(std::lround(r * std::sin(a)));
+  const float up = 7.4f, side = 3.6f, waist = 1.9f, narrow = 0.7f; // narrow: how much the waist and rays are pulled in sideways
+  auto at = [&](float r, float a, float sx, int &x, int &y) {
+    x = cx + static_cast<int>(std::lround(r * std::sin(a) * sx));
     y = cy - static_cast<int>(std::lround(r * std::cos(a)));
   };
-  for (int i = 0; i < 8; i++) { // the outline: tips at 7 pixels, the waist at 2.6
-    int x0, y0, x1, y1;
-    at(i % 2 ? 2.6f : 7.0f, turn + static_cast<float>(i) * pi / 4, x0, y0);
-    at((i + 1) % 2 ? 2.6f : 7.0f, turn + static_cast<float>(i + 1) * pi / 4, x1, y1);
-    c.line(x0, y0, x1, y1);
+  int xs[8], ys[8];
+  for (int i = 0; i < 8; i++) {
+    const float a = static_cast<float>(i) * pi / 4;
+    if (i % 2) at(waist, a, narrow, xs[i], ys[i]);
+    else at(i % 4 == 0 ? up : side, a, 1, xs[i], ys[i]);
   }
+  for (int i = 0; i < 8; i++) c.line(xs[i], ys[i], xs[(i + 1) % 8], ys[(i + 1) % 8]);
   c.set(cx, cy);
   const float grow = std::sin(pi * t);
   if (grow > 0.1f) for (int i = 0; i < 4; i++) { // the rays, between the points
     int x0, y0, x1, y1;
-    float a = turn + pi / 4 + static_cast<float>(i) * pi / 2;
-    at(3.2f, a, x0, y0);
-    at(3.2f + 3.2f * grow, a, x1, y1);
+    const float a = pi / 4 + static_cast<float>(i) * pi / 2;
+    at(waist + 1.0f, a, narrow, x0, y0);
+    at(waist + 1.0f + 2.4f * grow, a, narrow, x1, y1);
     c.line(x0, y0, x1, y1);
   }
-  if (t > 0.4f && t < 0.7f) { // the diamond, opening
-    int r = 5 + static_cast<int>(20.0f * (t - 0.4f));
-    for (int i = 0; i <= r; i += 2) { c.set(cx + i, cy - (r - i)); c.set(cx - i, cy + (r - i)); c.set(cx + (r - i), cy + i); c.set(cx - (r - i), cy - i); }
+  if (t > 0.4f && t < 0.7f) { // the diamond, opening: as tall as it is twice wide
+    const int r = 5 + static_cast<int>(20.0f * (t - 0.4f));
+    for (int i = 0; i <= r; i += 2) {
+      const int dx = i / 2, dy = r - i;
+      c.set(cx + dx, cy - dy); c.set(cx - dx, cy + dy); c.set(cx + dx, cy + dy); c.set(cx - dx, cy - dy);
+    }
   }
   const unsigned spark = frame % 40; // a pixel, a small cross, a pixel
   for (int k = 0; k < 2; k++) {
-    unsigned s0 = k ? 20 : 0;
-    int sx = cx + 7, sy = k ? cy + 6 : cy - 6;
+    const unsigned s0 = k ? 20 : 0;
+    const int sx = cx + 6, sy = k ? cy + 5 : cy - 5;
     if (spark >= s0 && spark < s0 + 4) c.set(sx, sy);
     if (spark == s0 + 1 || spark == s0 + 2) { c.set(sx - 1, sy); c.set(sx + 1, sy); c.set(sx, sy - 1); c.set(sx, sy + 1); }
   }
+}
+
+// The start the addresses on screen all share, in whole parts and at most the
+// first two ("192.168." on a home network): left out of the device list, which
+// then shows 192.168.1.23 as "1.23". The line above still shows the board's own
+// address whole, so the part left out is in view. 0 if any address differs.
+inline size_t shared_start(const HubStatus &s) {
+  const char *ref = s.peer_count ? s.peers[0].ip : "";
+  size_t n = 0;
+  for (int dots = 0; ref[n] && dots < 2; n++) if (ref[n] == '.') dots++;
+  if (n == 0 || ref[n - 1] != '.') return 0;
+  auto shares = [&](const char *ip) { return std::strncmp(ip, ref, n) == 0; };
+  if (s.host[0] && std::isdigit(static_cast<unsigned char>(s.host[0])) && !shares(s.host)) return 0;
+  for (int i = 0; i < s.peer_count; i++) if (!shares(s.peers[i].ip)) return 0;
+  return n;
 }
 
 inline void draw_screen(Canvas &c, const HubStatus &s, const BoardView &b, unsigned frame) {
@@ -110,14 +131,16 @@ inline void draw_screen(Canvas &c, const HubStatus &s, const BoardView &b, unsig
   } else {
     // Four to a page; more turn over every four seconds, with a dot per page on the dotted line.
     const int per_page = 4, pages = (s.peer_count + per_page - 1) / per_page, page = static_cast<int>(frame / 50) % pages;
+    const size_t cut = shared_start(s);
     for (int i = 0; i < per_page && page * per_page + i < s.peer_count; i++) {
       const HubPeer &p = s.peers[page * per_page + i];
       int y = top + i * 9;
       if (p.live) c.fill(0, y + 2, 3, 3);
       else { c.set(0, y + 2); c.set(2, y + 2); c.set(0, y + 4); c.set(2, y + 4); }
-      int ip_w = Canvas::digits_width(p.ip);
+      const char *ip = p.ip + cut;
+      int ip_w = Canvas::digits_width(ip);
       c.text_fit(5, y, p.name, 128 - ip_w - 8);
-      c.digits(128 - ip_w, y + 2, p.ip);
+      c.digits(128 - ip_w, y + 2, ip);
     }
     if (pages > 1) for (int i = 0; i < pages; i++) c.fill(127 - (pages - 1 - i) * 4 - 1, 25, 2, 3, i == page);
   }

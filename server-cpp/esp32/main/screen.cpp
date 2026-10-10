@@ -1,7 +1,8 @@
-// The board's 0.96" OLED: an SSD1306, 128 x 64, on I2C (SDA 21, SCL 22) at
-// 0x3C or 0x3D. The T3 V1.6.1 wires no reset pin to it (GPIO16, used for that
-// on other boards, belongs to the ESP32-PICO-D4's own flash). Some clones carry
-// an SH1106 instead: set "OLED is an SH1106" in menuconfig (Hub).
+// The board's 0.96" OLED: an SSD1306, 128 x 64, on I2C at 0x3C or 0x3D (pins in
+// board_pins.h: SDA 21 / SCL 22 on the T3 V1.6.1, 18 / 17 on the T3-S3). Neither
+// board wires a reset pin to it (GPIO16, used for that on other boards, belongs
+// to the T3 V1.6.1's own flash). Some clones carry an SH1106 instead: set
+// "OLED is an SH1106" in menuconfig (Hub).
 //
 // A task of its own, below the server in priority, draws the screen every
 // 80 ms (screen_draw.hpp) and sends the display only the bytes that changed
@@ -13,6 +14,8 @@
 #include <cstring>
 #include <mutex>
 
+#include "esp_attr.h"
+#include "esp_heap_caps.h"
 #include "esp_idf_version.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -20,7 +23,9 @@
 #include "freertos/task.h"
 #include "sdkconfig.h"
 
+#include "board_pins.h"
 #include "screen_draw.hpp"
+#include "version.h"
 
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 2, 0)
 #include "driver/i2c_master.h"
@@ -30,7 +35,8 @@
 #endif
 
 static const char *TAG = "screen";
-static const int SDA = 21, SCL = 22;
+static const int SDA = OLED_SDA, SCL = OLED_SCL;
+static volatile bool info_wanted = false;
 
 static std::mutex view_lock;
 static BoardView view;            // what the board has asked to show
@@ -140,11 +146,23 @@ static void screen_task(void *) {
   bool all = true;
   int64_t asked = 0, changed_at = esp_timer_get_time();
   bool dim = false;
+  int64_t info_until = 0;
   for (unsigned frame = 0;; frame++) {
     const int64_t t = esp_timer_get_time();
     if (t - asked > 500000) { hub_status(status); asked = t; }
     BoardView v;
     { std::lock_guard<std::mutex> g(view_lock); v = view; }
+    if (info_wanted) { info_wanted = false; info_until = t + 8000000; changed_at = t; }
+    if (t < info_until && !v.say[0][0] && v.progress < 0) { // the button: what the board knows of itself
+      const int64_t up = t / 1000000;
+      std::snprintf(v.say[0], sizeof v.say[0], "%s  v%d", BOARD_NAME, HUB_VERSION);
+      std::snprintf(v.say[1], sizeof v.say[1], "up %lldh %02lldm", static_cast<long long>(up / 3600), static_cast<long long>(up / 60 % 60));
+      const unsigned ram = static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024), ext = static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024);
+      char mem[48];
+      if (ext) std::snprintf(mem, sizeof mem, "RAM %uK PSRAM %uK", ram, ext);
+      else std::snprintf(mem, sizeof mem, "RAM %uK free", ram);
+      std::snprintf(v.say[2], sizeof v.say[2], "%.21s", mem);
+    }
     draw_screen(now, status, v, frame);
     // After ten minutes with nothing new but the star, turn it down: an OLED
     // wears where it stays lit.
@@ -174,6 +192,7 @@ void screen_say(const char *line1, const char *line2, const char *line3) {
   copy_line(view.say[1], line1 ? line2 : nullptr);
   copy_line(view.say[2], line1 ? line3 : nullptr);
 }
+void IRAM_ATTR screen_info() { info_wanted = true; }
 void screen_progress(int percent) { std::lock_guard<std::mutex> g(view_lock); view.progress = percent; }
 void screen_alert(const char *text) { std::lock_guard<std::mutex> g(view_lock); copy_line(view.alert, text); }
 void screen_name(const char *name) { std::lock_guard<std::mutex> g(view_lock); std::snprintf(view.name, sizeof view.name, "%s", name ? name : ""); }

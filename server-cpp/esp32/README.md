@@ -1,21 +1,26 @@
-# Learner-servr on the LilyGO T3 V1.6.1
+# Learner-servr on LilyGO T3 boards
 
-The hub's server running on an ESP32 board, with the documents on a microSD card of up to 32 GB and a status screen. Same server code as on a computer (`../src`); this folder adds what only the board needs. Branch: `claude/esp32-32gb-memory-efficiency-n3dz1c`. Its plan is [TODO.md](TODO.md), its review [REVIEW.md](REVIEW.md).
+The hub's server running on an ESP32 board, with the documents on a microSD card of up to 32 GB and a status screen. Two boards: the **T3 LoRa32 V1.6.1** (ESP32) and the **T3-S3 V1.3** (ESP32-S3 with 2 MB PSRAM). Same server code as on a computer (`../src`); this folder adds what only the board needs. Branch: `claude/esp32-32gb-memory-efficiency-n3dz1c`. Its plan, with every request made on the branch, is [TODO.md](TODO.md); its review [REVIEW.md](REVIEW.md); whether it is built the right way, [ARCHITECTURE.md](ARCHITECTURE.md).
 
 **Not yet run on a board.** Everything here builds (ESP-IDF 5.4.1) and the server parts are tested on a computer with the board's settings (`--profile esp32`); the board-only parts (screen, Wi-Fi, card, updates) are checked by compiling and reading, not by running. The first flash is where they meet the hardware.
 
-## The board
+## The boards
 
-LilyGO T3 LoRa32 V1.6.1: ESP32-PICO-D4 (two cores, 240 MHz, 520 KB of RAM of which roughly 150 to 200 KB is free once Wi-Fi and TLS are up), 4 MB of flash, no PSRAM.
+| | T3 LoRa32 V1.6.1 | T3-S3 V1.3 (and V1.2) |
+|---|---|---|
+| Chip | ESP32-PICO-D4, 2 cores, 240 MHz | ESP32-S3FH4R2, 2 cores, 240 MHz |
+| Memory | 520 KB, roughly 150 to 200 KB free once Wi-Fi and TLS are up; no PSRAM | 512 KB, and 2 MB PSRAM |
+| Flash | 4 MB | 4 MB |
+| microSD (SPI) | MOSI 15, MISO 2, SCK 14, CS 13 | MOSI 11, MISO 2, SCK 14, CS 13 |
+| OLED, 0.96" SSD1306 (I2C, 0x3C/0x3D, no reset pin) | SDA 21, SCL 22 | SDA 18, SCL 17 |
+| Buttons | RESET | RESET, BOOT (GPIO 0): shows the board's details on the screen |
+| LED, battery | 25, ADC 35 (not used yet) | 37, ADC 1 (not used yet) |
+| USB | through a USB-serial chip | the chip's own USB, on USB-C |
+| Profile (limits) | `esp32`: 4 connections at once, 6 open pages | `esp32-psram`: 8 connections, 12 open pages, page and scripts kept in memory |
 
-| | Pins (from LilyGO's own board definitions) |
-|---|---|
-| microSD (SPI) | MOSI 15, MISO 2, SCK 14, CS 13 |
-| OLED, 0.96" SSD1306 128×64 (I2C, 0x3C or 0x3D) | SDA 21, SCL 22, no reset pin |
-| LED | 25 |
-| Battery voltage | ADC 35 (not used yet) |
+Pins from LilyGO's own board definitions; `main/board_pins.h` picks them by chip, so there is nothing to choose but the build target. The LoRa radio on both (SX1276 on the V1.6.1, SX1262 at 915 MHz on yours) is left alone.
 
-GPIO 2 is also a boot-mode pin: if flashing fails with a card in, take the card out while flashing. GPIO 16, which other boards use to reset the OLED, belongs to the PICO-D4's own flash here and is never touched.
+On the V1.6.1, GPIO 2 is also a boot-mode pin: if flashing fails with a card in, take the card out while flashing. GPIO 16, which other boards use to reset the OLED, belongs to the PICO-D4's own flash and is never touched. On the T3-S3, if flashing over USB-C does not start, hold BOOT while plugging it in.
 
 ## The screen
 
@@ -23,9 +28,10 @@ GPIO 2 is also a boot-mode pin: if flashing fails with a card in, take the card 
 
 ![the star](docs/screen.gif)
 
-- Top: **Learner-servr** in serif (DejaVu Serif, drawn to pixels by `tools/make-title.py`) and the star, in thin lines: a hollow four-pointed star whose diagonal rays grow until it is an eight-pointed one, a dotted diamond opening as they peak, a spark at its side. About five seconds a cycle.
+- Top: **Learner-servr** in serif (DejaVu Serif, drawn to pixels by `tools/make-title.py`) and the star, in thin lines, tall and narrow: a hollow four-pointed star whose short diagonal rays grow and fall back, a tall dotted diamond opening as they peak, a spark at its side. About five seconds a cycle.
+- On the T3-S3, the BOOT button wakes the screen and shows, for eight seconds, the board, the firmware version, how long it has been up, and free memory (internal and PSRAM).
 - Under it, the address to type: the board's IP (and port if not 443), every few seconds `hub.local` instead.
-- The rest: devices with a page open (●) or heard from in the last two minutes (○), name and IP, four at a time; while a **pairing code** is on offer, the code large, the time left, and the start of the certificate authority's fingerprint to compare with the trust page; during an update, a progress bar; at start-up and when something is wrong, what is happening and what to do.
+- The rest: devices with a page open (●) or heard from in the last two minutes (○), name and IP, four at a time (when every address shares its start with the board's, as 192.168… does at home, only what follows is shown: "1.23" for 192.168.1.23, and the board's own address above shows the rest); while a **pairing code** is on offer, the code large, the time left, and the start of the certificate authority's fingerprint to compare with the trust page; during an update, a progress bar; at start-up and when something is wrong, what is happening and what to do.
 - Bottom line, reversed, for a few seconds: what just happened ("Paired: Kai's iPhone", "Removed: …", "Storage is full"), or until it is over, "Wi-Fi lost: rejoining".
 
 After ten minutes with nothing new it dims: an OLED wears where it stays lit. Only the bytes that changed are sent each frame (the star: a few dozen; a full screen is a kilobyte), from a task below the server in priority.
@@ -63,17 +69,19 @@ ESP-IDF 5.4 (the build this branch is checked with):
 ```
 . $IDF_PATH/export.sh
 cd server-cpp/esp32
-idf.py set-target esp32
+idf.py set-target esp32    # the T3 V1.6.1;  esp32s3 for the T3-S3
 idf.py menuconfig          # Hub: name, update repository (Wi-Fi only if you will not use wifi.txt)
-idf.py -p /dev/cu.usbserial-XXXX flash monitor
+idf.py -p /dev/cu.usbserial-XXXX flash monitor     # T3-S3: the port is /dev/cu.usbmodem…
 ```
+
+`set-target` starts the configuration afresh; for the T3-S3 it also applies `sdkconfig.defaults.esp32s3` (PSRAM on, TLS buffers in PSRAM, logs on the USB-C port). Each board needs its own build of the firmware, and its own releases if you use updates (see "Updates": publish one per board, or one repository each).
 
 The first build fetches the mDNS component (`main/idf_component.yml`); without the internet it builds without it, and the board is then reachable by IP only.
 
 PlatformIO (needs Arduino-ESP32 3.x; see the top of `platformio.ini`):
 
 ```
-pio run -d server-cpp/esp32 -t upload && pio device monitor -d server-cpp/esp32
+pio run -d server-cpp/esp32 -e t3 -t upload && pio device monitor -d server-cpp/esp32      # -e t3s3 for the T3-S3
 ```
 
 **This branch changes the partition table** (two program slots for updates). The state partition, with the certificates and the paired devices, stays where it was, so nothing has to be paired again; but the table itself only changes over USB: flash once by cable (`idf.py flash` writes it), after which updates can come over the network.
@@ -107,7 +115,7 @@ The board can install new firmware by itself from your repository's releases: tw
 
 How it decides (all in `main/update.cpp`):
 
-- Each release carries `hub.bin` and `hub-firmware.json`: version, SHA-256 of the image, and an ECDSA signature over both, made on your computer. The board holds only the public half of the key (`main/update_key.h`). Someone who takes over the GitHub account or the network can offer anything; the board installs nothing that is not signed by your key.
+- Each release carries, for each kind of board, an image and a manifest (`hub-esp32.bin` and `hub-firmware-esp32.json` for the T3 V1.6.1, `…-esp32s3…` for the T3-S3): the chip, the version, the SHA-256 of the image, and an ECDSA signature over all three, made on your computer. A board fetches only its own chip's, and the chip is inside the signature, so one board's image cannot be passed to the other. The board holds only the public half of the key (`main/update_key.h`). Someone who takes over the GitHub account or the network can offer anything; the board installs nothing that is not signed by your key.
 - The version is inside the signature and must be higher than the running one: an old release, signed but with a known fault, cannot be pushed back onto it.
 - The new image goes into the other program slot; the running one stays. After restarting into it, the board keeps it only once the server has served for a minute; if it crashes or cannot start first, the bootloader goes back to the previous one by itself (ESP-IDF build: `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`; with PlatformIO this depends on the Arduino core's bootloader).
 - It waits for a moment when nobody is being served and memory is plentiful: the HTTPS connection to GitHub needs about 40 KB.
@@ -127,13 +135,13 @@ Keep the private key safe and out of git and CI: whoever has it can make every b
 Each release:
 
 ```
-# raise HUB_VERSION in main/version.h, then
-idf.py build
-tools/release.sh                 # signs build/hub.bin, writes build/release/
-gh release create v2 build/release/hub.bin build/release/hub-firmware.json --title "Board firmware v2" --latest
+# raise HUB_VERSION in main/version.h, then, for each board you have:
+idf.py -B build-esp32 -D SDKCONFIG=build-esp32/sdkconfig set-target esp32 build && tools/release.sh build-esp32
+idf.py -B build-esp32s3 -D SDKCONFIG=build-esp32s3/sdkconfig set-target esp32s3 build && tools/release.sh build-esp32s3
+gh release create v2 build/release/* --title "Board firmware v2" --latest
 ```
 
-The board fetches `https://github.com/OWNER/REPO/releases/latest/download/hub-firmware.json` without signing in, so **the repository's releases must be public**. If the code repository is private, publish firmware releases from a small public repository of their own and point the board at that one. Progress shows on the screen ("Updating", a bar, "Do not unplug"), and the board restarts into the new version.
+(Each board's build keeps its own configuration, so the two do not overwrite each other's. After the first time, drop `set-target`: it starts the configuration afresh.) The board fetches `https://github.com/OWNER/REPO/releases/latest/download/hub-firmware-CHIP.json` without signing in, so **the repository's releases must be public**. If the code repository is private, publish firmware releases from a small public repository of their own and point the board at that one. Progress shows on the screen ("Updating", a bar, "Do not unplug"), and the board restarts into the new version.
 
 ## Large videos
 
@@ -146,7 +154,7 @@ tools/shrink-video.sh lecture.mov out.mp4 480  # smaller still
 
 "Index at the front" (`+faststart`) matters most here: the browser can start and seek with a few small requests instead of first reading the end of the file over the board's Wi-Fi. A lecture or screen recording typically comes out at a quarter to a tenth of its size.
 
-Uploads through the reader are limited to 4 MB a file on the board (they go to the card in pieces, so memory is not the reason; time and the 4 connection places are). Large files go onto the card directly.
+Uploads through the reader take files up to 4 GB on both boards, the most FAT32 holds: they go to the card in pieces, so memory never limited them, only time. Expect very roughly 0.3 to 1 MB a second over Wi-Fi with HTTPS (the T3-S3 at the faster end): a 1 GB lecture is a quarter of an hour to an hour, and copying it to the card on a computer is still quicker. Use the folder button ("Upload a folder") for large files: it sends them straight from the disk. "Add files" keeps each file on the device until it is sent (so it works offline), and so takes files up to 200 MB. Whatever is left out is listed, with the reason. An upload that stops sending gives up after 30 seconds instead of holding a connection.
 
 ## Big folders
 

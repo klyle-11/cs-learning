@@ -53,12 +53,33 @@ Ticked: handled on this branch. Each says what happened before and what happens 
 
 Chosen by estimate, to be measured (the board logs the unused part of each after five minutes): connection threads 12 KB (TLS handshake, then the request, the list 10 levels deep at most), the server's start-up thread 16 KB (certificates: EC P-256, fast), the screen 6 KB, the update task 8 KB (a TLS handshake with certificate checks), the watch 6 KB.
 
+## The T3-S3 V1.3 (third round)
+
+The second board shares every line of the server and nearly all of the board code: the build target picks the pins (`main/board_pins.h`), `sdkconfig.defaults.esp32s3` adds PSRAM, and at start-up the server finds 2 MB of PSRAM and takes the `esp32-psram` profile. It builds (ESP-IDF 5.4.1, 1.27 MB, 12% of the update slot spare); it has not run.
+
+- **What PSRAM changes.** mbedTLS allocates in PSRAM (`CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC`), so a connection's 20 KB of TLS buffers leave internal memory, and only its 12 KB stack stays. Hence 8 connections and 12 open pages, the page and its scripts kept in memory (about 380 KB) instead of read from the card on every load, and 512 KB to sort folder names in one pass.
+- **What stays internal, on purpose.** Thread stacks: tasks with stacks in PSRAM cannot run while the flash cache is off (during flash writes, so during updates), and the SD card's SPI transfers would go through bounce buffers. Buffers of 16 KB and under (the 8 KB pieces files are sent in): DMA needs internal memory, and the SD driver would otherwise read a sector at a time.
+- **The memory check** counts both: 40 KB of internal memory with a 16 KB block (a stack), and 96 KB of PSRAM.
+- [ ] Measure on the board: `/api/device` gives `heapFree` (all memory), `psramFree`, `heapLargest`; the BOOT button shows internal and PSRAM free on the screen.
+- [ ] Under the PlatformIO build, whether TLS buffers go to PSRAM depends on the Arduino core's settings; the memory check keeps it safe either way, but fewer may fit.
+
+## Uploads of gigabytes (third round)
+
+- [x] **The limit was the page's, as much as the board's.** The page dropped files over 50 MB without a word (review 21), whatever the server could take; the board took 4 MB. *Now:* both boards take up to 4 GB (FAT32's largest file); the page asks the server (`/api/device`, `maxUpload`; the Node server keeps 50 MB) and lists what it leaves out, with the reason. "Add files", which keeps each file on the device until it is sent, stops at 200 MB, and says to use the folder button, which sends from the disk.
+- [x] **A stalled upload held a connection for hours.** The time allowed was the whole body's (30 s plus its size at 32 KB/s: 36 hours for 4 GB). *Now:* each piece must also arrive within 30 seconds of the last.
+- [ ] A long upload occupies one of the 4 (T3 V1.6.1) or 8 (T3-S3) places, and shares the SPI bus and the processor's TLS work with everyone else: the others slow down while it runs. Measured: not yet.
+
+## Updates for two boards (third round)
+
+- [x] Both boards fetching one release's image would have offered the T3-S3 the T3 V1.6.1's firmware (the image check would refuse it, and the S3 could then never update). *Now:* a release holds an image and a manifest per chip, and the chip is in the signed sentence, so one board's signed image cannot be passed to the other. Checked: each manifest is accepted by its own chip's code and refused by the other's.
+
 ## The screen
 
 - It shows the pairing code to whoever is in the room. That is the point (physical presence is what pairing proves: review 23 asked for the address, the fingerprint and the code on the board), but it also means anyone near the board can pair while a code is on offer. Codes last ten minutes and are offered only when no device is paired or a paired device asks.
 - It shows the names and addresses of connected devices to whoever is in the room. Fine at home; worth knowing elsewhere.
 - It never makes the server walk the card: it reads the count already kept, and only once the server is up.
 - It runs below the server in priority: under load the star stutters, the server does not.
+- Device addresses are shortened only when all of them, and the board's, share their first two parts; then the board's own, whole on the line above, carries the part left out. One address from elsewhere (a VPN) and all are shown whole, so a shortened one is never ambiguous.
 
 ## Updates
 
@@ -74,7 +95,7 @@ What an attacker needs, and what stops them:
 
 - [ ] A release that boots and serves for a minute but is wrong in some other way stays. The fix is not to publish it; the board cannot know.
 - [ ] Releases must be public (the board does not sign in to GitHub). Putting a GitHub token on the board would be a key to the repository on a removable-card device: a separate public repository for firmware is better.
-- [ ] Room: the program is 1.31 MB with mDNS in a 1.38 MB slot (about 124 KB left; IPv6 is left out of the network stack to make that). Growing the slots means shrinking the state partition, which means pairing again once.
+- [ ] Room: the program is 1.32 MB with mDNS in a 1.38 MB slot (about 122 KB left on the T3 V1.6.1, 130 KB on the T3-S3; IPv6 is left out of the network stack to make that). Growing the slots means shrinking the state partition, which means pairing again once.
 
 ## Other things checked
 

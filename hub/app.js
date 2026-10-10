@@ -298,11 +298,29 @@ $('folderInput').onchange = (e) => {
   if (files.length) offerUpload(files);
 };
 
+// The largest file the server takes in one upload. The C++ server says (its
+// /api/device: on a board, as much as the card's FAT32 holds, 4 GB); the Node
+// server has no such answer and takes 50 MB. Asked once, at start.
+let uploadLimit = 50 * 1024 * 1024;
+async function loadUploadLimit() {
+  try {
+    const r = await call('/api/device', { quiet: true });
+    const d = r.ok ? await r.json() : null;
+    if (d?.maxUpload > 0) uploadLimit = d.maxUpload;
+  } catch { /* the old limit stands */ }
+}
+
 // After a folder is picked: say what was found, and ask where it should go.
 function offerUpload(files) {
   const folder = files[0].rel.split('/')[0];
-  const ok = files.filter(({ rel, file }) => !rel.split('/').some((x) => x.startsWith('.') || x === 'node_modules') && file.size <= 50 * 1024 * 1024);
-  const said = el('p', '', `${ok.length} file${ok.length === 1 ? '' : 's'}` + (ok.length < files.length ? ` (${files.length - ok.length} hidden or oversized files left out)` : '') + '. Where should they go?');
+  const hidden = ({ rel }) => rel.split('/').some((x) => x.startsWith('.') || x === 'node_modules');
+  const big = files.filter((f) => !hidden(f) && f.file.size > uploadLimit);
+  const ok = files.filter((f) => !hidden(f) && f.file.size <= uploadLimit);
+  const skipped = files.length - ok.length - big.length;
+  const notes = [];
+  if (skipped) notes.push(`${skipped} hidden file${skipped === 1 ? '' : 's'} left out`);
+  if (big.length) notes.push(`${big.length} over ${mb(uploadLimit)}, more than the server takes, left out: ` + big.slice(0, 3).map((f) => f.rel.split('/').pop()).join(', ') + (big.length > 3 ? '…' : ''));
+  const said = el('p', '', `${ok.length} file${ok.length === 1 ? '' : 's'}` + (notes.length ? ` (${notes.join('; ')})` : '') + '. Where should they go?');
   // Every folder gets a front page. Use one it already has, pick one of its
   // top-level markdown files, or have one made.
   const tops = ok.filter(({ rel }) => rel.split('/').length === 2 && /\.md$/i.test(rel));
@@ -1031,10 +1049,19 @@ setInterval(() => { if (stuck && net.online && !gateOpen()) flush(); }, 30000);
 // ---- adding files from this device -------------------------------------------------
 // They go to the folder "inbox". With the server in reach they are sent at once;
 // without it they wait here, already openable, and are sent later.
+// Each is kept on this device until sent, so files larger than this device
+// should be asked to hold (200 MB) go by "Upload a folder" (the folder button), which sends straight
+// from the disk. Whatever is left out is listed with the reason, not dropped.
 async function addFiles(fileList) {
+  const limit = Math.min(uploadLimit, 200 * 1024 * 1024);
   for (const file of fileList) {
     const name = file.name.replace(/[\\/]/g, ' ').replace(/^\.+/, '').trim();
-    if (!name || file.size > 50 * 1024 * 1024) continue;
+    if (!name) continue;
+    if (file.size > limit) {
+      refused.push({ what: name, why: `over ${mb(limit)}: put it in a folder and use "Upload a folder" (the folder button), which sends large files straight from the disk`, ts: Date.now() });
+      store.set('refused:' + config.root, refused);
+      continue;
+    }
     let path = 'inbox/' + name;
     for (let n = 2; docs.some((d) => d.path === path); n++) path = 'inbox/' + name.replace(/(\.[^.]*)?$/, ` ${n}$1`);
     await idb.put('files', { key: keyOf(path), root: config.root, path, blob: file });
@@ -1296,15 +1323,39 @@ function fileRow(d, label) {
 // Open a document. A plain open takes the place of the pane's preview tab (the
 // one opened by the last single click); `keep` adds it as a tab that stays.
 // `side` puts it in the right-hand pane, splitting if needed.
-// Back: each pane remembers the documents it has shown, in order, so the back
-// button in its tab bar returns to the one before (a gallery after a picture,
-// the page a link was followed from). Kept for this visit only. With nothing
-// left to return to, back goes up a level instead: to the front page of the
-// folder the document is in, then the folder above, ending at the main front page.
+// Back: each pane remembers the places it has been, so the back button in its
+// tab bar returns to them: the document before (a gallery after a picture, the
+// page a link was followed from), or the section of this one that a link or the
+// outline jumped away from. A place is a document, the section the reader was
+// in, and how far down. Each document keeps at most two places in this history,
+// the first one and the latest: moving about inside a document, or coming back
+// to it later, replaces its latest place rather than adding another, so back
+// crosses documents instead of walking through every section of one, and the
+// 50 places reach further back. Kept for this visit only. With nothing left to
+// return to, back goes up a level instead: to the front page of the folder the
+// document is in, then the folder above, ending at the main front page.
 const trail = [[], []];
+function hereOf(pane) {
+  const v = views[pane], path = state.panes[pane]?.active;
+  if (!path) return null;
+  return { path, slug: v?.cur?.dataset?.slug || '', head: v?.cur?.textContent || '', y: v?.scroller ? v.scroller.scrollTop : null };
+}
 function leave(pane) {
-  const from = state.panes[pane]?.active, t = trail[pane] || (trail[pane] = []);
-  if (from && t[t.length - 1] !== from) { t.push(from); if (t.length > 50) t.shift(); }
+  const at = hereOf(pane), t = trail[pane] || (trail[pane] = []);
+  if (!at) return;
+  const last = t[t.length - 1];
+  if (last && last.path === at.path && last.slug === at.slug) { last.y = at.y; return; }
+  t.push(at);
+  const mine = t.filter((x) => x.path === at.path);
+  if (mine.length > 2) t.splice(t.indexOf(mine[1]), 1); // keep the first and this, the latest
+  if (t.length > 50) t.shift();
+}
+// A jump inside the open document (a link to a heading, the outline, a note's
+// place) is remembered, so back returns to where the reader was.
+function jumpTo(pane, slug) {
+  leave(pane);
+  goTo(pane, slug);
+  renderTabs(pane);
 }
 function upFrom(path) {
   if (!path) return null;
@@ -1317,12 +1368,31 @@ function upFrom(path) {
     folder = folderOf(folder);
   }
 }
-const backTo = (pane) => { const t = trail[pane] || []; while (t.length && (!docOf(t[t.length - 1]) || t[t.length - 1] === state.panes[pane].active)) t.pop(); return t[t.length - 1] || upFrom(state.panes[pane].active); };
+// Where back goes: the last place that still exists and is not where the
+// reader is now. Only looks: right after a jump the section being read is not
+// updated yet (that follows the scroll), so nothing may be removed on that basis.
+function backTo(pane) {
+  const t = trail[pane] || [], now = hereOf(pane);
+  for (let i = t.length - 1; i >= 0; i--) {
+    const x = t[i];
+    if (docOf(x.path) && !(now && x.path === now.path && x.slug === now.slug && x.y === now.y)) return x;
+  }
+  const up = upFrom(state.panes[pane].active);
+  return up ? { path: up, slug: '', head: '', y: null } : null;
+}
 async function goBack(pane = state.active) {
-  const path = backTo(pane);
-  if (!path) return;
-  (trail[pane] || []).pop();
-  await openDoc(path, { pane, back: true });
+  const to = backTo(pane), t = trail[pane] || [];
+  if (!to) return;
+  const at = t.lastIndexOf(to);
+  if (at >= 0) t.splice(at); // it, and anything after it that was skipped
+  if (to.path === state.panes[pane].active) { // a section of this document
+    const v = views[pane];
+    if (to.y != null && v.scroller) v.scroller.scrollTop = to.y; else if (to.slug) goTo(pane, to.slug);
+    renderTabs(pane);
+    return;
+  }
+  if (to.y != null) scrollMem.set(pane + ':' + to.path, to.y);
+  await openDoc(to.path, { pane, back: true, hash: to.y == null && to.slug ? to.slug : undefined });
 }
 document.addEventListener('keydown', (e) => { if (e.altKey && e.key === 'ArrowLeft' && !e.target.matches?.('input, textarea, [contenteditable]')) { e.preventDefault(); goBack(); } });
 
@@ -1351,7 +1421,7 @@ async function openDoc(path, { pane = state.active, side = false, hash, keep = f
       p.preview = b.path;
     }
   }
-  if (!back && p.active !== path) leave(pane);
+  if (!back && (p.active !== path || hash)) leave(pane);
   p.active = path;
   state.active = pane;
   if (rebuilt) await buildPanes(); else { renderTabs(pane); await showDoc(pane, hash); }
@@ -1414,9 +1484,10 @@ function renderTabs(pane) {
   const p = state.panes[pane], bar = views[pane].tabsEl;
   bar.innerHTML = '';
   const back = el('button', 'back keep', '‹');
-  back.title = 'Back: to what this tab showed before, then up towards the front page (Alt + ←)';
+  const to = backTo(pane);
+  back.title = to ? `Back to ${docOf(to.path)?.title || to.path}${to.head && to.path !== p.active ? ' › ' + to.head : to.head ? ': ' + to.head : ''} (Alt + ←)` : 'Back';
   back.setAttribute('aria-label', 'Back');
-  back.disabled = !backTo(pane);
+  back.disabled = !to;
   back.onclick = () => goBack(pane);
   bar.append(back);
   for (const path of p.tabs) {
@@ -2158,7 +2229,7 @@ function onDocClick(e, pane) {
   const a = e.target.closest('a');
   if (!a) return;
   const href = a.getAttribute('href') || '';
-  if (href.startsWith('#')) { e.preventDefault(); return goTo(pane, decodeURIComponent(href.slice(1))); }
+  if (href.startsWith('#')) { e.preventDefault(); return jumpTo(pane, decodeURIComponent(href.slice(1))); }
   if (/^[a-z]+:/i.test(href)) { a.target = '_blank'; a.rel = 'noopener'; return; }
   const [file, hash] = href.split('#');
   if (!file) return;
@@ -2203,7 +2274,9 @@ function renderOutline() {
     a.href = '#' + (h.dataset?.slug || '');
     a.onclick = (e) => {
       e.preventDefault();
+      leave(state.active);
       h.scrollIntoView();
+      renderTabs(state.active);
       drawer(null);
       if (h.dataset?.slug) history.replaceState(null, '', '?doc=' + encodeURIComponent(activeDoc()) + '#' + h.dataset.slug);
     };
@@ -2523,7 +2596,7 @@ function renderNotes(rehighlight = true) {
       q.onclick = () => {
         const mark = views[state.active].surface?.querySelector(`mark[data-note="${n.id}"]`);
         drawer(null);
-        if (mark) flash(mark); else goTo(state.active, n.heading);
+        if (mark) { leave(state.active); flash(mark); renderTabs(state.active); } else jumpTo(state.active, n.heading);
         selectHighlight(n.id);
       };
       div.append(q);
@@ -2537,7 +2610,7 @@ function renderNotes(rehighlight = true) {
     if (n.headingText) {
       const where = el('a', '', n.headingText);
       where.href = '#' + n.heading;
-      where.onclick = (e) => { e.preventDefault(); goTo(state.active, n.heading); };
+      where.onclick = (e) => { e.preventDefault(); jumpTo(state.active, n.heading); };
       meta.append(' · ', where);
     }
     if (pendingQuote) {
@@ -2689,6 +2762,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').cat
   }
   listen();
   loadWorkspaces();
+  loadUploadLimit();
   refused = store.get('refused:' + config.root) || [];
   outbox = store.get('outbox:' + config.root) || [];
   loadQueue();

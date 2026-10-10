@@ -1,6 +1,7 @@
 build/
 hubd
 esp32/build/
+esp32/build-*/
 esp32/sdkconfig
 esp32/sdkconfig.old
 esp32/managed_components/

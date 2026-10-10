@@ -149,6 +149,8 @@ Not yet checked on real devices: installing the authority on an iPhone and an An
 - [ ] Screen-reader pass (labels on grips, live region when a note is saved)
 - [ ] Dyslexia-friendly font option; line-by-line reading ruler
 - [ ] Session aids: "where I stopped" bookmark per document, optional timer
+- [x] The tab bar's back button remembers places (a document, its section, how far down) and keeps at most two per document, the first and the latest, so back crosses documents instead of walking through every section of one (board branch)
+- [ ] A visible list of where back would go (a long press on it), now that the list is short enough to read
 
 ## The C++ server (branch `c-server`, folder `server-cpp/`)
 
@@ -197,6 +199,7 @@ Parse EPUB and PDF into a stable structure of pages / sections / paragraphs with
 
 - [ ] Decide whether the hub becomes its own code project (own branch or repo), using this repo's markdown files and folders as example content to develop with
 - [ ] Possible front-end rewrite in Preact with no build step, keeping the small Node server for file access and live reload
+- [ ] Split `server-cpp/src/hub.cpp` (2,100 lines) into routes, auth, store, docs, usage and status: `server-cpp/esp32/ARCHITECTURE.md`, which also weighs other ways to build the board's server and recommends keeping this one
 
 ## Carried over from the first brainstorm
 

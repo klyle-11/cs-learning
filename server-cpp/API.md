@@ -68,7 +68,7 @@ If `notes.json` (or `hub.json`, for `PUT /api/config` and `DELETE /api/folder`) 
 
 ## Uploads and workspaces
 
-`POST /api/upload?path=<path>` with the file as the raw body → `{ "saved": true, "root": "…" }`, or `{ "skipped": true }` if the file already exists (never overwritten). 400 for a path with `..`, a hidden part or `node_modules`. 413 over 50 MB.
+`POST /api/upload?path=<path>` with the file as the raw body → `{ "saved": true, "root": "…" }`, or `{ "skipped": true }` if the file already exists (never overwritten). 400 for a path with `..`, a hidden part or `node_modules`. 413 over the server's limit: 50 MB in Node; in C++ by profile (200 MB on a computer, 4 GB, the most FAT32 holds, on the boards), given by `GET /api/device` as `maxUpload`, which the page reads. Each piece of a C++ upload must arrive within 30 seconds of the last.
 
 `GET /api/workspaces` → `[{ "name", "root", "home", "current" }]`.
 
@@ -93,13 +93,14 @@ Node uses the operating system's file-change notifications. The C++ server on a 
   "watchMs": 500, "cacheAssets": true, "cacheListing": true }
 ```
 
-On the board it also reports memory in bytes: `heapFree` now, `heapLeast` (the lowest since start-up) and `heapLargest` (the largest single block, which is what a large allocation can get).
+`maxUpload` is the upload limit in bytes. On the board it also reports memory in bytes: `heapFree` now, `heapLeast` (the lowest since start-up), `heapLargest` (the largest single block, which is what a large allocation can get) and `psramFree`.
 
 | Profile | Chosen when | Upload limit | Changes found by | Document list kept | Quota | Page and scripts kept in memory |
 |---|---|---|---|---|---|---|
 | `desktop` | 1 GB of memory or more | 200 MB | looking the folder over every 0.5 s | in memory | 20 GB | yes |
 | `small` | under 1 GB (Raspberry Pi Zero class) | 50 MB | looking it over every 1 s | in memory | 8 GB | yes |
-| `esp32` | built with ESP-IDF | 4 MB | the server's own writes (nothing else writes to the card) | in a file on the card, `.hub-cache/` | none: the card's free space, less 16 MB | no |
+| `esp32` | built with ESP-IDF (T3 V1.6.1) | 4 GB | the server's own writes (nothing else writes to the card) | in a file on the card, `.hub-cache/` | none: the card's free space, less 16 MB | no |
+| `esp32-psram` | built with ESP-IDF, 1 MB of PSRAM or more (T3-S3) | 4 GB | the same | the same | the same | yes |
 
 All three keep the document list until something listed changes, and keep a running count of what the folder holds rather than measuring it for each request (see Storage). On the board the list is written out as it is made, never held whole in memory, and sorting a folder's names may use 32 KB: a larger folder is read again as many times as needed, each pass listing the next run of names in order. `--profile <name>` forces one, which is how the ESP32 limits are tried on a computer; `--profile esp32` then also assumes nothing else changes the folder while the server runs.
 

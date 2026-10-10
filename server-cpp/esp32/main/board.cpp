@@ -1,7 +1,8 @@
-// The board-specific part of the hub: LilyGO T3 LoRa32 V1.6.1 (ESP32-PICO-D4,
-// 4 MB flash, no extra RAM, microSD on its own SPI pins, a 0.96" SSD1306 OLED
-// on I2C). It brings up what the server needs and then runs the same server as
-// on a computer:
+// The board-specific part of the hub, for two LilyGO boards (board_pins.h; the
+// build target picks): the T3 LoRa32 V1.6.1 (ESP32, no PSRAM) and the T3-S3
+// V1.3 (ESP32-S3, 2 MB PSRAM, a BOOT button). Both have a microSD slot on SPI
+// and a 0.96" SSD1306 OLED on I2C. It brings up what the server needs and then
+// runs the same server as on a computer:
 //
 //   /sdcard/hub   the documents (what `hubd <folder>` is given on a computer).
 //                 A FAT32 card of up to 32 GB; the server lets the folder fill
@@ -52,6 +53,10 @@
 
 #include <thread>
 
+#include "driver/gpio.h"
+#include "esp_attr.h"
+
+#include "board_pins.h"
 #include "fs.hpp"
 #include "screen.h"
 #include "status.hpp"
@@ -73,10 +78,6 @@ int hub_main(int argc, char **argv);
 #ifndef CONFIG_HUB_NAME
 #define CONFIG_HUB_NAME "hub"
 #endif
-
-// microSD on the T3 V1.6.1. GPIO 2 is also a boot-mode pin: if flashing fails
-// with the card in, take the card out while flashing.
-static const int SD_MOSI = 15, SD_MISO = 2, SD_CLK = 14, SD_CS = 13;
 
 static const char *TAG = "hub";
 static const char CARD[] = "/sdcard";
@@ -298,10 +299,27 @@ static void watch_task(void *) {
   }
 }
 
+// The BOOT button (T3-S3): wakes the screen and shows what the board knows of
+// itself for a few seconds. Called in an interrupt: it only raises a flag.
+static void IRAM_ATTR on_button(void *) { screen_info(); }
+static void start_button() {
+  if (BOARD_BUTTON < 0) return;
+  gpio_config_t io = {};
+  io.pin_bit_mask = 1ULL << (BOARD_BUTTON < 0 ? 0 : BOARD_BUTTON); // (the < 0 case returned above; this keeps the compiler quiet on boards without one)
+  io.mode = GPIO_MODE_INPUT;
+  io.pull_up_en = GPIO_PULLUP_ENABLE;
+  io.intr_type = GPIO_INTR_NEGEDGE;
+  if (gpio_config(&io) != ESP_OK) return;
+  esp_err_t isr = gpio_install_isr_service(0);
+  if (isr == ESP_OK || isr == ESP_ERR_INVALID_STATE) gpio_isr_handler_add(static_cast<gpio_num_t>(BOARD_BUTTON), on_button, nullptr);
+}
+
 static void start() {
   esp_err_t nvs = nvs_flash_init();
   if (nvs == ESP_ERR_NVS_NO_FREE_PAGES || nvs == ESP_ERR_NVS_NEW_VERSION_FOUND) { nvs_flash_erase(); nvs_flash_init(); }
   screen_start();
+  start_button();
+  ESP_LOGI(TAG, "LilyGO %s, version %d", BOARD_NAME, HUB_VERSION);
   char version[22];
   std::snprintf(version, sizeof version, "version %d", HUB_VERSION);
   screen_say("Starting...", version);
