@@ -1,18 +1,47 @@
 {
-  "name": "discrete-math-hub",
+  "name": "hub-reader",
   "version": "1.0.0",
-  "description": "",
+  "description": "The reader page. The server is ../server-cpp/hubd; npm only fetches the page's libraries (the document engine from its package in ../marginalia-engine-integration).",
   "scripts": {
-    "start": "node server.js"
+    "start": "node start.mjs",
+    "start:network": "node start.mjs --network",
+    "start:network:insecure": "node start.mjs --network --insecure",
+    "start:https-local": "node start.mjs --https-local",
+    "start:pair-local": "node start.mjs --pair-local",
+    "start:scratch": "node start.mjs --scratch",
+    "cert": "node start.mjs cert",
+    "cert:new-authority": "node start.mjs new-authority",
+    "build": "node start.mjs build",
+    "test": "node start.mjs test",
+    "test:own": "node start.mjs test-own",
+    "test:browser": "node test/browser.mjs",
+    "start:win": "node start.mjs --win",
+    "start:network:win": "node start.mjs --win --network",
+    "start:network:insecure:win": "node start.mjs --win --network --insecure",
+    "start:https-local:win": "node start.mjs --win --https-local",
+    "start:pair-local:win": "node start.mjs --win --pair-local",
+    "start:scratch:win": "node start.mjs --win --scratch",
+    "cert:win": "node start.mjs --win cert",
+    "cert:new-authority:win": "node start.mjs --win new-authority",
+    "build:win": "node start.mjs --win build",
+    "test:win": "node start.mjs --win test",
+    "test:own:win": "node start.mjs --win test-own",
+    "test:browser:win": "node test/browser.mjs --win"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
+    "@fontsource/atkinson-hyperlegible": "^5.3.0",
+    "@fontsource/opendyslexic": "^5.3.0",
     "@highlightjs/cdn-assets": "^11.12.0",
     "dompurify": "^3.4.16",
-    "marked": "^18.0.14"
+    "marginalia-engine": "file:../marginalia-engine-integration/marginalia-engine-0.1.0.tgz",
+    "marked": "^18.0.14",
+    "pdfjs-dist": "4.10.38"
   },
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "playwright-core": "1.56.1"
+  }
 }

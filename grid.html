@@ -1,0 +1,3635 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Grid</title>
+  <script>
+    // Apply the saved theme before first paint to avoid a flash of the default.
+    try {
+      const savedTheme = localStorage.getItem("gridTheme");
+      if (savedTheme) document.documentElement.dataset.theme = savedTheme;
+    } catch {}
+  </script>
+  <style>
+    /* Themes: sepia/gold (default), lavender/periwinkle, navy. */
+    :root {
+      color-scheme: light;
+      --page: #e3cfa8;
+      --panel: #fdf9f1;
+      --panel-2: #f6efe0;
+      --line: #dccaa4;
+      --text: #2a1f12;
+      --muted: #5a4630;
+      --accent: #4a4fbc;
+      --accent-2: #f5c542;
+      --on-accent: #3d2c05;
+      --good: #3d6420;
+      --bad: #9e3422;
+      --input: #fffdf7;
+      --button: #f0e2c4;
+      --button-hover: #e6d5b3;
+      --primary-border: #f0bd33;
+      --primary-hover: #f8d160;
+      --chip: #f5ead3;
+      --tag: #f1dfae;
+      --media-bg: #e4d4b3;
+      --skeleton-a: #e8dbbf;
+      --skeleton-b: #f6eedc;
+      --nav-bg: rgba(251, 246, 236, 0.85);
+      --lightbox-media-bg: #fffdf7;
+      --gap: clamp(8px, 1vw, 14px);
+      --link-hover: #7456c8;
+      --heading: #3f3a9a;
+      --hover-bg: #eeeafc;
+      --hover-line: #d4cef5;
+      --hover-text: #4a45a3;
+      --focus: #8f88e6;
+      --focus-ring: rgba(143, 136, 230, 0.3);
+      --shadow: 0 1px 2px rgba(80, 55, 20, 0.1), 0 6px 20px rgba(80, 55, 20, 0.14);
+      --shadow-hover: 0 2px 6px rgba(74, 79, 188, 0.14), 0 12px 30px rgba(80, 55, 20, 0.2);
+      --page-bg: radial-gradient(ellipse 120% 90% at 50% 0%, #f6ecd6 0%, #ecdbb9 45%, #dcc298 80%, #cfb385 100%);
+      --page-muted: #3f2f1c;
+      --page-heading: #2f2a80;
+      --page-good: #2a4712;
+    }
+    :root[data-theme="lavender"] {
+      color-scheme: light;
+      --page: #f6eff5;
+      --panel: #fdf8fa;
+      --panel-2: #f4ebf2;
+      --line: #ecdfe9;
+      --text: #3b2c40;
+      --muted: #6d5873;
+      --accent: #7b4ea8;
+      --accent-2: #8a5cb8;
+      --on-accent: #ffffff;
+      --good: #3f7d5a;
+      --bad: #bf4160;
+      --input: #fffbfc;
+      --button: #f3e9f1;
+      --button-hover: #eadcea;
+      --primary-border: #7d51ab;
+      --primary-hover: #7d51ab;
+      --chip: #f7eff4;
+      --tag: #f1e3ee;
+      --media-bg: #efe3ec;
+      --skeleton-a: #f0e5ee;
+      --skeleton-b: #f9f3f7;
+      --nav-bg: rgba(253, 248, 250, 0.85);
+      --lightbox-media-bg: #fffbfc;
+      --link-hover: #a24f86;
+      --heading: #6c4596;
+      --hover-bg: #f3e6f2;
+      --hover-line: #dcc5df;
+      --hover-text: #6b3d96;
+      --focus: #b489cf;
+      --focus-ring: rgba(180, 137, 207, 0.3);
+      --shadow: 0 1px 2px rgba(110, 60, 100, 0.05), 0 4px 16px rgba(110, 60, 100, 0.07);
+      --shadow-hover: 0 2px 6px rgba(123, 78, 168, 0.1), 0 10px 28px rgba(123, 78, 168, 0.14);
+      --page-bg: var(--page);
+      --page-muted: var(--muted);
+      --page-heading: var(--heading);
+      --page-good: var(--good);
+    }
+    :root[data-theme="navy"] {
+      color-scheme: dark;
+      --page: #1b2b4b;
+      --panel: #233659;
+      --panel-2: #1e3052;
+      --line: #324a74;
+      --text: #e8eefb;
+      --muted: #b3c0dc;
+      --accent: #a3b4ff;
+      --accent-2: #3a74d8;
+      --on-accent: #ffffff;
+      --good: #75e6a0;
+      --bad: #ff8b8b;
+      --input: #172641;
+      --button: #2c4371;
+      --button-hover: #35507f;
+      --primary-border: #5a8fe6;
+      --primary-hover: #4a84e6;
+      --chip: #273b62;
+      --tag: #304a78;
+      --media-bg: #15243f;
+      --skeleton-a: #203253;
+      --skeleton-b: #2d446b;
+      --nav-bg: rgba(44, 67, 113, 0.85);
+      --lightbox-media-bg: #12203a;
+      --link-hover: #c3b5ff;
+      --heading: #b8c3ff;
+      --hover-bg: #34507f;
+      --hover-line: #5270a8;
+      --hover-text: #d3d9ff;
+      --focus: #9aa6ff;
+      --focus-ring: rgba(154, 166, 255, 0.3);
+      --shadow: 0 1px 2px rgba(5, 12, 30, 0.2), 0 6px 18px rgba(5, 12, 30, 0.22);
+      --shadow-hover: 0 2px 8px rgba(0, 0, 0, 0.3), 0 12px 30px rgba(20, 30, 80, 0.45);
+      --page-bg: var(--page);
+      --page-muted: var(--muted);
+      --page-heading: var(--heading);
+      --page-good: var(--good);
+    }
+    :root[data-theme="hot"] {
+      color-scheme: light;
+      --page: #ffe9ef;
+      --page-bg: radial-gradient(ellipse 120% 90% at 50% 0%, #fff4f0 0%, #ffdce6 40%, #ffb896 78%, #ff9a6b 100%);
+      --panel: #fffafb;
+      --panel-2: #fff0f4;
+      --line: #ffd0de;
+      --text: #2d1020;
+      --muted: #7a3f55;
+      --accent: #c2185b;
+      --accent-2: linear-gradient(135deg, #ff3d8f, #ff7a1a);
+      --on-accent: #2b0615;
+      --good: #1f7a3a;
+      --bad: #c0162c;
+      --input: #ffffff;
+      --button: #ffe8ef;
+      --button-hover: #ffd9e6;
+      --primary-border: #ff5a8c;
+      --primary-hover: linear-gradient(135deg, #ff5aa0, #ff8f3a);
+      --chip: #fff0f4;
+      --tag: #ffe0ea;
+      --media-bg: #ffe6ee;
+      --skeleton-a: #ffe4ec;
+      --skeleton-b: #fff5f8;
+      --nav-bg: rgba(255, 250, 251, 0.88);
+      --lightbox-media-bg: #ffffff;
+      --link-hover: #c2410c;
+      --heading: #b3124f;
+      --hover-bg: #fff0e6;
+      --hover-line: #ffc2a0;
+      --hover-text: #b23a08;
+      --focus: #ff5c9a;
+      --focus-ring: rgba(255, 61, 143, 0.28);
+      --shadow: 0 1px 2px rgba(180, 30, 80, 0.08), 0 6px 20px rgba(255, 90, 60, 0.12);
+      --shadow-hover: 0 2px 6px rgba(255, 61, 143, 0.18), 0 12px 30px rgba(255, 122, 26, 0.2);
+      --page-muted: #5a1a35;
+      --page-heading: #7a0f45;
+      --page-good: #0f4023;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    html {
+      background: var(--page);
+    }
+    body {
+      margin: 0;
+      min-width: 320px;
+      min-height: 100vh;
+      background: var(--page-bg);
+      background-attachment: fixed;
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+    }
+    main {
+      width: min(1800px, 100%);
+      margin: 0 auto;
+      padding: clamp(12px, 2vw, 26px);
+    }
+    h1 {
+      margin: 0 0 6px;
+      font-size: clamp(1.4rem, 3vw, 2.25rem);
+      line-height: 1.15;
+    }
+    .intro {
+      max-width: 1000px;
+      margin: 0 0 18px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(280px, 1fr) minmax(350px, 1.15fr);
+      gap: 16px;
+      align-items: start;
+    }
+    @media (max-width: 980px) {
+      .workspace {
+        grid-template-columns: 1fr;
+      }
+    }
+    .panel {
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel);
+      padding: 14px;
+    }
+    .panel h2 {
+      margin: 0;
+      font-size: 1rem;
+    }
+    .panel-heading {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .help {
+      margin: 0 0 10px;
+      color: var(--muted);
+      font-size: 0.88rem;
+      line-height: 1.45;
+    }
+    textarea,
+    input,
+    select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--input);
+      color: var(--text);
+      font: inherit;
+    }
+    textarea {
+      min-height: 200px;
+      resize: vertical;
+      padding: 10px;
+      font: 0.86rem/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+    input,
+    select {
+      height: 38px;
+      padding: 7px 9px;
+    }
+    textarea:focus,
+    input:focus,
+    select:focus {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
+      border-color: var(--accent);
+    }
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+    @media (max-width: 620px) {
+      .form-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+    .field {
+      min-width: 0;
+    }
+    .field.full {
+      grid-column: 1 / -1;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+    .checkboxes {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 16px;
+      margin-top: 12px;
+    }
+    .check {
+      display: inline-flex;
+      gap: 7px;
+      align-items: center;
+      margin: 0;
+      color: var(--text);
+      font-size: 0.88rem;
+      font-weight: 400;
+      letter-spacing: normal;
+      text-transform: none;
+    }
+    .check input {
+      width: auto;
+      height: auto;
+      accent-color: var(--accent);
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 14px;
+    }
+    button {
+      cursor: pointer;
+      min-height: 38px;
+      padding: 8px 11px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--button);
+      color: var(--text);
+      font: inherit;
+    }
+    button:hover {
+      border-color: var(--accent);
+      background: var(--button-hover);
+    }
+    button.primary {
+      border-color: var(--primary-border);
+      background: var(--accent-2);
+      color: var(--on-accent);
+      font-weight: 700;
+    }
+    button.primary:hover {
+      background: var(--primary-hover);
+    }
+    button.danger:hover {
+      border-color: var(--bad);
+    }
+    .status {
+      min-height: 1.35em;
+      margin: 12px 0 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .status.good {
+      color: var(--good);
+    }
+    .status.bad {
+      color: var(--bad);
+    }
+    .preview {
+      display: grid;
+      gap: 8px;
+      max-height: 330px;
+      overflow: auto;
+      margin-top: 12px;
+      padding: 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-2);
+    }
+    .preview-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 3px;
+      padding: 8px;
+      border-radius: 6px;
+      background: var(--chip);
+    }
+    .preview-row small {
+      color: var(--muted);
+      font-size: 0.72rem;
+    }
+    .preview-row code {
+      overflow-wrap: anywhere;
+      color: var(--accent);
+      font: 0.78rem/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+    .output-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      justify-content: space-between;
+      margin: 22px 0 10px;
+    }
+    .output-bar h2 {
+      margin: 0;
+      font-size: clamp(1rem, 2vw, 1.25rem);
+    }
+    .counter {
+      color: var(--good);
+      font-size: 0.9rem;
+      font-weight: 700;
+    }
+    .size-control {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.82rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+    .size-control input {
+      width: clamp(120px, 20vw, 240px);
+      height: auto;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      accent-color: var(--accent);
+    }
+    .size-control output {
+      min-width: 3.5em;
+      color: var(--text);
+      font-variant-numeric: tabular-nums;
+      text-transform: none;
+    }
+    .gallery {
+      column-width: var(--card-width, 250px);
+      column-gap: var(--gap);
+      width: 100%;
+    }
+    .card {
+      display: inline-block;
+      width: 100%;
+      break-inside: avoid;
+      margin: 0 0 var(--gap);
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--panel);
+    }
+    .image-link {
+      display: block;
+      background: var(--media-bg);
+    }
+    .image-link img {
+      display: block;
+      width: 100%;
+      height: auto;
+      min-height: 80px;
+      background:
+        linear-gradient(110deg, var(--skeleton-a) 8%, var(--skeleton-b) 18%, var(--skeleton-a) 33%);
+      object-fit: contain;
+    }
+    .card-info {
+      padding: 3px 5px 4px;
+    }
+    .url-pair {
+      display: grid;
+      gap: 1px;
+    }
+    .url-line {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 4px;
+      align-items: center;
+    }
+    .tag {
+      padding: 0 3px;
+      border-radius: 3px;
+      background: var(--tag);
+      color: var(--muted);
+      font-size: 0.55rem;
+      font-weight: 800;
+      line-height: 1.5;
+      letter-spacing: 0.03em;
+    }
+    .url-line a,
+    .url-line span:not(.tag) {
+      min-width: 0;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      color: var(--accent);
+      font: 0.66rem/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      text-decoration: none;
+    }
+    .copy-icon {
+      min-height: 0;
+      padding: 0 2px;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      font-size: 0.7rem;
+      line-height: 1.2;
+    }
+    .copy-icon:hover {
+      background: transparent;
+      color: var(--text);
+    }
+    .url-line a:hover {
+      text-decoration: underline;
+    }
+    .original-url {
+      color: var(--muted) !important;
+    }
+    .failed {
+      padding: 10px;
+      color: var(--bad);
+      font-size: 0.78rem;
+    }
+    .empty {
+      padding: 30px 16px;
+      border: 1px dashed var(--line);
+      border-radius: 10px;
+      color: var(--muted);
+      text-align: center;
+    }
+    .hidden {
+      display: none !important;
+    }
+
+
+    /* Folder imports, shuffle state, and lightbox */
+    .local-media-block {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+    }
+
+    .local-media-block .help {
+      margin-bottom: 8px;
+    }
+
+    .file-picker {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 38px;
+      padding: 8px 11px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--button);
+      color: var(--text);
+      cursor: pointer;
+      font: inherit;
+      text-transform: none;
+      letter-spacing: normal;
+    }
+
+    .file-picker:hover {
+      border-color: var(--accent);
+      background: var(--button-hover);
+    }
+
+    .file-picker input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .folder-summary {
+      align-self: center;
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+
+    .top-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      justify-content: space-between;
+      margin: 0 0 14px;
+    }
+
+    .top-bar select {
+      width: auto;
+    }
+
+    .mode-bar {
+      display: inline-flex;
+      gap: 6px;
+    }
+
+    .mode-bar button[aria-pressed="true"] {
+      border-color: var(--accent);
+      background: var(--accent-2);
+      color: var(--on-accent);
+      font-weight: 700;
+    }
+
+    .workspace.single {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .source-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-top: 10px;
+    }
+
+    .source-controls select {
+      width: auto;
+    }
+
+    .source-files {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 8px 0 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .source-file {
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
+      max-width: 100%;
+      padding: 3px 4px 3px 9px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--chip);
+      font-size: 0.78rem;
+      overflow-wrap: anywhere;
+    }
+
+    .source-file small {
+      color: var(--muted);
+    }
+
+    .source-file button {
+      min-height: 22px;
+      padding: 0 7px;
+      border-radius: 999px;
+      font-size: 0.75rem;
+    }
+
+    .drop-target {
+      outline: 2px dashed var(--accent);
+      outline-offset: 4px;
+    }
+
+    .shuffle-active {
+      border-color: var(--accent) !important;
+      background: var(--accent-2) !important;
+      color: var(--on-accent);
+      font-weight: 700;
+    }
+
+    .image-link {
+      width: 100%;
+      min-height: 0;
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      overflow: hidden;
+      text-align: left;
+    }
+
+    .image-link:hover {
+      border: 0;
+      background: var(--media-bg);
+    }
+
+    .image-link video {
+      display: block;
+      width: 100%;
+      max-height: 85vh;
+      background: var(--media-bg);
+      object-fit: contain;
+    }
+
+    .local-badge {
+      display: inline-flex;
+      margin: 3px 5px 0;
+      padding: 0 5px;
+      border-radius: 999px;
+      background: var(--tag);
+      color: var(--muted);
+      font-size: 0.55rem;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    /* The overlay lets clicks and scrolling pass through to the gallery;
+       only the media and controls catch the pointer. */
+    .lightbox {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      padding: clamp(12px, 2vw, 28px);
+      background: transparent;
+      pointer-events: none;
+    }
+
+    .lightbox-toolbar > *,
+    .lightbox-nav,
+    .lightbox-stage img,
+    .lightbox-stage video {
+      pointer-events: auto;
+    }
+
+    .lightbox.hidden {
+      display: none !important;
+    }
+
+    .lightbox-toolbar {
+      grid-column: 1 / -1;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      justify-content: flex-end;
+      min-width: 0;
+    }
+
+    .lightbox-open-source {
+      display: inline-flex;
+      align-items: center;
+      min-height: 38px;
+      padding: 8px 11px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--button);
+      color: var(--text);
+      text-decoration: none;
+      font-size: 0.86rem;
+    }
+
+    .lightbox-open-source:hover {
+      border-color: var(--accent);
+      background: var(--button-hover);
+    }
+
+    .lightbox-nav {
+      min-width: 44px;
+      min-height: 52px;
+      padding: 8px;
+      font-size: 1.5rem;
+      background: var(--nav-bg);
+    }
+
+    .lightbox-stage {
+      grid-column: 2;
+      grid-row: 2;
+      min-width: 0;
+      min-height: 0;
+      display: grid;
+      place-items: center;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    .lightbox-stage img,
+    .lightbox-stage video {
+      display: block;
+      max-width: 100%;
+      max-height: calc(100vh - 160px);
+      width: auto;
+      height: auto;
+      object-fit: contain;
+      border: 1px solid var(--text);
+      border-radius: 8px;
+      background: var(--lightbox-media-bg);
+    }
+
+    .lightbox-stage video {
+      width: min(1200px, 100%);
+    }
+
+    /* Full size: natural media dimensions, scrollable when larger than the viewport. */
+    .lightbox.full-size .lightbox-stage {
+      place-items: normal;
+      overflow: auto;
+      pointer-events: auto;
+    }
+
+    .lightbox.full-size .lightbox-stage img,
+    .lightbox.full-size .lightbox-stage video {
+      max-width: none;
+      max-height: none;
+      width: auto;
+      margin: auto;
+    }
+
+    .lightbox-caption {
+      grid-column: 1 / -1;
+      min-width: 0;
+      margin: 0;
+      color: var(--muted);
+      font: 0.8rem/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      text-align: center;
+      overflow-wrap: anywhere;
+    }
+
+    @media (max-width: 700px) {
+      .lightbox {
+        grid-template-columns: 44px minmax(0, 1fr) 44px;
+        padding: 10px;
+      }
+
+      .lightbox-stage img,
+      .lightbox-stage video {
+        max-height: calc(100vh - 180px);
+      }
+    }
+
+    /* The header and input area sit in a narrower centered column; the gallery
+       section below keeps the full main width. */
+    main > h1,
+    main > .intro,
+    main > .top-bar,
+    main > .workspace {
+      max-width: 1040px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    main > .workspace:not(.single) {
+      max-width: 1320px;
+    }
+
+    /* Sticky gallery header: one slim row holding every gallery control. */
+    .output-bar {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      gap: 6px;
+      justify-content: flex-start;
+      margin: 18px 0 10px;
+      padding: 4px 8px;
+      border: 1px solid var(--line);
+      border-top: 0;
+      border-radius: 0 0 12px 12px;
+      background: var(--nav-bg);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      font-size: 0.8rem;
+    }
+    .output-bar h2 {
+      margin-right: 2px;
+      font-size: 0.9rem !important;
+      white-space: nowrap;
+    }
+    .output-bar button,
+    .output-bar .file-picker {
+      min-height: 28px;
+      padding: 2px 9px;
+      font-size: 0.8rem;
+      line-height: 1.2;
+    }
+    .output-bar input:not([type="range"]),
+    .output-bar select {
+      height: 28px;
+      padding: 2px 8px;
+      font-size: 0.8rem;
+    }
+    .gallery-filter {
+      flex: 1 1 140px;
+      min-width: 110px;
+      max-width: 320px;
+    }
+    .page-size {
+      width: auto;
+    }
+    .pager {
+      display: inline-flex;
+      gap: 2px;
+      align-items: center;
+    }
+    .pager button {
+      min-width: 28px;
+      padding: 0 6px;
+      font-size: 1rem;
+    }
+    .pager button:disabled {
+      opacity: 0.4;
+      cursor: default;
+    }
+    .page-info {
+      min-width: 3.2em;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .output-bar .size-control {
+      gap: 5px;
+      font-size: 0.7rem;
+    }
+    .output-bar .size-control input {
+      width: clamp(70px, 9vw, 130px);
+    }
+    .output-bar .size-control output {
+      min-width: 3em;
+    }
+    .output-bar .size-control,
+    .output-bar .page-info {
+      color: var(--muted);
+    }
+    .output-bar .counter {
+      font-size: 0.78rem;
+      white-space: nowrap;
+    }
+    .output-bar .export-format {
+      width: auto;
+      margin-left: auto;
+    }
+
+    /* Quick-add flyout: a lightweight paste box + upload that drops down from the header. */
+    .quick-add {
+      position: relative;
+    }
+    .quick-add-panel {
+      position: absolute;
+      top: calc(100% + 6px);
+      left: 0;
+      z-index: 60;
+      display: grid;
+      gap: 6px;
+      width: min(420px, calc(100vw - 32px));
+      padding: 8px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel);
+      box-shadow: var(--shadow-hover);
+    }
+    .quick-add-panel textarea {
+      min-height: 64px;
+      padding: 6px 8px;
+      font-size: 0.78rem;
+    }
+    .quick-add-actions {
+      display: flex;
+      gap: 6px;
+      justify-content: flex-end;
+    }
+    .quick-add-status {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.72rem;
+      line-height: 1.35;
+    }
+    .quick-add-status:empty {
+      display: none;
+    }
+    .quick-add-status.good {
+      color: var(--good);
+    }
+    .quick-add-status.bad {
+      color: var(--bad);
+    }
+
+    /* Card media frame: images open the lightbox on click, videos keep their own
+       controls; the corner button opens the lightbox for either. */
+    .image-link {
+      position: relative;
+    }
+    .image-link img {
+      cursor: zoom-in;
+    }
+    .expand-button {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      min-height: 0;
+      width: 26px;
+      height: 26px;
+      padding: 0;
+      border-radius: 999px !important;
+      background: var(--nav-bg);
+      color: var(--text);
+      font-size: 0.85rem;
+      line-height: 1;
+      opacity: 0;
+      transition: opacity 0.15s ease;
+    }
+    .card:hover .expand-button,
+    .expand-button:focus-visible {
+      opacity: 1;
+    }
+    @media (hover: none) {
+      .expand-button {
+        opacity: 0.85;
+      }
+    }
+
+    /* Remove control: top-left corner button with a two-option dropdown. */
+    .remove-button {
+      position: absolute;
+      top: 6px;
+      left: 6px;
+      z-index: 2;
+      min-height: 0;
+      width: 26px;
+      height: 26px;
+      padding: 0;
+      border-radius: 999px !important;
+      background: var(--nav-bg);
+      color: var(--text);
+      font-size: 1rem;
+      line-height: 1;
+      opacity: 0;
+      transition: opacity 0.15s ease;
+    }
+    .card:hover .remove-button,
+    .remove-button:focus-visible,
+    .card.menu-open .remove-button {
+      opacity: 1;
+    }
+    @media (hover: none) {
+      .remove-button {
+        opacity: 0.85;
+      }
+    }
+    /* The card clips its corners; let the open menu spill past a short card. */
+    .card.menu-open {
+      position: relative;
+      z-index: 5;
+      overflow: visible;
+    }
+    .card-menu {
+      position: absolute;
+      top: 36px;
+      left: 6px;
+      z-index: 3;
+      display: grid;
+      gap: 2px;
+      min-width: 190px;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--panel);
+      box-shadow: var(--shadow-hover);
+    }
+    .card-menu.hidden {
+      display: none;
+    }
+    .card-menu button {
+      min-height: 0;
+      padding: 6px 8px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--text);
+      font-size: 0.8rem;
+      text-align: left;
+      white-space: nowrap;
+    }
+    .card-menu button:hover,
+    .card-menu button:focus-visible {
+      background: var(--panel-2);
+    }
+    .card-menu button:last-child {
+      color: var(--bad);
+    }
+
+    /* Queue control: sits beside the expand button and stays visible once queued. */
+    .queue-button {
+      position: absolute;
+      top: 8px;
+      right: 38px;
+      min-height: 0;
+      width: 22px;
+      height: 22px;
+      padding: 0;
+      border-radius: 999px !important;
+      background: var(--nav-bg);
+      color: var(--text);
+      font-size: 0.85rem;
+      line-height: 1;
+      opacity: 0;
+      transition: opacity 0.15s ease;
+    }
+    .card:hover .queue-button,
+    .queue-button:focus-visible,
+    .queue-button[aria-pressed="true"] {
+      opacity: 1;
+    }
+    .queue-button[aria-pressed="true"] {
+      background: var(--accent-2);
+      color: var(--on-accent);
+    }
+    @media (hover: none) {
+      .queue-button {
+        opacity: 0.85;
+      }
+    }
+
+    /* Floating queue: pinned to a bottom corner, above the lightbox. */
+    .queue-card {
+      position: fixed;
+      right: 12px;
+      bottom: 12px;
+      z-index: 10000;
+      display: grid;
+      gap: 4px;
+      width: min(260px, calc(100vw - 24px));
+      padding: 6px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel);
+      box-shadow: var(--shadow-hover);
+      font-size: 0.75rem;
+    }
+    .queue-card.left {
+      right: auto;
+      left: 12px;
+    }
+    .queue-head {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    }
+    .queue-head strong {
+      flex: 1;
+      padding-left: 4px;
+      color: var(--heading);
+    }
+    .queue-card button {
+      min-height: 0;
+      padding: 2px 6px;
+      font-size: inherit;
+    }
+    .queue-list {
+      display: grid;
+      gap: 2px;
+      max-height: 30vh;
+      margin: 0;
+      padding: 0;
+      overflow-y: auto;
+      list-style: none;
+    }
+    .queue-list li {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 2px;
+    }
+    .queue-play {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+      min-width: 0;
+      background: transparent;
+      text-align: left;
+    }
+    .queue-play span:last-child {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .queue-list li.playing .queue-play {
+      background: var(--hover-bg);
+      color: var(--hover-text);
+    }
+    /* Only used when the browser has no picture-in-picture window to play in. */
+    .queue-stage:empty {
+      display: none;
+    }
+    .queue-stage img,
+    .queue-stage video {
+      display: block;
+      width: 100%;
+      max-height: 40vh;
+      border-radius: 8px;
+      background: var(--media-bg);
+      object-fit: contain;
+    }
+
+    /* Text sitting directly on the page background (not inside a panel). */
+    .intro,
+    .size-control {
+      color: var(--page-muted);
+    }
+    main > h1 {
+      color: var(--text);
+    }
+    .output-bar h2 {
+      color: var(--page-heading) !important;
+    }
+    .counter {
+      color: var(--page-good);
+    }
+
+    /* Soft UI layer: hairline borders, rounder corners and shadows instead of hard
+       outlines; lavender/periwinkle for hover, focus, links and headings. */
+    .panel {
+      border-color: var(--line);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+    }
+    .panel h2,
+    .output-bar h2 {
+      color: var(--heading);
+    }
+    .card {
+      border-color: var(--line);
+      border-radius: 12px;
+      box-shadow: var(--shadow);
+      transition: box-shadow 0.18s ease;
+    }
+    .card:hover {
+      box-shadow: var(--shadow-hover);
+    }
+    textarea,
+    input,
+    select {
+      border-color: var(--line);
+      border-radius: 10px;
+    }
+    textarea:focus,
+    input:focus,
+    select:focus {
+      outline: 3px solid var(--focus-ring);
+      outline-offset: 0;
+      border-color: var(--focus);
+    }
+    button,
+    .file-picker,
+    .lightbox-open-source {
+      border-color: transparent;
+      border-radius: 10px;
+      transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    }
+    button:hover,
+    .file-picker:hover,
+    .lightbox-open-source:hover {
+      border-color: var(--hover-line);
+      background: var(--hover-bg);
+      color: var(--hover-text);
+    }
+    button.primary,
+    .mode-bar button[aria-pressed="true"],
+    .shuffle-active {
+      border-color: var(--primary-border) !important;
+    }
+    button.primary:hover,
+    .mode-bar button[aria-pressed="true"]:hover,
+    .shuffle-active:hover {
+      background: var(--primary-hover) !important;
+      color: var(--on-accent);
+    }
+    .image-link:hover {
+      border-color: transparent;
+      background: var(--media-bg);
+    }
+    .copy-icon:hover {
+      border-color: transparent;
+      color: var(--hover-text);
+    }
+    .url-line a:hover {
+      color: var(--link-hover);
+    }
+    .tag {
+      border-radius: 4px;
+    }
+    .source-file {
+      border-color: var(--line);
+    }
+    .empty {
+      border-color: var(--line);
+      border-radius: 14px;
+    }
+    .lightbox-stage img,
+    .lightbox-stage video {
+      border-color: var(--line);
+      border-radius: 12px;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Grid</h1>
+    <p class="intro">
+      Paste text or upload files containing HTTPS links and build a media grid. URLs are used as-is;
+      switch to Convert URLs mode to rewrite them with transform rules first.
+    </p>
+    <div class="top-bar">
+      <div class="mode-bar" role="group" aria-label="Mode">
+        <button id="modeInput" type="button" aria-pressed="true">Input URLs</button>
+        <button id="modeConvert" type="button" aria-pressed="false">Convert URLs</button>
+      </div>
+      <select id="themeSelect" aria-label="Theme">
+        <option value="sepia">Theme: Sepia &amp; gold</option>
+        <option value="lavender">Theme: Lavender</option>
+        <option value="navy">Theme: Navy</option>
+        <option value="hot">Theme: Hot pink &amp; orange</option>
+      </select>
+    </div>
+    <section id="workspace" class="workspace">
+      <div id="sourcePanel" class="panel">
+        <div class="panel-heading">
+          <h2>1. Paste text or upload files</h2>
+          <button id="clearInput" class="danger" type="button" title="Clear the text box and remove every added file and paste">Clear all</button>
+        </div>
+        <p class="help">
+          URLs can be in ordinary text, Markdown, HTML, JSON, CSV, logs, or one URL per line.
+          Only <code>https://</code> links are extracted. JSON entries with a media URL and a
+          post/page URL (e.g. <code>mediaUrl</code> + <code>postUrl</code>), and bookmark exports
+          where a direct media link sits next to its site link, become one card with both links.
+        </p>
+        <textarea
+          id="sourceText"
+          spellcheck="false"
+          placeholder="Paste anything here...
+Example:
+Photo: https://old-domain.com/images/cat-123?id=987
+HTML: <img src=&quot;https://another-domain.com/item/456.jpg?size=large&quot;>
+Markdown: [View]\(https://cdn.domain.com/photo/789)"
+        ></textarea>
+        <div class="source-controls">
+          <label class="file-picker">
+            Upload files
+            <input id="sourceFileInput" type="file" multiple accept=".json,.jsonl,.ndjson,.html,.htm,.txt,.csv,.md,text/*,application/json" />
+          </label>
+          <select id="inputFormat" aria-label="Input format">
+            <option value="auto">Format: Auto-detect</option>
+            <option value="json">Format: JSON</option>
+            <option value="html">Format: Bookmarks / HTML</option>
+            <option value="text">Format: Plain text</option>
+          </select>
+          <button id="extractOnly" type="button">Extract URLs</button>
+        </div>
+        <p class="help" style="margin: 6px 0 0;">
+          Drop JSON, bookmark .html, or text files anywhere on this panel. <strong>Add to grid</strong>
+          (Ctrl+Enter) keeps each paste as a source and clears the box, so pastes and files keep
+          adding to the same grid. Duplicates are skipped across all of them.
+        </p>
+        <ul id="sourceFileList" class="source-files"></ul>
+        <div class="checkboxes">
+          <label class="check">
+            <input id="removeDuplicates" type="checkbox" checked />
+            Remove duplicate URLs (across text and all files)
+          </label>
+          <label class="check">
+            <input id="showBroken" type="checkbox" />
+            Keep cards for failed images
+          </label>
+        </div>
+        <div class="actions">
+          <button id="addToGrid" class="primary" type="button" title="Keep this paste as a source, add its URLs to the grid, and clear the box for the next paste">Add to grid</button>
+          <button id="transformButton" type="button">Build Grid</button>
+          <button id="copyTransformed" type="button">Copy media URLs</button>
+          <button id="downloadTransformed" type="button">Download .txt</button>
+        </div>
+        <p id="status" class="status" aria-live="polite"></p>
+
+        <div class="local-media-block">
+          <p class="help">
+            Or add a whole local folder of images/videos. Files stay local to this browser tab;
+            relative folder paths are kept as labels when the browser provides them.
+          </p>
+          <div class="actions" style="margin-top: 0;">
+            <label class="file-picker">
+              Add media folder
+              <input id="folderInput" type="file" webkitdirectory directory multiple accept="image/*,video/*" />
+            </label>
+            <button id="clearLocalMedia" type="button">Remove local media</button>
+            <span id="folderSummary" class="folder-summary">No local folder added</span>
+          </div>
+        </div>
+      </div>
+      <div id="rulesPanel" class="panel hidden">
+        <div class="panel-heading">
+          <h2>2. Transform rules</h2>
+          <button id="resetRules" type="button">Reset rules</button>
+        </div>
+        <p class="help">
+          Leave any field empty to preserve that part of the original URL.
+          Rules run in the displayed order: domain, path prefix, slug, file extension, then query parameters.
+        </p>
+        <div class="form-grid">
+          <div class="field full">
+            <label for="newDomain">Replace domain</label>
+            <input
+              id="newDomain"
+              type="text"
+              placeholder="https://images.example.com"
+              autocomplete="off"
+            />
+          </div>
+          <div class="field">
+            <label for="domainPrefix">Prefix before current hostname</label>
+            <input
+              id="domainPrefix"
+              type="text"
+              placeholder="cdn."
+              autocomplete="off"
+            />
+          </div>
+          <div class="field">
+            <label for="pathPrefix">Add path prefix</label>
+            <input
+              id="pathPrefix"
+              type="text"
+              placeholder="/media"
+              autocomplete="off"
+            />
+          </div>
+          <div class="field">
+            <label for="slugMode">Slug / path handling</label>
+            <select id="slugMode">
+              <option value="keep">Keep original path</option>
+              <option value="last">Use last path segment only</option>
+              <option value="id">Use extracted ID as path</option>
+              <option value="custom">Use custom slug</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="customSlug">Custom slug or folder</label>
+            <input
+              id="customSlug"
+              type="text"
+              placeholder="gallery or /gallery/"
+              autocomplete="off"
+            />
+          </div>
+          <div class="field">
+            <label for="idParameter">ID query parameter name</label>
+            <input
+              id="idParameter"
+              type="text"
+              value="id"
+              placeholder="id"
+              autocomplete="off"
+            />
+          </div>
+          <div class="field">
+            <label for="extensionMode">Image extension</label>
+            <select id="extensionMode">
+              <option value="keep">Keep original extension</option>
+              <option value="add-jpg">Ensure .jpg</option>
+              <option value="remove-jpg">Remove .jpg</option>
+              <option value="replace-jpg">Replace extension with .jpg</option>
+              <option value="replace-png">Replace extension with .png</option>
+              <option value="remove-all">Remove any extension</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="appendText">Append to filename</label>
+            <input
+              id="appendText"
+              type="text"
+              placeholder="-large"
+              autocomplete="off"
+            />
+          </div>
+          <div class="field">
+            <label for="manualQuery">Add query parameters</label>
+            <input
+              id="manualQuery"
+              type="text"
+              placeholder="width=1600&quality=90"
+              autocomplete="off"
+            />
+          </div>
+        </div>
+        <div class="checkboxes">
+          <label class="check">
+            <input id="keepId" type="checkbox" checked />
+            Keep selected ID parameter
+          </label>
+          <label class="check">
+            <input id="keepAllQuery" type="checkbox" />
+            Keep all original query parameters
+          </label>
+        </div>
+        <div class="field full" style="margin-top: 10px;">
+          <label for="ytdlpDomains">Resolve with yt-dlp for these domains</label>
+          <input
+            id="ytdlpDomains"
+            type="text"
+            placeholder="example.com, video.example.org"
+            autocomplete="off"
+          />
+        </div>
+        <p class="help" style="margin: 6px 0 0;">
+          URLs on these domains (and their subdomains) skip the rules above and are replaced by the
+          direct media URL yt-dlp returns; the original URL is kept as the page link. Needs the
+          local helper running: <code>python grid-ytdlp.py</code>.
+        </p>
+        <div class="actions">
+          <button id="downloadYtdlp" type="button" title="Download only the URLs yt-dlp returned, one per line">Export yt-dlp URLs</button>
+        </div>
+      </div>
+    </section>
+    <section id="gallerySection">
+      <div class="output-bar">
+        <h2>Gallery</h2>
+        <div class="quick-add">
+          <button id="quickAddToggle" type="button" aria-expanded="false" aria-controls="quickAddPanel" title="Add URLs or files to the grid">＋ Add</button>
+          <div id="quickAddPanel" class="quick-add-panel hidden">
+            <textarea id="quickAddText" rows="3" spellcheck="false" placeholder="Paste URLs, JSON or bookmark HTML… (Ctrl+Enter adds)"></textarea>
+            <div class="quick-add-actions">
+              <label class="file-picker">
+                Upload
+                <input id="quickAddFiles" type="file" multiple accept=".json,.jsonl,.ndjson,.html,.htm,.txt,.csv,.md,text/*,application/json,image/*,video/*" />
+              </label>
+              <button id="quickAddSubmit" class="primary" type="button">Add</button>
+            </div>
+            <p id="quickAddStatus" class="quick-add-status" aria-live="polite"></p>
+          </div>
+        </div>
+        <input id="galleryFilter" class="gallery-filter" type="search" placeholder="Filter…" autocomplete="off" aria-label="Filter gallery by URL, page or file name" />
+        <div id="pager" class="pager hidden">
+          <button id="pagePrev" type="button" aria-label="Previous page">‹</button>
+          <span id="pageInfo" class="page-info">1 / 1</span>
+          <button id="pageNext" type="button" aria-label="Next page">›</button>
+        </div>
+        <select id="pageSize" class="page-size" aria-label="Items per page">
+          <option value="71" selected>71 / page</option>
+          <option value="90">90 / page</option>
+          <option value="35">35 / page</option>
+          <option value="all">All</option>
+        </select>
+        <label class="size-control" for="cardSize" title="Card size">
+          Size
+          <input id="cardSize" type="range" min="120" max="1800" step="10" value="250" />
+          <output id="cardSizeValue" for="cardSize">250px</output>
+        </label>
+        <span id="galleryCount" class="counter">0 items</span>
+        <button id="shuffleToggle" type="button" aria-pressed="false" title="Toggle randomized card order">Shuffle: Off</button>
+        <select id="exportFormat" class="export-format" aria-label="Export format">
+          <option value="auto" selected>Export: Auto</option>
+          <option value="json">Export: JSON</option>
+          <option value="html">Export: Bookmarks</option>
+          <option value="text">Export: Text</option>
+        </select>
+        <button id="exportGrid" type="button" title="Download every card in the grid plus every input URL the grid dropped, as one file. Auto keeps the imported format, or uses JSON when imports were mixed">Export</button>
+        <button id="clearGallery" class="danger" type="button" title="Remove all cards from the gallery">Clear</button>
+      </div>
+      <div id="gallery" class="gallery">
+        <div class="empty">
+          Paste text or upload files, then choose “Build Grid.”
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <aside id="queueCard" class="queue-card hidden" aria-label="Picture-in-picture queue">
+    <div class="queue-head">
+      <strong id="queueTitle">Queue</strong>
+      <button id="queueSide" type="button" title="Move to the other bottom corner" aria-label="Move queue to the other bottom corner">⇄</button>
+      <button id="queueClear" type="button" title="Empty the queue">Clear</button>
+    </div>
+    <div id="queueStage" class="queue-stage"></div>
+    <ol id="queueList" class="queue-list"></ol>
+  </aside>
+
+  <div id="lightbox" class="lightbox hidden" role="dialog" aria-modal="true" aria-label="Media lightbox">
+    <div class="lightbox-toolbar">
+      <button id="lightboxShuffle" type="button" aria-pressed="false" title="Toggle randomized order">Shuffle: Off</button>
+      <button id="lightboxFullSize" type="button" aria-pressed="false">Full size</button>
+      <a id="lightboxOpenSource" class="lightbox-open-source" href="#" target="_blank" rel="noopener noreferrer">Open media</a>
+      <a id="lightboxOpenPage" class="lightbox-open-source hidden" href="#" target="_blank" rel="noopener noreferrer">Open page</a>
+      <button id="lightboxClose" type="button" aria-label="Close lightbox">Close ×</button>
+    </div>
+    <button id="lightboxPrev" class="lightbox-nav" type="button" aria-label="Previous media">‹</button>
+    <div id="lightboxStage" class="lightbox-stage"></div>
+    <button id="lightboxNext" class="lightbox-nav" type="button" aria-label="Next media">›</button>
+    <p id="lightboxCaption" class="lightbox-caption"></p>
+  </div>
+  <script>
+    const elements = {
+      sourceText: document.getElementById("sourceText"),
+      clearInput: document.getElementById("clearInput"),
+      extractOnly: document.getElementById("extractOnly"),
+      newDomain: document.getElementById("newDomain"),
+      ytdlpDomains: document.getElementById("ytdlpDomains"),
+      domainPrefix: document.getElementById("domainPrefix"),
+      pathPrefix: document.getElementById("pathPrefix"),
+      slugMode: document.getElementById("slugMode"),
+      customSlug: document.getElementById("customSlug"),
+      idParameter: document.getElementById("idParameter"),
+      extensionMode: document.getElementById("extensionMode"),
+      appendText: document.getElementById("appendText"),
+      manualQuery: document.getElementById("manualQuery"),
+      keepId: document.getElementById("keepId"),
+      keepAllQuery: document.getElementById("keepAllQuery"),
+      removeDuplicates: document.getElementById("removeDuplicates"),
+      showBroken: document.getElementById("showBroken"),
+      transformButton: document.getElementById("transformButton"),
+      resetRules: document.getElementById("resetRules"),
+      copyTransformed: document.getElementById("copyTransformed"),
+      downloadTransformed: document.getElementById("downloadTransformed"),
+      clearGallery: document.getElementById("clearGallery"),
+      exportFormat: document.getElementById("exportFormat"),
+      exportGrid: document.getElementById("exportGrid"),
+      folderInput: document.getElementById("folderInput"),
+      clearLocalMedia: document.getElementById("clearLocalMedia"),
+      folderSummary: document.getElementById("folderSummary"),
+      shuffleToggle: document.getElementById("shuffleToggle"),
+      gallery: document.getElementById("gallery"),
+      cardSize: document.getElementById("cardSize"),
+      cardSizeValue: document.getElementById("cardSizeValue"),
+      galleryCount: document.getElementById("galleryCount"),
+      status: document.getElementById("status"),
+      lightbox: document.getElementById("lightbox"),
+      lightboxStage: document.getElementById("lightboxStage"),
+      lightboxCaption: document.getElementById("lightboxCaption"),
+      lightboxOpenSource: document.getElementById("lightboxOpenSource"),
+      lightboxOpenPage: document.getElementById("lightboxOpenPage"),
+      gallerySection: document.getElementById("gallerySection"),
+      galleryFilter: document.getElementById("galleryFilter"),
+      pager: document.getElementById("pager"),
+      pagePrev: document.getElementById("pagePrev"),
+      pageNext: document.getElementById("pageNext"),
+      pageInfo: document.getElementById("pageInfo"),
+      pageSize: document.getElementById("pageSize"),
+      sourcePanel: document.getElementById("sourcePanel"),
+      sourceFileInput: document.getElementById("sourceFileInput"),
+      sourceFileList: document.getElementById("sourceFileList"),
+      inputFormat: document.getElementById("inputFormat"),
+      workspace: document.getElementById("workspace"),
+      rulesPanel: document.getElementById("rulesPanel"),
+      modeInput: document.getElementById("modeInput"),
+      modeConvert: document.getElementById("modeConvert"),
+      lightboxPrev: document.getElementById("lightboxPrev"),
+      lightboxNext: document.getElementById("lightboxNext"),
+      lightboxClose: document.getElementById("lightboxClose"),
+      lightboxFullSize: document.getElementById("lightboxFullSize"),
+      lightboxShuffle: document.getElementById("lightboxShuffle")
+    };
+    let uploadedSources = [];
+    let convertMode = false;
+    let remoteItems = [];
+    let localMediaItems = [];
+    let transformedItems = [];
+    let shuffleEnabled = false;
+    let shuffledIds = [];
+    let shuffleSignature = "";
+    let lightboxIndex = -1;
+    let lightboxFullSize = false;
+    let itemCounter = 0;
+    const remoteItemIds = new Map();
+    let pastedBatchCount = 0;
+    // Card removals, kept for the session so rebuilds don't bring cards back.
+    // Hidden: gone from view, still exported. Excluded: gone from grid and exports.
+    const hiddenIds = new Set();
+    const excludedMediaUrls = new Set();
+    const excludedUrls = new Set();
+    const excludedLocalKeys = new Set();
+
+    function makeItemId(prefix = "item") {
+      itemCounter += 1;
+      return `${prefix}-${Date.now().toString(36)}-${itemCounter.toString(36)}`;
+    }
+
+    function syncTransformedItems() {
+      transformedItems = [...remoteItems, ...localMediaItems];
+    }
+
+    function itemSignature(items) {
+      return items.map((item) => item.id).sort().join("|");
+    }
+
+    function shuffleCopy(items) {
+      const copy = [...items];
+      for (let index = copy.length - 1; index > 0; index -= 1) {
+        const swapIndex = Math.floor(Math.random() * (index + 1));
+        [copy[index], copy[swapIndex]] = [copy[swapIndex], copy[index]];
+      }
+      return copy;
+    }
+
+    // Filtered list shown in the gallery and stepped through by the lightbox.
+    function getDisplayItems() {
+      return getOrderedItems().filter((item) => !hiddenIds.has(item.id) && !isHiddenAfterFailure(item) && matchesFilter(item));
+    }
+
+    // All items in display order; shuffle order is kept over the unfiltered set so
+    // typing in the filter doesn't reshuffle.
+    function getOrderedItems() {
+      const items = [...transformedItems];
+      if (!shuffleEnabled) {
+        return items;
+      }
+
+      const signature = itemSignature(items);
+      if (shuffleSignature !== signature) {
+        if (shuffleSignature === "") {
+          shuffledIds = shuffleCopy(items).map((item) => item.id);
+        } else {
+          // Items were added or removed: keep the current order and drop the
+          // newcomers in at random positions instead of reshuffling everything.
+          const ids = new Set(items.map((item) => item.id));
+          const kept = shuffledIds.filter((id) => ids.has(id));
+          const keptSet = new Set(kept);
+          for (const item of items) {
+            if (keptSet.has(item.id)) continue;
+            kept.splice(Math.floor(Math.random() * (kept.length + 1)), 0, item.id);
+          }
+          shuffledIds = kept;
+        }
+        shuffleSignature = signature;
+      }
+
+      const byId = new Map(items.map((item) => [item.id, item]));
+      return shuffledIds.map((id) => byId.get(id)).filter(Boolean);
+    }
+
+    function updateShuffleButton() {
+      for (const button of [elements.shuffleToggle, elements.lightboxShuffle]) {
+        button.textContent = `Shuffle: ${shuffleEnabled ? "On" : "Off"}`;
+        button.setAttribute("aria-pressed", String(shuffleEnabled));
+        button.classList.toggle("shuffle-active", shuffleEnabled);
+      }
+    }
+
+    function toggleShuffle() {
+      // Keep the lightbox on the same item while the order changes around it.
+      const lightboxItem = lightboxIndex >= 0 ? getDisplayItems()[lightboxIndex] : null;
+      shuffleEnabled = !shuffleEnabled;
+      if (shuffleEnabled) {
+        shuffleSignature = "";
+      }
+      updateShuffleButton();
+      renderGallery();
+      if (lightboxItem) {
+        lightboxIndex = getDisplayItems().findIndex((item) => item.id === lightboxItem.id);
+        updateLightboxCaption();
+      }
+      setStatus(
+        shuffleEnabled
+          ? "Shuffle enabled. Card order has been randomized. Toggle it off to restore the original order."
+          : "Shuffle disabled. Original card order restored.",
+        "good"
+      );
+    }
+    const defaultRules = {
+      newDomain: "",
+      domainPrefix: "",
+      pathPrefix: "",
+      slugMode: "keep",
+      customSlug: "",
+      idParameter: "id",
+      extensionMode: "keep",
+      appendText: "",
+      manualQuery: "",
+      keepId: true,
+      keepAllQuery: false,
+      removeDuplicates: true,
+      showBroken: false
+    };
+    // Returns URLs in source order, duplicates included; pairing needs the original order.
+    function extractHttpsUrls(text) {
+      const matches = text.match(/https:\/\/[^\s<>"'`()[\]{}]+/gi) || [];
+      return matches
+        .map((match) => cleanExtractedUrl(match))
+        .filter(Boolean);
+    }
+
+    /* ---------- Source parsing: JSON records, bookmark/HTML links, plain text ----------
+       Every parser produces entries of { mediaUrl, pageUrl }. pageUrl is "" when a
+       link has no partner; such links still get a card, as before. */
+
+    const FORMAT_LABELS = { json: "JSON", html: "Bookmarks / HTML", text: "Plain text" };
+    const MEDIA_EXTENSION = /\.(avif|bmp|gif|heic|heif|jpe?g|png|svg|webp|mp4|webm|ogv|ogg|mov|m4v|avi|mkv)(?![a-z0-9])/i;
+
+    function isMediaUrl(url) {
+      try {
+        const parsed = new URL(url);
+        if (MEDIA_EXTENSION.test(decodeURIComponent(parsed.pathname))) return true;
+        const format = parsed.searchParams.get("format") || parsed.searchParams.get("fm") || parsed.searchParams.get("ext");
+        return Boolean(format) && /^(avif|gif|jpe?g|png|webp|mp4|webm)$/i.test(format);
+      } catch {
+        return false;
+      }
+    }
+
+    function detectFormat(text, fileName = "") {
+      const extension = (fileName.match(/\.([a-z0-9]+)$/i) || [])[1] || "";
+      if (/^(json|jsonl|ndjson)$/i.test(extension)) return "json";
+      if (/^html?$/i.test(extension)) return "html";
+      const head = text.trimStart();
+      if (/^[[{]/.test(head)) return "json";
+      if (/<!DOCTYPE NETSCAPE-Bookmark-file/i.test(head.slice(0, 300)) || /<a\s[^>]*href\s*=/i.test(text)) return "html";
+      if (/["']?[A-Za-z_$][\w$]*["']?\s*:\s*["']https:/i.test(text)) return "json";
+      return "text";
+    }
+
+    function resolveFormat(text, fileName = "") {
+      const override = elements.inputFormat.value;
+      return override === "auto" ? detectFormat(text, fileName) : override;
+    }
+
+    function parseSource(text, format) {
+      if (!text.trim()) return { format, entries: [] };
+      if (format === "json") {
+        const entries = parseJsonEntries(text);
+        if (entries.length) return { format, entries };
+      }
+      if (format === "html") {
+        const links = extractHtmlLinks(text);
+        if (links.length) return { format, entries: pairLinks(links) };
+      }
+      // Fallback for plain text and for JSON/HTML that yielded nothing.
+      return { format: "text", entries: pairLinks(extractHttpsUrls(text)) };
+    }
+
+    function extractHtmlLinks(text) {
+      // DOMParser documents are inert: nothing is fetched or executed.
+      const doc = new DOMParser().parseFromString(text, "text/html");
+      const links = [];
+      doc.querySelectorAll("a[href], img[src], video[src], source[src]").forEach((element) => {
+        const url = cleanExtractedUrl(element.getAttribute("href") || element.getAttribute("src") || "");
+        if (url) links.push(url);
+      });
+      return links;
+    }
+
+    // Long alphanumeric path/query tokens containing a digit, e.g. "6a905680f159ef8fa54a60c7".
+    function idTokens(url) {
+      try {
+        const parsed = new URL(url);
+        const text = decodeURIComponent(`${parsed.pathname} ${parsed.search}`).toLowerCase();
+        return new Set((text.match(/[a-z0-9]{6,}/g) || []).filter((token) => /\d/.test(token)));
+      } catch {
+        return new Set();
+      }
+    }
+
+    // Pairs each direct media link with a neighbouring site link. Pass 1 pairs
+    // neighbours that share an ID token in either order; pass 2 pairs the rest
+    // using the order pass 1 saw most (media-then-site when nothing matched).
+    function pairLinks(urls) {
+      const isMedia = urls.map(isMediaUrl);
+      const tokens = urls.map(idTokens);
+      const partner = new Array(urls.length).fill(-1);
+      const canPair = (media, page) =>
+        page >= 0 && page < urls.length && !isMedia[page] &&
+        partner[page] === -1 && partner[media] === -1 && urls[page] !== urls[media];
+      const sharesId = (a, b) => [...tokens[a]].some((token) => tokens[b].has(token));
+      let pageAfter = 0;
+      let pageBefore = 0;
+
+      urls.forEach((_, index) => {
+        if (!isMedia[index]) return;
+        for (const offset of [1, -1]) {
+          const page = index + offset;
+          if (canPair(index, page) && sharesId(index, page)) {
+            partner[index] = page;
+            partner[page] = index;
+            if (offset === 1) pageAfter += 1;
+            else pageBefore += 1;
+            break;
+          }
+        }
+      });
+
+      const offset = pageBefore > pageAfter ? -1 : 1;
+      urls.forEach((_, index) => {
+        if (isMedia[index] && canPair(index, index + offset)) {
+          partner[index] = index + offset;
+          partner[index + offset] = index;
+        }
+      });
+
+      const entries = [];
+      urls.forEach((url, index) => {
+        if (isMedia[index]) {
+          entries.push({ mediaUrl: url, pageUrl: partner[index] >= 0 ? urls[partner[index]] : "" });
+        } else if (partner[index] === -1) {
+          // Doesn't look like media (often a page): gets one image attempt, no video retry.
+          entries.push({ mediaUrl: url, pageUrl: "", unverified: true });
+        }
+      });
+      return entries;
+    }
+
+    function parseJsonEntries(text) {
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        // JSON Lines, one object per line.
+        try {
+          data = text.split(/\r?\n/)
+            .map((line) => line.trim().replace(/,$/, ""))
+            .filter(Boolean)
+            .map((line) => JSON.parse(line));
+        } catch {
+          data = undefined;
+        }
+      }
+      const records = [];
+      if (data !== undefined) {
+        collectJsonRecords(data, records);
+      } else {
+        collectLooseRecords(text, records);
+      }
+      return records.flatMap(recordToEntries);
+    }
+
+    // Each object's own string fields (and string arrays) form one record.
+    function collectJsonRecords(value, records) {
+      if (Array.isArray(value)) {
+        value.forEach((child) => collectJsonRecords(child, records));
+        return;
+      }
+      if (!value || typeof value !== "object") return;
+      const fields = [];
+      const children = [];
+      for (const [key, fieldValue] of Object.entries(value)) {
+        if (typeof fieldValue === "string") {
+          fields.push([key, fieldValue]);
+        } else if (Array.isArray(fieldValue) && fieldValue.length && fieldValue.every((item) => typeof item === "string")) {
+          fieldValue.forEach((item) => fields.push([key, item]));
+        } else {
+          children.push(fieldValue);
+        }
+      }
+      if (fields.length) records.push(fields);
+      children.forEach((child) => collectJsonRecords(child, records));
+    }
+
+    // For text that is JSON-ish but not valid JSON (JS objects, truncated pastes):
+    // read "key": "value" pairs in order and start a new record when a key repeats.
+    function collectLooseRecords(text, records) {
+      const pattern = /["']?([A-Za-z_$][\w$]*)["']?\s*:\s*(["'])((?:\\.|(?!\2)[^\\])*)\2/g;
+      let current = [];
+      const seenKeys = new Set();
+      for (const match of text.matchAll(pattern)) {
+        const key = match[1];
+        if (seenKeys.has(key)) {
+          records.push(current);
+          current = [];
+          seenKeys.clear();
+        }
+        seenKeys.add(key);
+        current.push([key, match[3]]);
+      }
+      if (current.length) records.push(current);
+    }
+
+    // Decides from the key name (then the URL itself) whether a field is media or a page.
+    function classifyField(key, url) {
+      const name = key.toLowerCase().replace(/[^a-z]/g, "");
+      const mediaWord = /(media|video|image|img|photo|picture|file|download|original|full|src)/;
+      if (/(post|page|permalink|link|href|site|web|canonical|article|source|origin|referr?er)/.test(name) && !mediaWord.test(name)) {
+        return { kind: "page", score: 1 };
+      }
+      if (/(thumb|preview|poster)/.test(name)) return { kind: "media", score: 1 };
+      if (mediaWord.test(name)) return { kind: "media", score: 3 };
+      return isMediaUrl(url) ? { kind: "media", score: 2 } : { kind: "page", score: 0 };
+    }
+
+    function recordToEntries(fields) {
+      const urlFields = fields
+        .map(([key, value]) => ({ key, url: cleanExtractedUrl(String(value)) }))
+        .filter((field) => field.url)
+        .map((field) => ({ ...field, ...classifyField(field.key, field.url) }));
+      if (!urlFields.length) return [];
+
+      const byScore = (a, b) => b.score - a.score;
+      const media = urlFields.filter((field) => field.kind === "media").sort(byScore);
+      const pages = urlFields.filter((field) => field.kind === "page").sort(byScore);
+      if (!media.length) {
+        return pages.map((page) => ({ mediaUrl: page.url, pageUrl: "", unverified: !isMediaUrl(page.url) }));
+      }
+      // All values of the best media key (arrays give several), sharing one page link.
+      const primaryKey = media[0].key;
+      const pageUrl = (pages.find((page) => page.url !== media[0].url) || {}).url || "";
+      return media
+        .filter((field) => field.key === primaryKey)
+        .map((field) => ({ mediaUrl: field.url, pageUrl }));
+    }
+
+    // Drops repeated media URLs, and standalone cards for page URLs that are
+    // already attached to a media card.
+    function dedupeEntries(entries) {
+      const attachedPages = new Set(entries.map((entry) => entry.pageUrl).filter(Boolean));
+      const byMedia = new Map();
+      for (const entry of entries) {
+        if (!entry.pageUrl && attachedPages.has(entry.mediaUrl)) continue;
+        const existing = byMedia.get(entry.mediaUrl);
+        if (!existing) {
+          byMedia.set(entry.mediaUrl, { ...entry });
+        } else if (!existing.pageUrl && entry.pageUrl) {
+          existing.pageUrl = entry.pageUrl;
+        }
+      }
+      return [...byMedia.values()];
+    }
+
+    function collectEntries(includeUploads = true) {
+      const sources = [];
+      if (elements.sourceText.value.trim()) {
+        sources.push({ name: "", label: "pasted text", text: elements.sourceText.value });
+      }
+      if (includeUploads) {
+        sources.push(...uploadedSources.map((source) => ({ ...source, label: source.name })));
+      }
+      let entries = [];
+      const summaries = [];
+      for (const source of sources) {
+        const result = parseSource(source.text, resolveFormat(source.text, source.name));
+        entries.push(...result.entries.map((entry) => ({ ...entry, format: result.format })));
+        summaries.push(`${source.label} (${FORMAT_LABELS[result.format]})`);
+      }
+      if (elements.removeDuplicates.checked) {
+        entries = dedupeEntries(entries);
+      }
+      return { entries, summaries };
+    }
+
+    async function handleSourceFiles(fileList) {
+      const files = Array.from(fileList || []);
+      if (!files.length) return;
+      // Dropped images/videos go to the local media gallery instead.
+      const mediaFiles = files.filter(isSupportedLocalMedia);
+      const textFiles = files.filter((file) => !isSupportedLocalMedia(file));
+      if (mediaFiles.length) handleFolderSelection(mediaFiles);
+      if (!textFiles.length) return;
+      let skipped = 0;
+      for (const file of textFiles) {
+        const text = await file.text();
+        // The same file picked or dropped again adds nothing.
+        if (uploadedSources.some((source) => source.name === file.name && source.text === text)) {
+          skipped += 1;
+          continue;
+        }
+        uploadedSources.push({ id: makeItemId("file"), name: file.name, text });
+      }
+      elements.sourceFileInput.value = "";
+      renderSourceFileList();
+      transformAllUrls();
+      if (skipped) {
+        setStatus(`${elements.status.textContent} ${skipped} already-loaded file(s) skipped.`, elements.status.className.replace("status", "").trim());
+      }
+    }
+
+    function setConvertMode(enabled) {
+      convertMode = enabled;
+      elements.rulesPanel.classList.toggle("hidden", !enabled);
+      elements.workspace.classList.toggle("single", !enabled);
+      elements.modeInput.setAttribute("aria-pressed", String(!enabled));
+      elements.modeConvert.setAttribute("aria-pressed", String(enabled));
+      elements.transformButton.textContent = enabled ? "Transform & Build Grid" : "Build Grid";
+      try {
+        localStorage.setItem("gridMode", enabled ? "convert" : "input");
+      } catch {}
+      // Rebuild so existing cards reflect the mode (raw vs transformed URLs).
+      if (remoteItems.length) transformAllUrls();
+    }
+
+    function renderSourceFileList() {
+      elements.sourceFileList.replaceChildren(...uploadedSources.map((source) => {
+        const result = parseSource(source.text, resolveFormat(source.text, source.name));
+        const paired = result.entries.filter((entry) => entry.pageUrl).length;
+        const row = document.createElement("li");
+        row.className = "source-file";
+        const name = document.createElement("span");
+        name.textContent = source.name;
+        const detail = document.createElement("small");
+        detail.textContent = `${FORMAT_LABELS[result.format]} · ${result.entries.length} entries · ${paired} with page`;
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.textContent = "×";
+        remove.title = `Remove ${source.name}`;
+        remove.addEventListener("click", () => {
+          uploadedSources = uploadedSources.filter((item) => item.id !== source.id);
+          renderSourceFileList();
+          transformAllUrls();
+          setStatus(`Removed ${source.name}. ${elements.status.textContent}`, elements.status.className.replace("status", "").trim());
+        });
+        row.append(name, detail, remove);
+        return row;
+      }));
+    }
+    function cleanExtractedUrl(value) {
+      const url = trimUrlText(value);
+      try {
+        const parsed = new URL(url);
+        return parsed.protocol === "https:" ? parsed.href : "";
+      } catch {
+        return "";
+      }
+    }
+    function trimUrlText(value) {
+      let url = value
+        .replace(/&amp;/gi, "&")
+        .replace(/\\u0026/gi, "&")
+        .replace(/\\\//g, "/")
+        .trim();
+      // Common punctuation that sits after URLs in prose.
+      url = url.replace(/[.,;:!?]+$/g, "");
+      // Remove unmatched closing brackets at the end.
+      while (url.endsWith(")") && charCount(url, "(") < charCount(url, ")")) {
+        url = url.slice(0, -1);
+      }
+      while (url.endsWith("]") && charCount(url, "[") < charCount(url, "]")) {
+        url = url.slice(0, -1);
+      }
+      while (url.endsWith("}") && charCount(url, "{") < charCount(url, "}")) {
+        url = url.slice(0, -1);
+      }
+      return url;
+    }
+    function charCount(text, character) {
+      return [...text].filter((item) => item === character).length;
+    }
+    function readRules() {
+      return {
+        newDomain: elements.newDomain.value.trim(),
+        domainPrefix: elements.domainPrefix.value.trim(),
+        pathPrefix: elements.pathPrefix.value.trim(),
+        slugMode: elements.slugMode.value,
+        customSlug: elements.customSlug.value.trim(),
+        idParameter: elements.idParameter.value.trim(),
+        extensionMode: elements.extensionMode.value,
+        appendText: elements.appendText.value.trim(),
+        manualQuery: elements.manualQuery.value.trim(),
+        keepId: elements.keepId.checked,
+        keepAllQuery: elements.keepAllQuery.checked,
+        showBroken: elements.showBroken.checked
+      };
+    }
+    function transformUrl(originalUrl, rules) {
+      const original = new URL(originalUrl);
+      const transformed = new URL(originalUrl);
+      // Replace complete domain when a domain is supplied.
+      if (rules.newDomain) {
+        const normalizedDomain = normalizeDomain(rules.newDomain);
+        try {
+          const replacement = new URL(normalizedDomain);
+          transformed.protocol = replacement.protocol;
+          transformed.hostname = replacement.hostname;
+          transformed.port = replacement.port;
+        } catch {
+          throw new Error(`Invalid replacement domain: ${rules.newDomain}`);
+        }
+      }
+      // Add a prefix directly before the hostname: cdn.example.com.
+      if (rules.domainPrefix) {
+        const prefix = rules.domainPrefix
+          .replace(/^https?:\/\//i, "")
+          .replace(/[/.]+$/g, "");
+        if (prefix) {
+          transformed.hostname = `${prefix}.${transformed.hostname}`;
+        }
+      }
+      const originalId = rules.idParameter
+        ? original.searchParams.get(rules.idParameter)
+        : null;
+      let selectedPath = original.pathname;
+      if (rules.slugMode === "last") {
+        selectedPath = getLastPathPart(original.pathname);
+      }
+      if (rules.slugMode === "id") {
+        selectedPath = originalId || "";
+      }
+      if (rules.slugMode === "custom") {
+        selectedPath = rules.customSlug || "";
+      }
+      const prefixedPath = joinPaths(rules.pathPrefix, selectedPath);
+      transformed.pathname = applyFilenameRules(
+        prefixedPath,
+        rules.extensionMode,
+        rules.appendText
+      );
+      // Rebuild the query string from scratch to ensure precise control.
+      transformed.search = "";
+      if (rules.keepAllQuery) {
+        for (const [key, value] of original.searchParams.entries()) {
+          transformed.searchParams.append(key, value);
+        }
+      } else if (rules.keepId && rules.idParameter && originalId !== null) {
+        transformed.searchParams.set(rules.idParameter, originalId);
+      }
+      if (rules.manualQuery) {
+        const cleanQuery = rules.manualQuery.replace(/^[?&]+/, "");
+        const extraParameters = new URLSearchParams(cleanQuery);
+        for (const [key, value] of extraParameters.entries()) {
+          transformed.searchParams.set(key, value);
+        }
+      }
+      // Keep the original #hash only if it exists.
+      transformed.hash = original.hash;
+      return transformed.href;
+    }
+    function normalizeDomain(domain) {
+      const trimmed = domain.replace(/\/+$/g, "");
+      if (/^https?:\/\//i.test(trimmed)) {
+        return trimmed;
+      }
+      return `https://${trimmed}`;
+    }
+    function getLastPathPart(pathname) {
+      const parts = pathname.split("/").filter(Boolean);
+      return parts.length ? parts[parts.length - 1] : "";
+    }
+    function joinPaths(prefix, path) {
+      const cleanPrefix = (prefix || "").trim().replace(/^\/+|\/+$/g, "");
+      const cleanPath = (path || "").trim().replace(/^\/+|\/+$/g, "");
+      const parts = [cleanPrefix, cleanPath].filter(Boolean);
+      return parts.length ? `/${parts.join("/")}` : "/";
+    }
+    function applyFilenameRules(pathname, extensionMode, appendText) {
+      let path = pathname || "/";
+      // Do not attempt filename extension changes for a root-only path.
+      if (path === "/") {
+        return path;
+      }
+      const parts = path.split("/");
+      let filename = parts.pop() || "";
+      const isDirectoryPath = filename === "";
+      if (isDirectoryPath) {
+        return path;
+      }
+      const extensionMatch = filename.match(/(\.[a-z0-9]{1,10})$/i);
+      const currentExtension = extensionMatch ? extensionMatch[1] : "";
+      const nameWithoutExtension = currentExtension
+        ? filename.slice(0, -currentExtension.length)
+        : filename;
+      // Append text before the extension.
+      if (appendText) {
+        filename = `${nameWithoutExtension}${appendText}${currentExtension}`;
+      }
+      const refreshedExtensionMatch = filename.match(/(\.[a-z0-9]{1,10})$/i);
+      const refreshedExtension = refreshedExtensionMatch ? refreshedExtensionMatch[1] : "";
+      const refreshedBase = refreshedExtension
+        ? filename.slice(0, -refreshedExtension.length)
+        : filename;
+      switch (extensionMode) {
+        case "add-jpg":
+          if (!/\.jpg$/i.test(filename)) {
+            filename += ".jpg";
+          }
+          break;
+        case "remove-jpg":
+          filename = filename.replace(/\.jpg$/i, "");
+          break;
+        case "replace-jpg":
+          filename = `${refreshedBase}.jpg`;
+          break;
+        case "replace-png":
+          filename = `${refreshedBase}.png`;
+          break;
+        case "remove-all":
+          filename = refreshedBase;
+          break;
+        case "keep":
+        default:
+          break;
+      }
+      parts.push(filename);
+      return parts.join("/") || "/";
+    }
+    /* ---------- yt-dlp resolving (Convert URLs mode) ----------
+       A page cannot run programs, so grid-ytdlp.py does it and answers over localhost.
+       Results are cached per original URL: { url } on success, { error } on failure. */
+    const YTDLP_HELPER = "http://127.0.0.1:8765/resolve";
+    const YTDLP_BATCH = 2;
+    const ytdlpResolved = new Map();
+    const ytdlpInFlight = new Set();
+
+    function readYtdlpDomains() {
+      return elements.ytdlpDomains.value
+        .split(/[\s,;]+/)
+        .map((domain) => domain.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^\*\./, "").replace(/[/:?#].*$/, ""))
+        .filter(Boolean);
+    }
+
+    function matchesYtdlpDomain(url, domains) {
+      if (!domains.length) return false;
+      try {
+        const host = new URL(url).hostname.toLowerCase();
+        return domains.some((domain) => host === domain || host.endsWith(`.${domain}`));
+      } catch {
+        return false;
+      }
+    }
+
+    async function resolveWithYtdlp(urls) {
+      urls.forEach((url) => ytdlpInFlight.add(url));
+      let done = 0;
+      try {
+        for (let start = 0; start < urls.length; start += YTDLP_BATCH) {
+          const batch = urls.slice(start, start + YTDLP_BATCH);
+          setStatus(`Resolving with yt-dlp... ${done}/${urls.length}`);
+          const response = await fetch(YTDLP_HELPER, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ urls: batch })
+          });
+          if (!response.ok) throw new Error(`helper answered ${response.status}`);
+          const { results } = await response.json();
+          batch.forEach((url) => {
+            ytdlpResolved.set(url, results[url] || { error: "no result" });
+            ytdlpInFlight.delete(url);
+          });
+          done += batch.length;
+          // Rebuild so resolved cards appear as they come in.
+          transformAllUrls();
+        }
+      } catch (error) {
+        urls.forEach((url) => ytdlpInFlight.delete(url));
+        setStatus(
+          `yt-dlp helper not reachable (${error.message}). Start it with "python grid-ytdlp.py", then build again. ${done}/${urls.length} resolved; the rest keep their original URL.`,
+          "bad"
+        );
+      }
+    }
+
+    function transformAllUrls() {
+      const { entries, summaries } = collectEntries();
+
+      if (entries.length === 0) {
+        remoteItems = [];
+        syncTransformedItems();
+        renderGallery();
+        setStatus(
+          localMediaItems.length
+            ? "No valid HTTPS URLs were found. Local folder media is still shown."
+            : "No valid HTTPS URLs were found in the pasted text or uploaded files.",
+          "bad"
+        );
+        return;
+      }
+
+      const rules = readRules();
+      const errors = [];
+      const ytdlpDomains = readYtdlpDomains();
+      const ytdlpPending = [];
+      const ytdlpFailed = [];
+      let ytdlpDone = 0;
+      let ytdlpWaiting = 0;
+      const previousIds = new Set(remoteItems.map((item) => item.id));
+      const occurrences = new Map();
+      // The same URL keeps the same id across rebuilds, so adding sources only
+      // adds cards and a shuffled order stays put. Repeats (dedupe off) get #2, #3...
+      const stableId = (url) => {
+        const count = (occurrences.get(url) || 0) + 1;
+        occurrences.set(url, count);
+        const key = `${url}#${count}`;
+        if (!remoteItemIds.has(key)) remoteItemIds.set(key, makeItemId("url"));
+        return remoteItemIds.get(key);
+      };
+
+      // Rules transform the media URL only, and only in Convert URLs mode;
+      // the page link is always kept as-is.
+      remoteItems = entries.map(({ mediaUrl: originalUrl, pageUrl, unverified = false, format }) => {
+        const id = stableId(originalUrl);
+        if (convertMode && matchesYtdlpDomain(originalUrl, ytdlpDomains)) {
+          const resolved = ytdlpResolved.get(originalUrl);
+          if (!resolved) {
+            if (!ytdlpInFlight.has(originalUrl)) ytdlpPending.push(originalUrl);
+            ytdlpWaiting += 1;
+          } else if (resolved.url) {
+            ytdlpDone += 1;
+            return {
+              id,
+              sourceType: "remote",
+              // yt-dlp URLs rarely carry an extension; treat them as video unless they clearly are an image.
+              mediaKind: isMediaUrl(resolved.url) ? inferMediaKind(resolved.url) : "video",
+              originalUrl,
+              pageUrl: pageUrl || originalUrl,
+              unverified: false,
+              sourceFormat: format,
+              transformedUrl: resolved.url,
+              ytdlpUrls: resolved.urls || [resolved.url]
+            };
+          } else {
+            ytdlpFailed.push(resolved.error);
+          }
+          // Waiting or failed: show the original URL untouched.
+          return {
+            id,
+            sourceType: "remote",
+            mediaKind: inferMediaKind(originalUrl),
+            originalUrl,
+            pageUrl,
+            unverified,
+            sourceFormat: format,
+            transformedUrl: originalUrl
+          };
+        }
+        try {
+          return {
+            id,
+            sourceType: "remote",
+            mediaKind: inferMediaKind(originalUrl),
+            originalUrl,
+            pageUrl,
+            unverified,
+            sourceFormat: format,
+            transformedUrl: convertMode ? transformUrl(originalUrl, rules) : originalUrl
+          };
+        } catch (error) {
+          errors.push({
+            originalUrl,
+            message: error.message
+          });
+
+          return {
+            id,
+            sourceType: "remote",
+            mediaKind: inferMediaKind(originalUrl),
+            originalUrl,
+            pageUrl,
+            unverified,
+            sourceFormat: format,
+            transformedUrl: originalUrl,
+            error: error.message
+          };
+        }
+      }).filter((item) => !excludedMediaUrls.has(item.originalUrl) && !excludedMediaUrls.has(item.transformedUrl));
+
+      syncTransformedItems();
+      renderGallery();
+
+      const successful = remoteItems.filter((item) => !item.error).length;
+      const paired = remoteItems.filter((item) => item.pageUrl).length;
+      const added = remoteItems.filter((item) => !previousIds.has(item.id)).length;
+      let sourceNote = ` ${added} new, ${paired} with a page link. Parsed: ${summaries.join(", ")}.`;
+      if (ytdlpDone || ytdlpFailed.length || ytdlpWaiting) {
+        sourceNote += ` yt-dlp: ${ytdlpDone} resolved`;
+        if (ytdlpWaiting) sourceNote += `, ${ytdlpWaiting} waiting`;
+        if (ytdlpFailed.length) sourceNote += `, ${ytdlpFailed.length} failed (${ytdlpFailed[0]})`;
+        sourceNote += ".";
+      }
+
+      if (errors.length) {
+        setStatus(
+          `Created ${successful} transformed URL(s). ${errors.length} URL(s) used the original link because of an invalid rule.${sourceNote}`,
+          "bad"
+        );
+      } else {
+        const localNote = localMediaItems.length
+          ? ` ${localMediaItems.length} local media item(s) are also in the gallery.`
+          : "";
+        setStatus(
+          `${convertMode ? "Extracted and transformed" : "Extracted"} ${remoteItems.length} media URL(s).${sourceNote}${localNote}`,
+          ytdlpFailed.length ? "bad" : "good"
+        );
+      }
+
+      if (ytdlpPending.length) resolveWithYtdlp(ytdlpPending);
+    }
+
+    function inferMediaKind(value, mimeType = "") {
+      if (mimeType.startsWith("video/")) return "video";
+      if (mimeType.startsWith("image/")) return "image";
+      let text = String(value || "");
+      try {
+        text = decodeURIComponent(text);
+      } catch {}
+      // Match a video extension anywhere in the URL, not only at the end:
+      // ".../clip.mp4/download", "...?file=clip.webm&x=1", "...?format=mp4".
+      return /[.=](mp4|webm|ogv|ogg|mov|m4v|avi|mkv)(?![a-z0-9])/i.test(text) ? "video" : "image";
+    }
+
+    function isSupportedLocalMedia(file) {
+      if (file.type.startsWith("image/") || file.type.startsWith("video/")) {
+        return true;
+      }
+      return /\.(avif|bmp|gif|heic|heif|jpe?g|png|svg|webp|mp4|webm|ogv|ogg|mov|m4v)$/i.test(file.name);
+    }
+
+    function revokeLocalItem(item) {
+      if (item && item.objectUrl) {
+        URL.revokeObjectURL(item.objectUrl);
+      }
+    }
+
+    function handleFolderSelection(fileList) {
+      const files = Array.from(fileList || []);
+      if (!files.length) return;
+
+      const existingKeys = new Set(localMediaItems.map((item) => item.localKey));
+      let added = 0;
+      let skipped = 0;
+
+      for (const file of files) {
+        if (!isSupportedLocalMedia(file)) {
+          skipped += 1;
+          continue;
+        }
+
+        const relativePath = file.webkitRelativePath || file.name;
+        const key = `${relativePath}|${file.size}|${file.lastModified}`;
+        if (existingKeys.has(key) || excludedLocalKeys.has(key)) {
+          skipped += 1;
+          continue;
+        }
+
+        const objectUrl = URL.createObjectURL(file);
+        localMediaItems.push({
+          id: makeItemId("local"),
+          sourceType: "local",
+          mediaKind: inferMediaKind(file.name, file.type),
+          originalUrl: relativePath,
+          transformedUrl: objectUrl,
+          objectUrl,
+          localKey: key,
+          fileName: file.name,
+          relativePath,
+          size: file.size,
+          mimeType: file.type
+        });
+        existingKeys.add(key);
+        added += 1;
+      }
+
+      syncTransformedItems();
+      renderGallery();
+      updateFolderSummary();
+
+      const skippedText = skipped ? ` ${skipped} unsupported or duplicate file(s) skipped.` : "";
+      setStatus(`Added ${added} local media item(s) from the selected folder.${skippedText}`, added ? "good" : "bad");
+    }
+
+    function updateFolderSummary() {
+      if (!localMediaItems.length) {
+        elements.folderSummary.textContent = "No local folder added";
+        return;
+      }
+      const folders = new Set(
+        localMediaItems.map((item) => {
+          const parts = item.relativePath.split("/");
+          return parts.length > 1 ? parts[0] : "Selected files";
+        })
+      );
+      const folderText = folders.size === 1 ? [...folders][0] : `${folders.size} folders`;
+      elements.folderSummary.textContent = `${localMediaItems.length} local item(s) · ${folderText}`;
+    }
+
+    function clearLocalMedia() {
+      localMediaItems.forEach(revokeLocalItem);
+      localMediaItems = [];
+      elements.folderInput.value = "";
+      syncTransformedItems();
+      closeLightbox();
+      renderGallery();
+      updateFolderSummary();
+      setStatus("Local folder media removed. URL-based gallery items were kept.", "good");
+    }
+    /* ---------- Gallery rendering ----------
+       Cards are cached by item id and reused across rebuilds and page changes, so
+       adding sources only creates the new cards and loaded media is not reloaded. */
+
+    const cardCache = new Map();
+    // Per-URL load state that outlives rebuilds: { mediaKind, triedVideo, failed }.
+    const mediaState = new Map();
+    let currentPage = 1;
+    let renderQueued = false;
+
+    // Videos get their src only when near the viewport. Webm clips autoplay (muted,
+    // looping, like GIFs) while visible; other videos never autoplay.
+    const videoObserver = "IntersectionObserver" in window
+      ? new IntersectionObserver((entries) => {
+          for (const entry of entries) {
+            const video = entry.target;
+            if (entry.isIntersecting) {
+              if (!video.getAttribute("src") && video.dataset.src) video.src = video.dataset.src;
+              if (video.dataset.autoplay) video.play().catch(() => {});
+            } else if (video.dataset.autoplay) {
+              video.pause();
+            }
+          }
+        }, { rootMargin: "300px 0px" })
+      : null;
+
+    function effectiveKind(item) {
+      return (mediaState.get(item.transformedUrl) || {}).mediaKind || item.mediaKind;
+    }
+
+    function setMediaState(item, patch) {
+      mediaState.set(item.transformedUrl, { ...mediaState.get(item.transformedUrl), ...patch });
+    }
+
+    function isHiddenAfterFailure(item) {
+      return item.sourceType === "remote" &&
+        !elements.showBroken.checked &&
+        Boolean((mediaState.get(item.transformedUrl) || {}).failed);
+    }
+
+    function isAutoplayVideo(item) {
+      const name = item.sourceType === "local"
+        ? `${item.fileName || ""} ${item.mimeType || ""}`
+        : item.transformedUrl;
+      return /webm/i.test(name);
+    }
+
+    // Every whitespace-separated term must appear in one of the item's URLs or its path.
+    function matchesFilter(item) {
+      const terms = elements.galleryFilter.value.toLowerCase().split(/\s+/).filter(Boolean);
+      if (!terms.length) return true;
+      let haystack = [item.transformedUrl, item.originalUrl, item.pageUrl, item.relativePath, item.fileName]
+        .filter((value) => value && !String(value).startsWith("blob:"))
+        .join(" ")
+        .toLowerCase();
+      try {
+        haystack = decodeURIComponent(haystack);
+      } catch {}
+      return terms.every((term) => haystack.includes(term));
+    }
+
+    // "All" puts everything on one page.
+    function pageSize() {
+      if (elements.pageSize.value === "all") return Infinity;
+      return Number(elements.pageSize.value) || 71;
+    }
+
+    function cardSignature(item) {
+      return [item.sourceType, item.transformedUrl, item.originalUrl, item.pageUrl, item.mediaKind].join("|");
+    }
+
+    function discardCard(card) {
+      const video = card.querySelector("video");
+      if (video) {
+        if (videoObserver) videoObserver.unobserve(video);
+        video.pause();
+      }
+      card.remove();
+    }
+
+    // Coalesces the many re-renders that failing images can trigger in one frame.
+    function queueRender() {
+      if (renderQueued) return;
+      renderQueued = true;
+      requestAnimationFrame(() => {
+        renderQueued = false;
+        renderGallery();
+      });
+    }
+
+    function goToPage(page) {
+      currentPage = page;
+      renderGallery();
+      elements.gallerySection.scrollIntoView({ block: "start" });
+    }
+
+    function renderPager(totalItems) {
+      const totalPages = Math.max(1, Math.ceil(totalItems / pageSize()));
+      elements.pageInfo.textContent = `${currentPage} / ${totalPages}`;
+      elements.pagePrev.disabled = currentPage <= 1;
+      elements.pageNext.disabled = currentPage >= totalPages;
+      elements.pager.classList.toggle("hidden", totalPages < 2);
+    }
+
+    function renderGallery() {
+      const allItems = getDisplayItems();
+      const totalPages = Math.max(1, Math.ceil(allItems.length / pageSize()));
+      currentPage = Math.min(Math.max(1, currentPage), totalPages);
+      // Guard against 0 * Infinity (NaN) when showing all.
+      const start = currentPage > 1 ? (currentPage - 1) * pageSize() : 0;
+      const visibleItems = allItems.slice(start, start + pageSize());
+
+      const filtered = elements.galleryFilter.value.trim();
+      const total = transformedItems.length;
+      elements.galleryCount.textContent = filtered
+        ? `${allItems.length} of ${total} match`
+        : `${allItems.length} item${allItems.length === 1 ? "" : "s"}`;
+      renderPager(allItems.length);
+
+      if (visibleItems.length === 0) {
+        cardCache.forEach((entry) => discardCard(entry.card));
+        cardCache.clear();
+        elements.gallery.innerHTML = `
+          <div class="empty">
+            ${filtered && total ? "No media matches the filter." : "No media to display."}
+          </div>
+        `;
+        return;
+      }
+
+      const emptyMessage = elements.gallery.querySelector(".empty");
+      if (emptyMessage) emptyMessage.remove();
+
+      // Cards leaving the page are detached but kept cached, so paging back is instant.
+      // Cards whose items are gone entirely are dropped.
+      const pageIds = new Set(visibleItems.map((item) => item.id));
+      const liveIds = new Set(transformedItems.map((item) => item.id));
+      for (const [id, entry] of cardCache) {
+        if (!liveIds.has(id)) {
+          discardCard(entry.card);
+          cardCache.delete(id);
+        } else if (!pageIds.has(id) && entry.card.isConnected) {
+          discardCard(entry.card);
+        }
+      }
+
+      // Walk the wanted order against the current DOM; cards already in place are
+      // left untouched, only new or moved cards are inserted.
+      let cursor = elements.gallery.firstElementChild;
+      for (const item of visibleItems) {
+        const signature = cardSignature(item);
+        let entry = cardCache.get(item.id);
+        if (entry && entry.signature !== signature) {
+          if (cursor === entry.card) cursor = cursor.nextElementSibling;
+          discardCard(entry.card);
+          entry = null;
+        }
+        if (!entry) {
+          entry = { card: createCard(item), signature };
+          cardCache.set(item.id, entry);
+        }
+        if (entry.card === cursor) {
+          cursor = cursor.nextElementSibling;
+        } else {
+          elements.gallery.insertBefore(entry.card, cursor);
+          // Moving a node pauses its video; re-observing re-applies load/play.
+          const video = entry.card.querySelector("video");
+          if (video && videoObserver) {
+            videoObserver.unobserve(video);
+            videoObserver.observe(video);
+          }
+        }
+      }
+    }
+
+    /* ---------- Card removal menu ---------- */
+
+    let openCardMenuCard = null;
+
+    function openCardMenu(card, button, menu) {
+      closeCardMenu();
+      openCardMenuCard = card;
+      card.classList.add("menu-open");
+      menu.classList.remove("hidden");
+      button.setAttribute("aria-expanded", "true");
+      menu.querySelector("button").focus();
+    }
+
+    function closeCardMenu() {
+      if (!openCardMenuCard) return;
+      openCardMenuCard.classList.remove("menu-open");
+      openCardMenuCard.querySelector(".card-menu").classList.add("hidden");
+      openCardMenuCard.querySelector(".remove-button").setAttribute("aria-expanded", "false");
+      openCardMenuCard = null;
+    }
+
+    function hideItem(item) {
+      hiddenIds.add(item.id);
+      renderGallery();
+      setStatus("Card hidden from the grid. Exports still include it.", "good");
+    }
+
+    function excludeItem(item) {
+      if (item.sourceType === "local") {
+        excludedLocalKeys.add(item.localKey);
+        revokeLocalItem(item);
+        localMediaItems = localMediaItems.filter((local) => local.id !== item.id);
+        updateFolderSummary();
+      } else {
+        [item.originalUrl, item.transformedUrl].forEach((url) => {
+          excludedMediaUrls.add(url);
+          excludedUrls.add(url);
+        });
+        if (item.pageUrl) excludedUrls.add(item.pageUrl);
+        remoteItems = remoteItems.filter((remote) => remote.id !== item.id);
+      }
+      syncTransformedItems();
+      renderGallery();
+      setStatus("Card removed from the grid and from exports.", "good");
+    }
+
+    document.addEventListener("click", (event) => {
+      if (openCardMenuCard && !event.target.closest(".remove-button, .card-menu")) closeCardMenu();
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && openCardMenuCard) closeCardMenu();
+    });
+
+    /* ---------- Picture-in-picture queue ---------- */
+
+    // Entries are snapshots ({ id, url, kind, label }) so they outlive grid rebuilds.
+    const queue = [];
+    let queuePlayingId = null;
+    // Document Picture-in-Picture window (Chromium); it shows images as well as videos.
+    let pipWindow = null;
+    const queueCard = document.getElementById("queueCard");
+    const queueStage = document.getElementById("queueStage");
+    const queueList = document.getElementById("queueList");
+
+    function setQueueButtonState(button, queued) {
+      if (!button) return;
+      button.textContent = queued ? "✓" : "+";
+      button.title = queued ? "Remove from queue" : "Add to queue";
+      button.setAttribute("aria-label", button.title);
+      button.setAttribute("aria-pressed", String(queued));
+    }
+
+    function toggleQueued(item) {
+      const index = queue.findIndex((entry) => entry.id === item.id);
+      if (index >= 0) {
+        queue.splice(index, 1);
+      } else {
+        const url = item.transformedUrl;
+        queue.push({
+          id: item.id,
+          url,
+          kind: effectiveKind(item),
+          label: item.sourceType === "local"
+            ? (item.relativePath || item.fileName)
+            : (url.split(/[?#]/)[0].split("/").filter(Boolean).pop() || url)
+        });
+      }
+      renderQueue();
+    }
+
+    function renderQueue() {
+      queueCard.classList.toggle("hidden", queue.length === 0);
+      document.getElementById("queueTitle").textContent = `Queue (${queue.length})`;
+      if (queue.length === 0) {
+        queueStage.replaceChildren();
+        if (!pipWindow) queuePlayingId = null;
+      }
+
+      queueList.replaceChildren(...queue.map((entry) => {
+        const row = document.createElement("li");
+        row.classList.toggle("playing", entry.id === queuePlayingId);
+
+        const play = document.createElement("button");
+        play.type = "button";
+        play.className = "queue-play";
+        play.title = `Play in picture-in-picture: ${entry.url}`;
+        const tag = document.createElement("span");
+        tag.className = "tag";
+        tag.textContent = entry.kind === "video" ? "VID" : "IMG";
+        const label = document.createElement("span");
+        label.textContent = entry.label;
+        play.append(tag, label);
+        play.addEventListener("click", () => playQueueEntry(entry));
+
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.textContent = "×";
+        remove.title = "Remove from queue";
+        remove.setAttribute("aria-label", "Remove from queue");
+        remove.addEventListener("click", () => {
+          queue.splice(queue.indexOf(entry), 1);
+          renderQueue();
+        });
+
+        row.append(play, remove);
+        return row;
+      }));
+
+      const queuedIds = new Set(queue.map((entry) => entry.id));
+      cardCache.forEach((cached, id) => {
+        setQueueButtonState(cached.card.querySelector(".queue-button"), queuedIds.has(id));
+      });
+    }
+
+    function buildPipMedia(entry) {
+      let media;
+      if (entry.kind === "video") {
+        media = document.createElement("video");
+        media.controls = true;
+        media.playsInline = true;
+        media.src = entry.url;
+        media.addEventListener("ended", () => playNextInQueue(entry));
+      } else {
+        media = document.createElement("img");
+        media.alt = entry.label;
+        media.src = entry.url;
+      }
+      media.addEventListener("error", () => {
+        setStatus(`Queue: could not load ${entry.label}.`, "bad");
+        playNextInQueue(entry);
+      });
+      return media;
+    }
+
+    function startPipVideo(media) {
+      if (media.tagName !== "VIDEO") return;
+      // Sound can be blocked when the queue advances on its own; fall back to muted.
+      media.play().catch(() => {
+        media.muted = true;
+        media.play().catch(() => {});
+      });
+    }
+
+    async function playQueueEntry(entry) {
+      queuePlayingId = entry.id;
+      renderQueue();
+      const media = buildPipMedia(entry);
+
+      if ("documentPictureInPicture" in window) {
+        try {
+          if (!pipWindow) {
+            pipWindow = await documentPictureInPicture.requestWindow({ width: 480, height: 270 });
+            pipWindow.document.body.style.cssText =
+              "margin:0;height:100vh;overflow:hidden;background:#000;display:grid;place-items:center";
+            pipWindow.addEventListener("pagehide", () => {
+              pipWindow = null;
+              queuePlayingId = null;
+              renderQueue();
+            });
+          }
+          media.style.cssText = "width:100%;height:100%;object-fit:contain";
+          pipWindow.document.body.replaceChildren(media);
+          startPipVideo(media);
+          return;
+        } catch {}
+      }
+
+      // No PiP window: play inside the queue card, and pop videos out natively where possible.
+      queueStage.replaceChildren(media);
+      if (media.tagName === "VIDEO" && document.pictureInPictureEnabled) {
+        media.addEventListener("loadedmetadata", () => {
+          media.requestPictureInPicture().catch(() => {});
+        }, { once: true });
+      }
+      startPipVideo(media);
+    }
+
+    function playNextInQueue(entry) {
+      if (queuePlayingId !== entry.id) return;
+      const next = queue[queue.indexOf(entry) + 1];
+      if (next) playQueueEntry(next);
+    }
+
+    document.getElementById("queueSide").addEventListener("click", () => {
+      const left = queueCard.classList.toggle("left");
+      try {
+        localStorage.setItem("gridQueueSide", left ? "left" : "right");
+      } catch {}
+    });
+    document.getElementById("queueClear").addEventListener("click", () => {
+      queue.length = 0;
+      renderQueue();
+    });
+    try {
+      queueCard.classList.toggle("left", localStorage.getItem("gridQueueSide") === "left");
+    } catch {}
+
+    function createCard(item) {
+      const card = document.createElement("article");
+      card.className = "card";
+      card.dataset.itemId = item.id;
+
+      // A plain frame rather than a button, so video controls work inline.
+      // Images open the lightbox on click; the corner button works for every card.
+      const frame = document.createElement("div");
+      frame.className = "image-link";
+
+      const expandButton = document.createElement("button");
+      expandButton.type = "button";
+      expandButton.className = "expand-button";
+      expandButton.textContent = "⤢";
+      expandButton.title = "Open in lightbox";
+      expandButton.setAttribute("aria-label", "Open in lightbox");
+      expandButton.addEventListener("click", () => openLightbox(item.id));
+
+      const queueButton = document.createElement("button");
+      queueButton.type = "button";
+      queueButton.className = "queue-button";
+      setQueueButtonState(queueButton, queue.some((entry) => entry.id === item.id));
+      queueButton.addEventListener("click", () => toggleQueued(item));
+
+      const removeButton = document.createElement("button");
+      removeButton.type = "button";
+      removeButton.className = "remove-button";
+      removeButton.textContent = "×";
+      removeButton.title = "Remove this card";
+      removeButton.setAttribute("aria-label", "Remove this card");
+      removeButton.setAttribute("aria-haspopup", "menu");
+      removeButton.setAttribute("aria-expanded", "false");
+
+      const menu = document.createElement("div");
+      menu.className = "card-menu hidden";
+      menu.setAttribute("role", "menu");
+      const menuOption = (label, detail, action) => {
+        const option = document.createElement("button");
+        option.type = "button";
+        option.setAttribute("role", "menuitem");
+        option.textContent = label;
+        option.title = detail;
+        option.addEventListener("click", () => {
+          closeCardMenu();
+          action(item);
+        });
+        return option;
+      };
+      menu.append(
+        menuOption("Hide from grid", "Removes the card from view only; exports still include it", hideItem),
+        menuOption("Remove from grid & exports", "Removes the card and leaves it out of this and future exports", excludeItem)
+      );
+      removeButton.addEventListener("click", () => {
+        if (openCardMenuCard === card) closeCardMenu();
+        else openCardMenu(card, removeButton, menu);
+      });
+
+      const handleMediaError = () => {
+        const state = mediaState.get(item.transformedUrl) || {};
+        // Extensionless media URLs default to image; retry once as video. Links that
+        // don't look like media (e.g. unpaired post pages) get only the one attempt.
+        if (effectiveKind(item) === "image" && !state.triedVideo && !item.unverified) {
+          setMediaState(item, { triedVideo: true, mediaKind: "video" });
+          frame.replaceChildren(buildCardMedia(), expandButton, queueButton, removeButton, menu);
+          return;
+        }
+        setMediaState(item, { failed: true });
+        if (elements.showBroken.checked || item.sourceType === "local") {
+          const failed = document.createElement("div");
+          failed.className = "failed";
+          failed.textContent = "Media could not load. Its source information remains available below.";
+          frame.replaceChildren(failed, expandButton, queueButton, removeButton, menu);
+        } else {
+          discardCard(card);
+          cardCache.delete(item.id);
+          // Re-render so the next items move up to fill the page.
+          queueRender();
+        }
+      };
+
+      const buildCardMedia = () => {
+        const media = createMediaElement(item, false);
+        media.addEventListener("error", handleMediaError);
+        if (media.tagName === "IMG") {
+          media.addEventListener("click", () => openLightbox(item.id));
+        }
+        return media;
+      };
+
+      frame.append(buildCardMedia(), expandButton, queueButton, removeButton, menu);
+
+      if (item.sourceType === "local") {
+        const badge = document.createElement("span");
+        badge.className = "local-badge";
+        badge.textContent = `Local ${item.mediaKind}`;
+        card.appendChild(badge);
+      }
+
+      const info = document.createElement("div");
+      info.className = "card-info";
+
+      const urlPair = document.createElement("div");
+      urlPair.className = "url-pair";
+
+      // One line per link with its own copy icon.
+      if (item.sourceType === "local") {
+        urlPair.appendChild(createTextLine("FILE", item.relativePath || item.fileName));
+      } else {
+        if (item.transformedUrl === item.originalUrl) {
+          urlPair.appendChild(createUrlLine("MEDIA", item.transformedUrl, item.transformedUrl, false));
+        } else {
+          urlPair.appendChild(createUrlLine("NEW", item.transformedUrl, item.transformedUrl, false));
+          urlPair.appendChild(createUrlLine("SOURCE", item.originalUrl, item.originalUrl, true));
+        }
+
+        if (item.pageUrl) {
+          urlPair.appendChild(createUrlLine("PAGE", item.pageUrl, item.pageUrl, false));
+        }
+      }
+
+      info.append(urlPair);
+      card.append(frame, info);
+      return card;
+    }
+
+    function createMediaElement(item, forLightbox) {
+      if (effectiveKind(item) === "video") {
+        const autoplay = isAutoplayVideo(item);
+        const video = document.createElement("video");
+        video.controls = true;
+        video.playsInline = true;
+        video.preload = forLightbox ? "auto" : "metadata";
+        if (autoplay) {
+          // Muted is required for autoplay; the controls allow unmuting.
+          video.muted = false;
+          video.defaultMuted = false;
+          video.setAttribute("muted", "");
+          video.loop = true;
+          video.dataset.autoplay = "true";
+        }
+
+        if (forLightbox) {
+          video.src = item.transformedUrl;
+          video.autoplay = autoplay;
+          return video;
+        }
+
+        // "#t=0.1" makes non-autoplay videos show a first frame instead of black.
+        video.dataset.src = autoplay ? item.transformedUrl : `${item.transformedUrl}#t=0.1`;
+        if (videoObserver) {
+          videoObserver.observe(video);
+        } else {
+          video.src = video.dataset.src;
+        }
+        return video;
+      }
+
+      const image = document.createElement("img");
+      image.src = item.transformedUrl;
+      image.alt = item.sourceType === "local"
+        ? (item.relativePath || item.fileName || "Local image")
+        : "Gallery image";
+      image.loading = forLightbox ? "eager" : "lazy";
+      image.decoding = "async";
+      return image;
+    }
+
+    function createTextLine(tagText, text) {
+      const row = document.createElement("div");
+      row.className = "url-line";
+
+      const tag = document.createElement("span");
+      tag.className = "tag";
+      tag.textContent = tagText;
+
+      const value = document.createElement("span");
+      value.textContent = text;
+      value.title = text;
+
+      row.append(tag, value, createCopyButton(text));
+      return row;
+    }
+
+    function createCopyButton(text) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "copy-icon";
+      button.textContent = "⧉";
+      button.title = "Copy";
+      button.setAttribute("aria-label", `Copy ${text}`);
+      button.addEventListener("click", () => copyText(text));
+      return button;
+    }
+
+    // "https://www.site.com/a/b/c/file.jpg?x=1" -> "site.com/…/file.jpg?x=1".
+    // Keeps the host and last segment, where IDs and filenames live; CSS ellipsis
+    // trims whatever still overflows.
+    function shortenUrl(url) {
+      try {
+        const parsed = new URL(url);
+        const host = parsed.hostname.replace(/^www\./, "");
+        const parts = parsed.pathname.split("/").filter(Boolean);
+        const tail = parts.length > 1 ? `/…/${parts[parts.length - 1]}` : parsed.pathname.replace(/\/$/, "");
+        return `${host}${tail}${parsed.search}`;
+      } catch {
+        return url;
+      }
+    }
+
+    function openLightbox(itemId) {
+      const items = getDisplayItems();
+      const index = items.findIndex((item) => item.id === itemId);
+      if (index < 0) return;
+      const alreadyOpen = !elements.lightbox.classList.contains("hidden");
+      lightboxIndex = index;
+      elements.lightbox.classList.remove("hidden");
+      renderLightboxItem();
+      if (!alreadyOpen) elements.lightboxClose.focus({ preventScroll: true });
+    }
+
+    function toggleLightboxFullSize() {
+      lightboxFullSize = !lightboxFullSize;
+      elements.lightbox.classList.toggle("full-size", lightboxFullSize);
+      elements.lightboxFullSize.textContent = lightboxFullSize ? "Fit to screen" : "Full size";
+      elements.lightboxFullSize.setAttribute("aria-pressed", String(lightboxFullSize));
+      elements.lightboxFullSize.classList.toggle("shuffle-active", lightboxFullSize);
+      elements.lightboxStage.scrollTo(0, 0);
+    }
+
+    function closeLightbox() {
+      if (elements.lightbox.classList.contains("hidden")) return;
+      const video = elements.lightboxStage.querySelector("video");
+      if (video) video.pause();
+      elements.lightbox.classList.add("hidden");
+      elements.lightboxStage.replaceChildren();
+      lightboxIndex = -1;
+    }
+
+    function moveLightbox(direction) {
+      const items = getDisplayItems();
+      if (!items.length) return;
+      lightboxIndex = (lightboxIndex + direction + items.length) % items.length;
+      renderLightboxItem();
+    }
+
+    function renderLightboxItem() {
+      const items = getDisplayItems();
+      if (!items.length || lightboxIndex < 0) {
+        closeLightbox();
+        return;
+      }
+
+      if (lightboxIndex >= items.length) lightboxIndex = 0;
+      const item = items[lightboxIndex];
+      const previousVideo = elements.lightboxStage.querySelector("video");
+      if (previousVideo) previousVideo.pause();
+
+      const media = createMediaElement(item, true);
+      elements.lightboxStage.replaceChildren(media);
+      elements.lightboxStage.scrollTo(0, 0);
+      updateLightboxCaption();
+
+      if (item.sourceType === "remote") {
+        elements.lightboxOpenSource.href = item.transformedUrl;
+        elements.lightboxOpenSource.classList.remove("hidden");
+      } else {
+        elements.lightboxOpenSource.removeAttribute("href");
+        elements.lightboxOpenSource.classList.add("hidden");
+      }
+
+      if (item.pageUrl) {
+        elements.lightboxOpenPage.href = item.pageUrl;
+        elements.lightboxOpenPage.classList.remove("hidden");
+      } else {
+        elements.lightboxOpenPage.removeAttribute("href");
+        elements.lightboxOpenPage.classList.add("hidden");
+      }
+
+      const disableNav = items.length < 2;
+      elements.lightboxPrev.disabled = disableNav;
+      elements.lightboxNext.disabled = disableNav;
+    }
+    function updateLightboxCaption() {
+      const items = getDisplayItems();
+      const item = items[lightboxIndex];
+      if (!item) return;
+      const label = item.sourceType === "local"
+        ? (item.relativePath || item.fileName)
+        : item.transformedUrl;
+      elements.lightboxCaption.textContent = `${lightboxIndex + 1} / ${items.length} · ${label}`;
+    }
+    function createUrlLine(tagText, href, text, muted) {
+      const row = document.createElement("div");
+      row.className = "url-line";
+      const tag = document.createElement("span");
+      tag.className = "tag";
+      tag.textContent = tagText;
+      const link = document.createElement("a");
+      link.href = href;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = shortenUrl(text);
+      link.title = text;
+      if (muted) {
+        link.classList.add("original-url");
+      }
+      row.append(tag, link, createCopyButton(href));
+      return row;
+    }
+    async function copyText(text) {
+      try {
+        await navigator.clipboard.writeText(text);
+        setStatus("Copied to clipboard.", "good");
+      } catch {
+        const fallback = document.createElement("textarea");
+        fallback.value = text;
+        fallback.style.position = "fixed";
+        fallback.style.opacity = "0";
+        document.body.appendChild(fallback);
+        fallback.focus();
+        fallback.select();
+        document.execCommand("copy");
+        fallback.remove();
+        setStatus("Copied to clipboard.", "good");
+      }
+    }
+    function copyAllTransformedUrls() {
+      if (transformedItems.length === 0) {
+        setStatus("Create transformed URLs before copying.", "bad");
+        return;
+      }
+      copyText(transformedItems.map((item) => item.transformedUrl).join("\n"));
+    }
+    // Only the URLs yt-dlp returned, every line of them, in grid order.
+    function downloadYtdlpUrls() {
+      const urls = remoteItems.flatMap((item) => item.ytdlpUrls || []);
+      if (urls.length === 0) {
+        setStatus("No yt-dlp URLs yet. Enter domains, start the helper, and build the grid first.", "bad");
+        return;
+      }
+      downloadFile("yt-dlp-urls.txt", urls.join("\n") + "\n", "text/plain");
+      setStatus(`Exported ${urls.length} yt-dlp URL(s).`, "good");
+    }
+    function downloadTransformedUrls() {
+      if (transformedItems.length === 0) {
+        setStatus("Create transformed URLs before downloading.", "bad");
+        return;
+      }
+      const content = transformedItems
+        .map((item) => item.transformedUrl)
+        .join("\n") + "\n";
+      downloadFile("transformed-image-urls.txt", content, "text/plain");
+      setStatus("Downloaded transformed-image-urls.txt.", "good");
+    }
+    /* ---------- Export: every grid item in one file ----------
+       Auto uses the format the items were imported as, or JSON when imports were
+       mixed. Each format re-imports into the same media/page pairs. */
+
+    function escapeHtml(text) {
+      return String(text).replace(/[&<>"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" })[character]);
+    }
+
+    function resolveExportFormat() {
+      const choice = elements.exportFormat.value;
+      if (choice !== "auto") return choice;
+      const formats = new Set(remoteItems.map((item) => item.sourceFormat));
+      // Local files have no URL to write as a bookmark or text line, so only JSON keeps them.
+      return formats.size === 1 && !localMediaItems.length ? [...formats][0] : "json";
+    }
+
+    // Every http(s) URL in every source (pasted box, pasted batches, files), in
+    // order, including ones the grid dropped: duplicates, extra JSON fields,
+    // http:// links, and links the parsers could not pair.
+    function collectAllInputUrls() {
+      const texts = uploadedSources.map((source) => source.text);
+      if (elements.sourceText.value.trim()) texts.push(elements.sourceText.value);
+      const urls = [];
+      for (const text of texts) {
+        for (const match of text.match(/https?:(?:\/|\\\/){2}[^\s<>"'`]+/gi) || []) {
+          const url = trimUrlText(match);
+          try {
+            urls.push(new URL(url).href);
+          } catch {
+            urls.push(url);
+          }
+        }
+      }
+      return urls;
+    }
+
+    // Input URLs not already written by the grid items, each listed once.
+    function inputUrlsMissingFrom(writtenUrls) {
+      // Links of cards removed "from grid & exports" stay out of the leftovers too.
+      const seen = new Set([...writtenUrls, ...excludedUrls]);
+      return collectAllInputUrls().filter((url) => {
+        if (seen.has(url)) return false;
+        seen.add(url);
+        return true;
+      });
+    }
+
+    function buildExport(format) {
+      if (format === "json") {
+        const records = transformedItems.map((item) => {
+          if (item.sourceType === "local") return { localFile: item.relativePath };
+          const record = { mediaUrl: item.transformedUrl, pageUrl: item.pageUrl || "", format: item.sourceFormat };
+          if (item.originalUrl !== item.transformedUrl) record.originalUrl = item.originalUrl;
+          return record;
+        });
+        const written = remoteItems.flatMap((item) => [item.transformedUrl, item.originalUrl, item.pageUrl]);
+        const extras = inputUrlsMissingFrom(written);
+        records.push(...extras.map((url) => ({ url, inGrid: false })));
+        return { content: JSON.stringify(records, null, 2) + "\n", extension: "json", type: "application/json", extras: extras.length };
+      }
+      const gridUrls = [
+        ...remoteItems.flatMap((item) => [item.transformedUrl, item.pageUrl].filter(Boolean)),
+        ...localMediaItems.map((item) => item.relativePath)
+      ];
+      const extras = inputUrlsMissingFrom(gridUrls);
+      const allUrls = [...gridUrls, ...extras];
+      if (format === "html") {
+        const links = allUrls.map((url) => `    <DT><A HREF="${escapeHtml(url)}">${escapeHtml(url)}</A>`);
+        const content = [
+          "<!DOCTYPE NETSCAPE-Bookmark-file-1>",
+          '<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">',
+          "<TITLE>Grid export</TITLE>",
+          "<H1>Grid export</H1>",
+          "<DL><p>",
+          ...links,
+          "</DL><p>"
+        ].join("\n") + "\n";
+        return { content, extension: "html", type: "text/html", extras: extras.length };
+      }
+      // Media line then page line, the same layout "Extract URLs" writes.
+      return { content: allUrls.join("\n") + "\n", extension: "txt", type: "text/plain", extras: extras.length };
+    }
+
+    function downloadFile(fileName, content, type) {
+      const objectUrl = URL.createObjectURL(new Blob([content], { type: `${type};charset=utf-8` }));
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+    }
+
+    function exportGrid() {
+      if (transformedItems.length === 0 && collectAllInputUrls().length === 0) {
+        setStatus("Nothing to export. Add some URLs or files first.", "bad");
+        return;
+      }
+      const format = resolveExportFormat();
+      const { content, extension, type, extras } = buildExport(format);
+      const fileName = `grid-export-${new Date().toISOString().slice(0, 10)}.${extension}`;
+      downloadFile(fileName, content, type);
+      const extrasNote = extras ? ` Also included ${extras} input URL(s) the grid does not show.` : "";
+      setStatus(`Exported ${transformedItems.length} grid item(s) to ${fileName} (${FORMAT_LABELS[format]}).${extrasNote}`, "good");
+    }
+
+    function setStatus(message, state = "") {
+      elements.status.textContent = message;
+      elements.status.className = `status ${state}`;
+      // Mirror into the header flyout, which is visible when the input panel is not.
+      const quickStatus = document.getElementById("quickAddStatus");
+      quickStatus.textContent = message;
+      quickStatus.className = `quick-add-status ${state}`;
+    }
+    function resetRules() {
+      elements.newDomain.value = defaultRules.newDomain;
+      elements.domainPrefix.value = defaultRules.domainPrefix;
+      elements.pathPrefix.value = defaultRules.pathPrefix;
+      elements.slugMode.value = defaultRules.slugMode;
+      elements.customSlug.value = defaultRules.customSlug;
+      elements.idParameter.value = defaultRules.idParameter;
+      elements.extensionMode.value = defaultRules.extensionMode;
+      elements.appendText.value = defaultRules.appendText;
+      elements.manualQuery.value = defaultRules.manualQuery;
+      elements.keepId.checked = defaultRules.keepId;
+      elements.keepAllQuery.checked = defaultRules.keepAllQuery;
+      elements.ytdlpDomains.value = "";
+      elements.removeDuplicates.checked = defaultRules.removeDuplicates;
+      elements.showBroken.checked = defaultRules.showBroken;
+      setStatus("Transformation rules reset.", "good");
+    }
+    elements.transformButton.addEventListener("click", () => {
+      // An explicit build retries URLs yt-dlp failed on earlier.
+      ytdlpResolved.forEach((result, url) => {
+        if (!result.url) ytdlpResolved.delete(url);
+      });
+      transformAllUrls();
+    });
+    // Moves the current paste into the sources list so the next paste adds to the
+    // grid instead of replacing it.
+    // Used by both the input panel and the header's quick-add flyout.
+    function addPasteToGrid(textArea = elements.sourceText) {
+      const text = textArea.value;
+      if (!text.trim()) {
+        setStatus("Paste some text or URLs first, or upload files.", "bad");
+        return;
+      }
+      pastedBatchCount += 1;
+      uploadedSources.push({ id: makeItemId("paste"), name: `Pasted batch ${pastedBatchCount}`, text });
+      textArea.value = "";
+      renderSourceFileList();
+      transformAllUrls();
+      textArea.focus();
+    }
+    document.getElementById("addToGrid").addEventListener("click", () => addPasteToGrid());
+
+    const quickAdd = {
+      toggle: document.getElementById("quickAddToggle"),
+      panel: document.getElementById("quickAddPanel"),
+      text: document.getElementById("quickAddText"),
+      files: document.getElementById("quickAddFiles"),
+      submit: document.getElementById("quickAddSubmit")
+    };
+    function setQuickAddOpen(open) {
+      quickAdd.panel.classList.toggle("hidden", !open);
+      quickAdd.toggle.setAttribute("aria-expanded", String(open));
+      quickAdd.toggle.classList.toggle("shuffle-active", open);
+      if (open) quickAdd.text.focus();
+    }
+    quickAdd.toggle.addEventListener("click", () => {
+      setQuickAddOpen(quickAdd.panel.classList.contains("hidden"));
+    });
+    quickAdd.submit.addEventListener("click", () => addPasteToGrid(quickAdd.text));
+    quickAdd.text.addEventListener("keydown", (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key === "Enter") addPasteToGrid(quickAdd.text);
+      if (event.key === "Escape") setQuickAddOpen(false);
+    });
+    quickAdd.files.addEventListener("change", async () => {
+      await handleSourceFiles(quickAdd.files.files);
+      quickAdd.files.value = "";
+    });
+    document.addEventListener("click", (event) => {
+      if (!quickAdd.panel.classList.contains("hidden") && !event.target.closest(".quick-add")) {
+        setQuickAddOpen(false);
+      }
+    });
+    elements.extractOnly.addEventListener("click", () => {
+      // Pasted text only; uploaded files stay as files. Each pair is written as
+      // media line then page line, which re-parses into the same pairs.
+      const { entries } = collectEntries(false);
+      if (entries.length === 0) {
+        setStatus("No valid HTTPS URLs were found in the pasted text.", "bad");
+        return;
+      }
+      elements.sourceText.value = entries
+        .flatMap((entry) => (entry.pageUrl ? [entry.mediaUrl, entry.pageUrl] : [entry.mediaUrl]))
+        .join("\n");
+      const paired = entries.filter((entry) => entry.pageUrl).length;
+      setStatus(
+        `Extracted ${entries.length} media URL(s), ${paired} with a page link, into the input field. Now set rules and build the grid.`,
+        "good"
+      );
+    });
+    elements.clearInput.addEventListener("click", () => {
+      elements.sourceText.value = "";
+      uploadedSources = [];
+      elements.sourceFileInput.value = "";
+      renderSourceFileList();
+      elements.sourceText.focus();
+      setStatus("");
+    });
+    elements.sourceFileInput.addEventListener("change", (event) => handleSourceFiles(event.target.files));
+    const themeSelect = document.getElementById("themeSelect");
+    themeSelect.value = document.documentElement.dataset.theme || "sepia";
+    themeSelect.addEventListener("change", () => {
+      if (themeSelect.value === "sepia") {
+        delete document.documentElement.dataset.theme;
+      } else {
+        document.documentElement.dataset.theme = themeSelect.value;
+      }
+      try {
+        localStorage.setItem("gridTheme", themeSelect.value);
+      } catch {}
+    });
+    elements.modeInput.addEventListener("click", () => setConvertMode(false));
+    elements.modeConvert.addEventListener("click", () => setConvertMode(true));
+    elements.inputFormat.addEventListener("change", renderSourceFileList);
+    elements.sourcePanel.addEventListener("dragover", (event) => {
+      if (!event.dataTransfer.types.includes("Files")) return;
+      event.preventDefault();
+      elements.sourcePanel.classList.add("drop-target");
+    });
+    elements.sourcePanel.addEventListener("dragleave", (event) => {
+      if (!elements.sourcePanel.contains(event.relatedTarget)) {
+        elements.sourcePanel.classList.remove("drop-target");
+      }
+    });
+    elements.sourcePanel.addEventListener("drop", (event) => {
+      if (!event.dataTransfer.files.length) return;
+      event.preventDefault();
+      elements.sourcePanel.classList.remove("drop-target");
+      handleSourceFiles(event.dataTransfer.files);
+    });
+    elements.clearGallery.addEventListener("click", () => {
+      localMediaItems.forEach(revokeLocalItem);
+      remoteItems = [];
+      localMediaItems = [];
+      syncTransformedItems();
+      shuffledIds = [];
+      shuffleSignature = "";
+      elements.folderInput.value = "";
+      updateFolderSummary();
+      closeLightbox();
+      renderGallery();
+      setStatus("Gallery cleared.", "good");
+    });
+    elements.pagePrev.addEventListener("click", () => goToPage(currentPage - 1));
+    elements.pageNext.addEventListener("click", () => goToPage(currentPage + 1));
+    elements.pageSize.addEventListener("change", () => {
+      try {
+        localStorage.setItem("gridPageSize", elements.pageSize.value);
+      } catch {}
+      goToPage(1);
+    });
+    let filterTimer = 0;
+    elements.galleryFilter.addEventListener("input", () => {
+      clearTimeout(filterTimer);
+      filterTimer = setTimeout(() => {
+        currentPage = 1;
+        renderGallery();
+      }, 150);
+    });
+    elements.showBroken.addEventListener("change", renderGallery);
+    try {
+      const savedPageSize = localStorage.getItem("gridPageSize");
+      if (savedPageSize && elements.pageSize.querySelector(`option[value="${savedPageSize}"]`)) {
+        elements.pageSize.value = savedPageSize;
+      }
+    } catch {}
+    elements.resetRules.addEventListener("click", resetRules);
+    elements.copyTransformed.addEventListener("click", copyAllTransformedUrls);
+    elements.downloadTransformed.addEventListener("click", downloadTransformedUrls);
+    document.getElementById("downloadYtdlp").addEventListener("click", downloadYtdlpUrls);
+    elements.exportGrid.addEventListener("click", exportGrid);
+    elements.folderInput.addEventListener("change", (event) => handleFolderSelection(event.target.files));
+    elements.clearLocalMedia.addEventListener("click", clearLocalMedia);
+    elements.shuffleToggle.addEventListener("click", toggleShuffle);
+    elements.lightboxClose.addEventListener("click", closeLightbox);
+    elements.lightboxPrev.addEventListener("click", () => moveLightbox(-1));
+    elements.lightboxNext.addEventListener("click", () => moveLightbox(1));
+    elements.lightboxFullSize.addEventListener("click", toggleLightboxFullSize);
+    elements.lightboxShuffle.addEventListener("click", toggleShuffle);
+    document.addEventListener("click", (event) => {
+      if (elements.lightbox.classList.contains("hidden")) return;
+      // Media and controls inside the lightbox keep it open.
+      if (event.target.closest(".lightbox img, .lightbox video, .lightbox button, .lightbox a")) return;
+      // Card media and buttons handle themselves (clicking media swaps it into the lightbox).
+      if (event.target.closest(".card .image-link, .card button")) return;
+      // The queue re-renders its rows on click, so the target may already be detached.
+      if (event.composedPath().includes(queueCard)) return;
+      closeLightbox();
+    });
+    document.addEventListener("keydown", (event) => {
+      if (elements.lightbox.classList.contains("hidden")) return;
+      if (event.key === "Escape") closeLightbox();
+      if (event.key === "ArrowLeft") moveLightbox(-1);
+      if (event.key === "ArrowRight") moveLightbox(1);
+    });
+    window.addEventListener("beforeunload", () => localMediaItems.forEach(revokeLocalItem));
+    function updateCardSize() {
+      const value = Number(elements.cardSize.value);
+      const isMax = value >= Number(elements.cardSize.max);
+      // At max, one card fills the full gallery width.
+      elements.gallery.style.setProperty("--card-width", isMax ? "100vw" : `${value}px`);
+      elements.cardSizeValue.textContent = isMax ? "Max" : `${value}px`;
+    }
+    elements.cardSize.addEventListener("input", updateCardSize);
+    updateCardSize();
+    let savedMode = "input";
+    try {
+      savedMode = localStorage.getItem("gridMode") || "input";
+    } catch {}
+    setConvertMode(savedMode === "convert");
+    updateShuffleButton();
+    updateFolderSummary();
+    elements.sourceText.addEventListener("keydown", (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+        addPasteToGrid();
+      }
+    });
+  </script>
+</body>
+</html>

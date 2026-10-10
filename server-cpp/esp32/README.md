@@ -102,7 +102,7 @@ PlatformIO (needs Arduino-ESP32 3.x; see the top of `platformio.ini`):
 pio run -d server-cpp/esp32 -e t3 -t upload && pio device monitor -d server-cpp/esp32      # -e t3s3 for the T3-S3
 ```
 
-**This branch changes the partition table** (two program slots for updates). The state partition, with the certificates and the paired devices, stays where it was, so nothing has to be paired again; but the table itself only changes over USB: flash once by cable (`idf.py flash` writes it), after which updates can come over the network.
+**This branch changes the partition table**: two program slots of 1.75 MB for updates (the program is about 1.4 MB, with the server side of books, files of links and anchors, and mDNS), and a smaller state partition (448 KB) for the certificates and the paired devices. The table only changes over USB: flash once by cable (`idf.py flash` writes it), after which updates can come over the network. Paired devices and the certificate authority start afresh with the new table (the old one's firmware never built for the board, so no board should have any).
 
 ## Connecting
 
@@ -179,6 +179,10 @@ Uploads through the reader take files up to 4 GB on both boards, the most FAT32 
 A folder of a thousand files works, within the same memory as ten: the list is written to the card as it is made, names are sorted in 32 KB with extra passes for bigger folders, and titles from the last list are reused for files that did not change. Uploading a folder of a thousand files sends them one at a time; the page that uploads asks for the list once at the end, and other open pages at most every three seconds.
 
 FAT itself is slow at very large single folders: adding a file means searching the folder from its start for the name (and FAT's short-name scheme searches again for each of the first few names alike). Split thousands of files into subfolders of a few hundred where you can.
+
+## Books, PDFs and files of links
+
+Everything the reader does with them happens in the browser: the document engine runs there, and reads a book from the board a piece at a time (64 KB range requests), so a book or a PDF of any size can be read and highlighted. What the board unpacks itself is small, and limited by its memory: a book's list of files and its contents (to list its pages), and a page only when the engine is not there (an older page, another hub). On the T3 V1.6.1 each may be at most 32 KB: a book with a very long contents (hundreds of chapters) or thousands of files inside is left out of the list there, and a page over 32 KB cannot be shown without the engine. On the T3-S3, with PSRAM, 1 MB. Search looks at the first 32 KB of each document on the T3 V1.6.1 (1 MB on the T3-S3).
 
 ## When something is wrong
 

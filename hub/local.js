@@ -7,7 +7,7 @@ import { vault } from './vault.js';
 export { vault };
 
 // How the reader looks is not private, and is needed before unlocking.
-const PLAIN = new Set(['theme', 'font', 'view', 'hlType']);
+const PLAIN = new Set(['theme', 'themeSide', 'themeRight', 'font', 'view', 'hlType']);
 const VAULT_META = 'hub:vault';
 const te = new TextEncoder(), td = new TextDecoder();
 
@@ -47,20 +47,54 @@ const db = {
 };
 
 const lsGet = (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } };
-const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+// A write the browser refuses (its small store is full) is remembered, so the reader can say so.
+// Which values could not be written; one that is written successfully later comes off the list.
+const unsaved = new Set();
+const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); unsaved.delete(k); } catch { unsaved.add(k); } };
 
 async function putKv(k, json) {
   const key = await vault.name('kv|' + k);
-  await db.put('kv', { key, data: await vault.seal(te.encode(JSON.stringify({ k, json })), key) });
+  // With protection on, values live in the larger store; a failed write there is noted the same way.
+  if ((await db.put('kv', { key, data: await vault.seal(te.encode(JSON.stringify({ k, json })), key) })) == null) unsaved.add(k); else unsaved.delete(k);
+}
+
+// The notes, what waits to be sent, and the lists of documents can outgrow the small store (about 5 MB, shared by
+// every hub and workspace kept here), and a write it refuses was lost on the next start. Unprotected, they are written
+// to the larger store too, numbered, and at the start the newer of the two is read: so a full small store loses none
+// of them, and a write still lands at once wherever it fits. (Protected, everything private is in the larger store already.)
+const MIRRORED = /^(notes|outbox|pending|refused|docs):/;
+const mirrors = new Map();   // key -> JSON text, for the mirrored keys whose copy in the larger store is the newer one
+let numbered = 0;
+const nextNumber = () => (numbered = Math.max(Date.now(), numbered + 1));
+const mirrorKey = (k) => 'plain|' + k;
+function setMirrored(k, v) {
+  const json = JSON.stringify(v), n = nextNumber();
+  mirrors.set(k, json);
+  // The small store's copy is numbered only once it is written whole: a refused write leaves its number behind. The
+  // value is lost only if neither store takes it.
+  let small = true;
+  try { localStorage.setItem(k, json); localStorage.setItem('n:' + k, String(n)); unsaved.delete(k); } catch { small = false; unsaved.add(k); }
+  later(async () => { if ((await db.put('kv', { key: mirrorKey(k), k, json, n })) != null) unsaved.delete(k); else if (!small) unsaved.add(k); });
+}
+async function loadMirrors() {
+  mirrors.clear();
+  for (const rec of (await db.all('kv')) || []) {
+    if (!rec.key?.startsWith?.('plain|') || typeof rec.json !== 'string') continue;
+    numbered = Math.max(numbered, rec.n || 0);
+    const small = Number(localStorage.getItem('n:' + rec.k)) || 0;
+    if ((rec.n || 0) > small || localStorage.getItem(rec.k) == null) mirrors.set(rec.k, rec.json);
+  }
 }
 
 export const store = {
   get(k) {
-    if (PLAIN.has(k) || mode === 'plain') return lsGet(k);
+    if (PLAIN.has(k)) return lsGet(k);
+    if (mode === 'plain') { if (MIRRORED.test(k) && mirrors.has(k)) { try { return JSON.parse(mirrors.get(k)); } catch { return null; } } return lsGet(k); }
     try { return cache.has(k) ? JSON.parse(cache.get(k)) : null; } catch { return null; }
   },
   set(k, v) {
-    if (PLAIN.has(k) || mode === 'plain') return lsSet(k, v);
+    if (PLAIN.has(k)) return lsSet(k, v);
+    if (mode === 'plain') return MIRRORED.test(k) ? setMirrored(k, v) : lsSet(k, v);
     const json = JSON.stringify(v);
     cache.set(k, json);
     if (mode === 'open') later(() => putKv(k, json)); // while locked, nothing private is written at all
@@ -97,13 +131,14 @@ export const idb = {
     if (!rec) return null;
     try { return unpack(await vault.open(rec.data, hashed)); } catch { return null; }
   },
+  // True if the record was stored. False when there was no room, or the store is locked.
   async put(name, value) {
-    if (mode === 'plain') return db.put(name, value);
-    if (mode !== 'open') return null;
+    if (mode === 'plain') return (await db.put(name, value)) != null;
+    if (mode !== 'open') return false;
     const hashed = await vault.name(name + '|' + value.key);
-    await db.put(name, { key: hashed, data: await vault.seal(await pack(value), hashed) });
+    if ((await db.put(name, { key: hashed, data: await vault.seal(await pack(value), hashed) })) == null) return false;
     if (!index(name).includes(value.key)) store.set('idx:' + name, [...index(name), value.key]);
-    return null;
+    return true;
   },
   async del(name, key) {
     if (mode === 'plain') return db.del(name, key);
@@ -116,15 +151,40 @@ export const idb = {
     if (mode === 'plain') return db.keys(name);
     return mode === 'open' ? index(name) : [];
   },
+  // How many bytes a record takes on this device: its file, or its text as UTF-8; encrypted, what is stored, which
+  // is measured without decrypting it. 0 if there is none (or the store is locked).
+  async size(name, key) {
+    if (mode === 'plain') {
+      const r = await db.get(name, key);
+      return !r ? 0 : r.blob ? r.blob.size : typeof r.text === 'string' ? utf8Length(r.text) : 0;
+    }
+    if (mode !== 'open') return 0;
+    const r = await db.get(name, await vault.name(name + '|' + key));
+    return r?.data?.byteLength || 0;
+  },
 };
+function utf8Length(s) {
+  let n = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c < 0x80) n += 1;
+    else if (c < 0x800) n += 2;
+    else if (c >= 0xd800 && c <= 0xdbff) { n += 4; i++; }   // a pair of surrogates is one character of four bytes
+    else n += 3;
+  }
+  return n;
+}
 
 const privateKeys = () => Object.keys(localStorage).filter((k) => !PLAIN.has(k) && k !== VAULT_META);
 
 export const local = {
   get mode() { return mode; },
   get canProtect() { return vault.available; },
+  get full() { return unsaved.size > 0; },
   // Call first. Says whether a passphrase is needed before anything can be read.
   start() { return (mode = vault.enabled ? 'locked' : 'plain'); },
+  // Unprotected, call (and wait for) this next: the copies of the notes and the outbox kept in the larger store.
+  load: () => (mode === 'plain' ? loadMirrors() : Promise.resolve()),
 
   async unlock(passphrase) {
     if (!(await vault.unlock(passphrase))) return false;
@@ -145,7 +205,10 @@ export const local = {
     const records = { docs: (await db.all('docs')) || [], files: (await db.all('files')) || [] };
     await vault.create(passphrase);
     mode = 'open';
-    for (const [k, json] of values) { cache.set(k, json); later(() => putKv(k, json)); localStorage.removeItem(k); }
+    for (const [k, json] of values) { if (k.startsWith('n:')) { localStorage.removeItem(k); continue; } const newer = MIRRORED.test(k) && mirrors.has(k) ? mirrors.get(k) : json; cache.set(k, newer); later(() => putKv(k, newer)); localStorage.removeItem(k); }
+    for (const [k, json] of mirrors) if (!cache.has(k)) { cache.set(k, json); later(() => putKv(k, json)); }   // newer than the small store had, or not in it at all
+    for (const k of mirrors.keys()) later(() => db.del('kv', mirrorKey(k)));
+    mirrors.clear();
     for (const name of ['docs', 'files']) {
       for (const rec of records[name]) {
         if (rec.data) continue;
@@ -166,12 +229,14 @@ export const local = {
     vault.remove();
     mode = 'plain';
     cache.clear();
-    for (const [k, json] of values) { try { localStorage.setItem(k, json); } catch {} }
+    for (const [k, json] of values) { if (MIRRORED.test(k)) { try { setMirrored(k, JSON.parse(json)); } catch {} } else try { localStorage.setItem(k, json); } catch {} }
+    await tail;
     for (const name of ['docs', 'files']) for (const rec of records[name]) await db.put(name, rec);
   },
   // Remove every copy and every private value from this device. The server's data is untouched.
   async forget() {
     for (const name of ['docs', 'files', 'kv']) await db.clear(name);
+    mirrors.clear();
     for (const k of privateKeys()) localStorage.removeItem(k);
     vault.remove();
     cache.clear();

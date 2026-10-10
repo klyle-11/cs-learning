@@ -2,4 +2,6 @@
 data/
 # Scratch copies used for testing
 data-test/
+# The document engine's package, put here by hand: hub/package.json installs from it
+marginalia-engine-integration/
 .DS_Store

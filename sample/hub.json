@@ -6,5 +6,19 @@
   ],
   "ignore": [
     "CLAUDE.md"
+  ],
+  "starter": [
+    "c-lessons-project/",
+    "discrete-math/",
+    "docs/",
+    "responses/",
+    "challenge_phase_guide.md",
+    "cs-learning.epub",
+    "hi.c",
+    "hi.c.txt",
+    "INDEX.md",
+    "linked-list.md",
+    "README.md",
+    "references.md"
   ]
 }

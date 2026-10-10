@@ -1,0 +1,39 @@
+[
+  {
+    "mediaUrl": "https://cdn.photos.example.test/albums/7/original.jpg?token=T1",
+    "postUrl": "https://cdn.photos.example.test/albums/7/original.jpg?token=T1",
+    "source": "gallery",
+    "isVideo": false,
+    "username": null
+  },
+  {
+    "mediaUrl": "https://stream.tube.example.test/9/720.mp4?expires=100",
+    "postUrl": "https://stream.tube.example.test/9/720.mp4?expires=100",
+    "source": "gallery",
+    "isVideo": true,
+    "username": null
+  },
+  {
+    "mediaUrl": "https://rr1.googlevideo.example.test/videoplayback?mime=audio%2Fmp4&expire=100",
+    "postUrl": "https://rr1.googlevideo.example.test/videoplayback?mime=audio%2Fmp4&expire=100",
+    "source": "gallery",
+    "isVideo": false,
+    "isAudio": true,
+    "username": null
+  },
+  {
+    "mediaUrl": "https://tube.example.test/video/77",
+    "postUrl": "https://tube.example.test/video/77",
+    "source": "gallery",
+    "isVideo": false,
+    "username": null,
+    "title": "A bookmarked page"
+  },
+  {
+    "mediaUrl": "https://scontent-a.cdninstagram.com/v/t50/222_n.mp4?oe=OLD1",
+    "postUrl": "https://scontent-a.cdninstagram.com/v/t50/222_n.mp4?oe=OLD1",
+    "source": "gallery",
+    "isVideo": true,
+    "username": null
+  }
+]

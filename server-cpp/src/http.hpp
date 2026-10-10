@@ -11,13 +11,7 @@
 // Bodies and files are moved in pieces, never held whole in memory.
 #pragma once
 
-#include <arpa/inet.h>
-#include <fcntl.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#include <sys/poll.h>
-#include <sys/socket.h>
-#include <unistd.h>
+#include "platform.hpp"
 
 #include <mbedtls/net_sockets.h>
 #include <mbedtls/ssl.h>
@@ -101,7 +95,7 @@ class Conn {
   std::string ahead;          // bytes already read from the wire but not yet used
 
   Conn(int socket, bool is_local, std::string address) : fd(socket), local(is_local), peer(std::move(address)) {
-    ::fcntl(fd, F_SETFL, ::fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
+    sys::nonblocking(fd);
     within(15000);
   }
   ~Conn() {
@@ -110,7 +104,7 @@ class Conn {
       mbedtls_ssl_close_notify(&ssl);
       mbedtls_ssl_free(&ssl);
     }
-    ::close(fd);
+    sys::close_socket(fd);
   }
   Conn(const Conn &) = delete;
   Conn &operator=(const Conn &) = delete;
@@ -135,10 +129,12 @@ class Conn {
   int peek() {
     unsigned char b;
     for (;;) {
-      ssize_t n = ::recv(fd, &b, 1, MSG_PEEK);
+      long n = sys::receive(fd, &b, 1, true);
       if (n == 1) return b;
-      if (n == 0 || (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)) return -1;
-      if (errno != EINTR && !wait(POLLIN)) return -1;
+      if (n == 0) return -1;
+      sys::Why why = sys::why();
+      if (why == sys::Why::failed) return -1;
+      if (why == sys::Why::again && !wait(true)) return -1;
     }
   }
 
@@ -180,37 +176,34 @@ class Conn {
   // request, so anything to read (a TLS close notice, the end of the stream)
   // means it has gone. Does not wait.
   bool gone() {
-    if (!ahead.empty()) return true;
-    pollfd p{fd, POLLIN, 0};
-    int rc = ::poll(&p, 1, 0);
-    return rc > 0 || (rc < 0 && errno != EINTR);
+    // (A socket in error is not reported here; the next write to it fails and drops it.)
+    return !ahead.empty() || sys::wait_ready(fd, true, 0);
   }
 
  private:
-  bool wait(short events) {
+  bool wait(bool to_read) {
     auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - Clock::now()).count();
     if (left <= 0) return false;
-    pollfd p{fd, events, 0};
-    int rc;
-    do { rc = ::poll(&p, 1, static_cast<int>(std::min<long long>(left, 60000))); } while (rc < 0 && errno == EINTR);
-    return rc > 0;
+    return sys::wait_ready(fd, to_read, static_cast<int>(std::min<long long>(left, 60000)));
   }
   long raw_recv(unsigned char *out, size_t len) {
     for (;;) {
-      ssize_t n = ::recv(fd, out, len, 0);
-      if (n >= 0) return static_cast<long>(n);
-      if (errno == EINTR) continue;
-      if (errno != EAGAIN && errno != EWOULDBLOCK) return -1;
-      if (!wait(POLLIN)) return -2;
+      long n = sys::receive(fd, out, len);
+      if (n >= 0) return n;
+      sys::Why why = sys::why();
+      if (why == sys::Why::interrupted) continue;
+      if (why == sys::Why::failed) return -1;
+      if (!wait(true)) return -2;
     }
   }
   long raw_send(const unsigned char *data, size_t len) {
     for (;;) {
-      ssize_t n = ::send(fd, data, len, 0);
-      if (n >= 0) return static_cast<long>(n);
-      if (errno == EINTR) continue;
-      if (errno != EAGAIN && errno != EWOULDBLOCK) return -1;
-      if (!wait(POLLOUT)) return -2;
+      long n = sys::send_some(fd, data, len);
+      if (n >= 0) return n;
+      sys::Why why = sys::why();
+      if (why == sys::Why::interrupted) continue;
+      if (why == sys::Why::failed) return -1;
+      if (!wait(false)) return -2;
     }
   }
   static int bio_send(void *self, const unsigned char *data, size_t len) {
@@ -305,6 +298,7 @@ struct Response {
   std::string file;
   unsigned long long offset = 0, length = 0;
   std::shared_ptr<void> keep; // whatever must outlive the sending (the file of a cached document list)
+  std::string etag;   // set for the page's own files: the browser may keep them and ask "still this one?"
   bool hold = false;  // the handler wrote its own response and keeps the connection (event stream)
   bool close = false; // do not reuse the connection after this
 };
@@ -329,12 +323,14 @@ inline const char *reason(int status) {
     case 200: return "OK";
     case 204: return "No Content";
     case 206: return "Partial Content";
+    case 304: return "Not Modified";
     case 308: return "Permanent Redirect";
     case 400: return "Bad Request";
     case 401: return "Unauthorized";
     case 403: return "Forbidden";
     case 404: return "Not Found";
     case 408: return "Request Timeout";
+    case 412: return "Precondition Failed";
     case 413: return "Payload Too Large";
     case 416: return "Range Not Satisfiable";
     case 429: return "Too Many Requests";
@@ -378,11 +374,13 @@ inline bool write_response(Conn &conn, const Response &r, bool keep, size_t piec
   head += "Content-Type: " + r.type + (text ? "; charset=utf-8" : "") + "\r\n";
   head += r.extra;
   head += "Content-Length: " + std::to_string(length) + "\r\n";
-  head += std::string("Cache-Control: no-store\r\nConnection: ") + (keep ? "keep-alive" : "close") + "\r\n\r\n";
+  if (!r.etag.empty()) head += "ETag: " + r.etag + "\r\n";
+  // Kept by the browser only where it can ask whether its copy is still current; everything else, never.
+  head += std::string(r.etag.empty() ? "Cache-Control: no-store" : "Cache-Control: no-cache") + "\r\nConnection: " + (keep ? "keep-alive" : "close") + "\r\n\r\n";
   conn.within(30000 + static_cast<long>(length / 8)); // at least 8 KB a second
   if (!conn.write_all(head)) return false;
   if (r.file.empty()) return conn.write_all(r.body);
-  fs::Reader f;
+  fs::Reader f;   // positions past 2 GB, on the board's card too
   bool ok = f.open(r.file) && f.seek(r.offset);
   std::vector<char> chunk(piece);
   unsigned long long left = r.length;
@@ -520,19 +518,17 @@ inline void handle_connection(std::shared_ptr<Conn> conn, const Handler &handler
 
 // Listen and serve until the process ends. Returns non-zero if it cannot start.
 inline int serve(const Options &opt, Handler handler) {
-#ifndef ESP_PLATFORM
-  std::signal(SIGPIPE, SIG_IGN);
+  if (!sys::net_start()) { std::fprintf(stderr, "the network could not be started\n"); return 1; }
+  int srv = sys::tcp_socket();
+  if (srv < 0) { std::fprintf(stderr, "no socket to be had\n"); return 1; }
+#ifndef _WIN32
+  sys::set_option(srv, SOL_SOCKET, SO_REUSEADDR);   // on Windows this option would let a second server take the port
 #endif
-  int srv = ::socket(AF_INET, SOCK_STREAM, 0);
-  if (srv < 0) { std::perror("socket"); return 1; }
-  int yes = 1;
-  ::setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof yes);
   sockaddr_in addr{};
   addr.sin_family = AF_INET;
   addr.sin_port = htons(static_cast<uint16_t>(opt.port));
   if (::inet_pton(AF_INET, opt.host.c_str(), &addr.sin_addr) != 1) { std::fprintf(stderr, "bad host address: %s\n", opt.host.c_str()); return 1; }
-  if (::bind(srv, reinterpret_cast<sockaddr *>(&addr), sizeof addr) < 0) { std::perror("bind"); return 1; }
-  if (::listen(srv, 16) < 0) { std::perror("listen"); return 1; }
+  if (!sys::bind_and_listen(srv, addr, 16)) { std::fprintf(stderr, "port %d is in use, or may not be used\n", opt.port); return 1; }
   if (opt.listening) opt.listening();
   for (;;) {
     // Full, or short of memory: leave the next one waiting on the listening
@@ -540,13 +536,12 @@ inline int serve(const Options &opt, Handler handler) {
     // One connection is always let in: with none open, memory is as free as it gets.
     while (active().load() >= opt.max_conns || (active().load() > 0 && opt.admit && !opt.admit())) std::this_thread::sleep_for(std::chrono::milliseconds(20));
     sockaddr_in peer{};
-    socklen_t len = sizeof peer;
-    int fd = ::accept(srv, reinterpret_cast<sockaddr *>(&peer), &len);
+    int fd = sys::accept_from(srv, peer);
     if (fd < 0) continue;
 #ifdef SO_NOSIGPIPE
-    ::setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof yes);
+    sys::set_option(fd, SOL_SOCKET, SO_NOSIGPIPE);
 #endif
-    ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof yes);
+    sys::set_option(fd, IPPROTO_TCP, TCP_NODELAY);
     bool local = (ntohl(peer.sin_addr.s_addr) >> 24) == 127;
     char address[INET_ADDRSTRLEN] = "";
     ::inet_ntop(AF_INET, &peer.sin_addr, address, sizeof address);
@@ -559,7 +554,7 @@ inline int serve(const Options &opt, Handler handler) {
       }).detach();
     } catch (...) { // no thread to be had
       active()--;
-      ::close(fd);
+      sys::close_socket(fd);
     }
   }
 }

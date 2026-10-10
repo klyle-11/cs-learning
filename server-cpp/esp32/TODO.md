@@ -40,6 +40,11 @@ Fourth request:
 - [x] Keep copies of the older star designs to compare: one file each (`main/star_tall.hpp`, `star_wide.hpp`, `star_burst.hpp`), chosen in menuconfig, with "take turns" to see all three on the board; side by side in `docs/stars.gif` and `docs/stars.png`
 - [ ] Choose one, on the board ("take turns"); then the other two can be deleted
 
+Fifth request:
+- [x] Merge `marginalia-engine` (and the 7 commits on `claude/cs-learning-annotation-eval-4pvaq6` above it; `c-server` was already inside) into this branch, keeping both: the document engine, books, links, workspaces, anchors, replies, removed folders and Windows from there; the bounded memory, the board, the screen and updates from here. Then a pull request into `marginalia-engine`
+- [x] Would the program fit, even with PSRAM? PSRAM is memory to work in, not room for the program: that is flash, 4 MB on both boards. After the merge it no longer fitted with mDNS, so the program slots grew from 1.375 to 1.75 MB (the state partition shrank to 448 KB): about 384 KB spare with mDNS on the T3 V1.6.1, 393 KB on the T3-S3
+- [ ] From now on, one branch: the board's checks (`HUBD_ARGS="--profile esp32" ./test/contract.sh`, both firmware builds) on every change, instead of a branch of its own
+
 ## Done on this branch
 
 A full 32 GB card in a few hundred KB:
@@ -88,6 +93,17 @@ Fourth round:
 - [x] Three star designs kept side by side, one file each, chosen in menuconfig or shown in turn
 - [x] The screen dims again: it never did, because the star and the address taking turns with the name counted as something new every few seconds; now only what the screen says counts (`screen_sum`). The tall and wide stars' diamonds also reached two rows into the blue part of two-colour screens: cut at the title's band
 
+The merge with `marginalia-engine` (fifth round; REVIEW.md, "The merge"):
+- [x] The document list stays bounded with books (each listed page by page, in reading order), files of links (`links`), when each file changed (`changed`), and names saved shorter (`asked`); what the start of a file says (its title; whether it holds web addresses) is kept with the title for the next list
+- [x] One cap per board on what one file may take in memory (`most_held`): 32 KB on the T3 V1.6.1, 1 MB on the T3-S3 (in PSRAM), 16 MB on a computer. It bounds a book's page, a file of links, a document mapped for anchors, the part of a file searched, a zip's list of entries
+- [x] The zip reader looked for the end of a zip with a 64 KB block every time (more than the T3 V1.6.1 has in one piece): now the last kilobyte first
+- [x] Search and a folder's file list (`/api/files`) read folders through FatFS like the list does, and on the board in the card's order (no folder's names held to sort); `/api/files` is written to the card and sent from there
+- [x] Earlier versions of the notes file are copied a piece at a time (they were read whole, a second copy in memory); each file is parsed once per request
+- [x] Folders removed into `.removed/` (to be put back) and let go are counted as they move; workspaces switching resets the count, the list and its cache
+- [x] `sys::move` used `lstat`, which ESP-IDF does not have: the merged code builds for the board
+- [x] `fs.hpp` on Windows (no `fstatat`, `lstat` or `statvfs` there): compiled with MinGW, not yet run there
+- [x] Connections over the limit still wait rather than being turned away (`marginalia-engine` turned them away)
+
 ## To try on the board
 
 - [ ] Flash by USB (the partition table changed); check the screen comes up, at 0x3C or 0x3D, the right way up
@@ -101,12 +117,15 @@ Fourth round:
 - [ ] A clone board: SH1106 or not, pins the same or not
 - [ ] T3-S3: flash over its USB-C (hold BOOT while plugging in if it will not take it), the screen at 0x3C on 18/17, the card on 11/2/14/13, `/api/device` reporting `esp32-psram` and `psramFree`, the BOOT button
 - [ ] A 1 GB upload through the reader on each board: how long, and whether anything else stays usable meanwhile
+- [ ] Since the merge: books (EPUB, a short one and a long one) and PDFs on each board, read by the engine over the board's Wi-Fi; search, highlights, "update…" on an uploaded folder, a folder removed and put back
+- [ ] On Windows: `make test` and `npm run test:browser:win` (the merged server only compiles there so far)
 
 ## Next
 
+- [ ] Books on the T3 V1.6.1: the board unpacks a book's contents whole to list it, so one whose contents unpack to over 32 KB (hundreds of chapters) is not listed there, and a page over 32 KB is not shown without the engine. Parsing the contents as it is unpacked (inflate in pieces) would lift both; the T3-S3 holds 1 MB
+- [ ] Book pages in the title cache: a book is opened again (its list of entries, its contents) each time the list is made
 - [ ] An event loop instead of a thread per connection: the 12 KB stack each is the largest cost per device after TLS. With `select()` on lwIP and mbedTLS's non-blocking mode, many more devices fit
 - [ ] One notes file per document: the notes file is read and parsed whole for every note saved, and on the board a parsed file takes about ten times its size
-- [ ] The same "never overwrite an unreadable notes file" in the Node server (`hub/server.js`)
 - [ ] Wi-Fi set up without the card: a setup network of the board's own (SoftAP) with a page to choose the network
 - [ ] More screen pages on the BOOT button (T3-S3): storage, the full fingerprint; it shows the board, version, uptime and memory for now
 - [ ] Split `../src/hub.cpp` into parts (ARCHITECTURE.md, recommendation 3)
@@ -114,4 +133,4 @@ Fourth round:
 - [ ] Check for an update now, from the reader (a paired device asks; the board looks at once)
 - [ ] A larger upload limit on the board, or resumable uploads, so videos can go up through the reader
 - [ ] exFAT, for cards larger than 32 GB. FatFS supports it, but ESP-IDF 5.4 builds FatFS with exFAT off (`FF_FS_EXFAT 0` in its `ffconf.h`, no menuconfig option): it needs a patched FatFS component, and 64-bit sizes through `fs.hpp`
-- [ ] Free room in the update slot: about 122 KB left with mDNS (130 KB on the T3-S3). If it runs short, the slots can grow by shrinking the state partition, at the cost of pairing again once
+- [x] Room in the update slot: grown to 1.75 MB (about 384 KB spare with mDNS)

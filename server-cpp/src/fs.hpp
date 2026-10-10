@@ -16,11 +16,11 @@
 //
 // The board says which paths are on the card (board_fat_path, in
 // esp32/main/board.cpp); anything else, such as the state partition, goes
-// through POSIX as on a computer.
+// through POSIX as on a computer. What differs on Windows comes from
+// platform.hpp.
 #pragma once
 
-#include <dirent.h>
-#include <sys/stat.h>
+#include "platform.hpp"
 
 #include <cstdint>
 #include <cstdio>
@@ -32,9 +32,6 @@
 #include "ff.h"
 // "/sdcard/hub/a.md" -> "1:/hub/a.md". False for a path that is not on the card.
 extern "C" bool board_fat_path(const char *path, char *out, size_t size);
-#else
-#include <fcntl.h>
-#include <sys/statvfs.h>
 #endif
 
 namespace fs {
@@ -43,7 +40,7 @@ struct Entry {
   const char *name;
   bool dir;          // a folder; otherwise a regular file (anything else is never reported)
   uint64_t size;
-  int64_t time;      // changes when the file is written (not necessarily seconds since 1970)
+  int64_t time;      // when it was last written, in seconds since 1970 (on the board's card, local time)
 };
 
 #ifdef ESP_PLATFORM
@@ -54,7 +51,19 @@ struct FatPath {
   // The drive itself ("1:" or "1:/"), which f_stat cannot describe.
   bool is_drive() const { const char *c = std::strchr(text, ':'); return c && (c[1] == '\0' || (c[1] == '/' && c[2] == '\0')); }
 };
-inline int64_t fat_time(const FILINFO &fi) { return static_cast<int64_t>(fi.fdate) << 16 | fi.ftime; }
+// FAT keeps a date (years from 1980, month, day) and a time (to two seconds) in
+// each entry, in local time. As seconds since 1970, counted as if it were UTC
+// (days_from_civil, from Howard Hinnant's date algorithms).
+inline int64_t fat_time(const FILINFO &fi) {
+  int64_t y = 1980 + (fi.fdate >> 9);
+  const int64_t m = (fi.fdate >> 5) & 15, d = fi.fdate & 31;
+  if (m < 1 || m > 12 || d < 1) return 0;
+  y -= m <= 2;
+  const int64_t era = (y >= 0 ? y : y - 399) / 400, yoe = y - era * 400;
+  const int64_t doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1, doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+  const int64_t days = era * 146097 + doe - 719468;
+  return days * 86400 + (fi.ftime >> 11) * 3600 + ((fi.ftime >> 5) & 63) * 60 + (fi.ftime & 31) * 2;
+}
 // Kept out of each() so the path buffer is not on the stack while callers recurse.
 inline bool fat_opendir(const std::string &dir, FF_DIR &d, bool &on_card) {
   FatPath fat(dir);
@@ -99,7 +108,7 @@ bool each(const std::string &dir, Fn &&fn) {
     const char *name = de->d_name;
     if (name[0] == '.' && (name[1] == '\0' || (name[1] == '.' && name[2] == '\0'))) continue;
     struct stat st;
-#ifdef ESP_PLATFORM
+#if defined(ESP_PLATFORM) || defined(_WIN32)
     if (::stat((dir + "/" + name).c_str(), &st) != 0) continue;
 #else
     if (::fstatat(::dirfd(d), name, &st, 0) != 0) continue; // follows links, as stat() does
@@ -133,9 +142,10 @@ inline bool info(const std::string &path, bool &dir, uint64_t &size) {
 }
 inline bool file_size(const std::string &path, uint64_t &size) { bool dir; return info(path, dir, size) && !dir; }
 
-// Like lstat(): never follows a link. There are no links on FAT, and ESP-IDF has no lstat.
+// Like lstat(): never follows a link. There are no links on FAT, and ESP-IDF has
+// no lstat; nor has Windows, where sys::is_link tells a link apart instead.
 inline int lstat(const char *path, struct stat *st) {
-#ifdef ESP_PLATFORM
+#if defined(ESP_PLATFORM) || defined(_WIN32)
   return ::stat(path, st);
 #else
   return ::lstat(path, st);
@@ -166,6 +176,12 @@ inline bool space(const std::string &path, uint64_t &total, uint64_t &free) {
 #endif
   total = static_cast<uint64_t>(vol->n_fatent - 2) * vol->csize * sector;
   free = static_cast<uint64_t>(free_clusters) * vol->csize * sector;
+  return true;
+#elif defined(_WIN32)
+  ULARGE_INTEGER avail, all;
+  if (!GetDiskFreeSpaceExA(path.c_str(), &avail, &all, nullptr)) return false;
+  total = all.QuadPart;
+  free = avail.QuadPart;
   return true;
 #else
   struct statvfs v;
@@ -203,7 +219,7 @@ class Reader {
     if (fil_) return at <= 0xFFFFFFFFull && f_lseek(fil_.get(), static_cast<FSIZE_t>(at)) == FR_OK && f_tell(fil_.get()) == at;
     if (file_ && at > 0x7FFFFFFFull) return false;
 #endif
-    return file_ && ::fseeko(file_, static_cast<off_t>(at), SEEK_SET) == 0;
+    return file_ && sys::seek(file_, at);
   }
   // Up to `len` bytes; 0 at the end or on an error.
   size_t read(void *out, size_t len) {

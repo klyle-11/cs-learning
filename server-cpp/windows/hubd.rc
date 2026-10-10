@@ -1,0 +1,2 @@
+// Attaches the manifest to hubd.exe (resource type 24, id 1).
+1 24 "windows/hubd.manifest"
