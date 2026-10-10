@@ -162,14 +162,22 @@ The server compares modification times and sizes at an interval set by the devic
 
 `maxUpload` is the upload limit in bytes. On the board it also reports memory in bytes: `heapFree` now, `heapLeast` (the lowest since start-up), `heapLargest` (the largest single block, which is what a large allocation can get) and `psramFree`.
 
-| Profile | Chosen when | Upload limit | Changes found by | Document list kept | Quota | Page and scripts kept in memory |
-|---|---|---|---|---|---|---|
-| `desktop` | 1 GB of memory or more | 200 MB | looking the folder over every 0.5 s | in memory | 20 GB | yes |
-| `small` | under 1 GB (Raspberry Pi Zero class) | 50 MB | looking it over every 1 s | in memory | 8 GB | yes |
-| `esp32` | built with ESP-IDF (T3 V1.6.1) | 4 GB | the server's own writes (nothing else writes to the card) | in a file on the card, `.hub-cache/` | none: the card's free space, less 16 MB | no |
-| `esp32-psram` | built with ESP-IDF, 1 MB of PSRAM or more (T3-S3) | 4 GB | the same | the same | the same | yes |
+| Profile | Chosen when | Upload limit | Changes found by | Names sorted in | One file held whole, at most | Page files kept in memory | Quota |
+|---|---|---|---|---|---|---|---|
+| `desktop` | 1 GB of memory or more | 200 MB | looking the folder over every 0.5 s | 8 MB | 16 MB | up to 16 MB in all | 20 GB |
+| `small` | under 1 GB (Raspberry Pi Zero class) | 50 MB | looking it over every 1 s | 2 MB | 4 MB | up to 4 MB in all | 8 GB |
+| `esp32` | built with ESP-IDF (T3 V1.6.1) | 4 GB | the server's own writes (nothing else writes to the card) | 32 KB | 32 KB | none | none: the card's free space, less 16 MB |
+| `esp32-psram` | built with ESP-IDF, 1 MB of PSRAM or more (T3-S3) | 4 GB | the same | 512 KB | 1 MB | up to 1 MB in all | the same |
 
-All three keep the document list until something listed changes, and keep a running count of what the folder holds rather than measuring it for each request (see Storage). On the board the list is written out as it is made, never held whole in memory, and sorting a folder's names may use 32 KB: a larger folder is read again as many times as needed, each pass listing the next run of names in order. `--profile <name>` forces one, which is how the ESP32 limits are tried on a computer; `--profile esp32` then also assumes nothing else changes the folder while the server runs.
+The same bounded ways of working run on every profile; only the numbers differ, the boards' being the tighter. Every profile:
+- keeps the document list until something listed changes, written out as it is made into a file in the served folder's hidden `.hub-cache/` (remade at each start), never held whole in memory, with each file's title kept beside it so the next list reads only the files that changed;
+- keeps a running count of what the folder holds rather than measuring it for each request (see Storage);
+- sorts a folder's names within its budget: for the list, a larger folder is read again as many times as needed, each pass listing the next run of names in order; search and `/api/files` go through a larger folder in the order the disk keeps it;
+- holds at most "one file held whole" of a file it works on whole (a book's page, a file of links, a document mapped for anchors, the part of a file searched), and answers 413 past it;
+- shares a page file kept in memory between the answers that send it (never a copy each), and sends one that would take the cache past its bound from disk instead;
+- on a computer, looks the folder over for a single sum each turn, and lists every file's stamp only when that sum has moved.
+
+`--profile <name>` forces one, which is how the boards' limits are tried on a computer; `--profile esp32` then also assumes nothing else changes the folder while the server runs.
 
 ## Security
 

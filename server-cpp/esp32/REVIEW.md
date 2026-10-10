@@ -111,6 +111,7 @@ What the merge had to change in that branch's code for the board:
 - [x] **Moving a folder into `.removed/` and letting it go** reset the count of what is stored, so the board would have walked the whole card again. *Now:* counted as it happens.
 - [ ] **What the T3 V1.6.1 unpacks itself is 32 KB at most.** The reader's engine reads books by range requests, so pages of any size are read and highlighted. But to list a book the board unpacks its contents (the package file and the table of contents), and a book whose contents unpack to more than 32 KB (hundreds of chapters), or whose zip lists thousands of files, is left out of the list there; a page over 32 KB is also not shown when the engine is not there. Unpacking a piece at a time would lift both; the T3-S3 holds 1 MB.
 - [ ] **Not tried on a board, nor run on Windows** (only compiled there).
+- [x] **The T3-S3 would have tried to keep the engine's 2.6 MB WebAssembly in memory** (found after the merge, sixth round). Its profile keeps page files in memory, which was sized for the page and its scripts; since the merge they include the document engine and PDF.js. *Now:* a page file is kept only within `most_held` (1 MB in all on the T3-S3), the rest sent from the card; and kept files are shared by the answers that send them, never copied for each.
 
 ## Other things checked
 

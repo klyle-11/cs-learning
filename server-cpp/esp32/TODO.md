@@ -45,6 +45,15 @@ Fifth request:
 - [x] Would the program fit, even with PSRAM? PSRAM is memory to work in, not room for the program: that is flash, 4 MB on both boards. After the merge it no longer fitted with mDNS, so the program slots grew from 1.375 to 1.75 MB (the state partition shrank to 448 KB): about 384 KB spare with mDNS on the T3 V1.6.1, 393 KB on the T3-S3
 - [ ] From now on, one branch: the board's checks (`HUBD_ARGS="--profile esp32" ./test/contract.sh`, both firmware builds) on every change, instead of a branch of its own
 
+Sixth request:
+- [x] Memory efficiency and safety on every platform the hub runs on, with the boards' limits the tighter ones, but only as set today: written into `../../CLAUDE.md` ("Building the hub") and ARCHITECTURE.md as the rule. The boards' limits are unchanged; the computer and Pi profiles now work the bounded way too:
+  - the document list kept in a file in `.hub-cache/` with its titles, on every profile (a computer held it in memory and re-read every title after each change)
+  - page files and the list shared by the answers that send them, not copied for each (each request for the engine's 2.6 MB WebAssembly copied it)
+  - the page-file cache bounded by `most_held`: on the T3-S3 it would have tried to hold the 2.6 MB WebAssembly in its 2 MB of PSRAM
+  - names sorted within a budget on a computer too (8 MB; 2 MB on a Pi), shared with the folders being gone through; search and `/api/files` go through a bigger folder unsorted rather than holding it
+  - the watcher looks for one sum each turn and lists every file only when it moved, in a compact form (a third of a map of strings)
+  - measured on 20,000 files, a computer: 2.3 MB at rest (8.3 MB before), 6 MB at the peak (18 MB); the boards' numbers unchanged
+
 ## Done on this branch
 
 A full 32 GB card in a few hundred KB:

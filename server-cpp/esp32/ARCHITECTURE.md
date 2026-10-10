@@ -2,6 +2,10 @@
 
 An evaluation asked for on this branch: would the hub be better built a different way for the board, or can the way it is built work? Short answer: **it can work, and it is the right shape to keep**, with three changes ahead, in this order: stop writing every feature twice (retire the Node server: done on `marginalia-engine`, and merged here), split `hub.cpp` into parts, and, only if measurements on the T3 V1.6.1 call for it, an event loop instead of a thread per connection. The T3-S3 does not need the last one.
 
+## The rule it is held to
+
+Memory efficiency and safety on every platform, with the boards' limits the tighter ones but no tighter than the values set on 10 October 2026. So the bounded ways of working (the list written out as it is made, names sorted within a budget, files in pieces, nothing held twice, a count kept rather than a walk) are not the board's special case: they run on a computer too, with larger numbers. Measured on 20,000 files after that day's changes, a computer holds 2.3 MB at rest and 6 MB at most (it held 8 MB and 18 MB); the T3 V1.6.1's limits, 84 KB and 194 KB.
+
 ## The shape today
 
 ```

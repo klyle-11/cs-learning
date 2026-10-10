@@ -293,6 +293,9 @@ struct Response {
   int status = 200;
   std::string type = "application/json";
   std::string body;
+  // A body kept elsewhere and shared (a cached page file, the cached document list), in place of `body`: sent from
+  // there, never copied for each answer.
+  std::shared_ptr<const std::string> shared;
   std::string extra;  // further header lines, each ending in \r\n
   // When `file` is set the body is that file's bytes [offset, offset + length), sent in pieces.
   std::string file;
@@ -368,7 +371,8 @@ inline Response error(int status, const std::string &message) {
 
 // Send a response. Returns false if the connection can no longer be used.
 inline bool write_response(Conn &conn, const Response &r, bool keep, size_t piece) {
-  const unsigned long long length = r.file.empty() ? r.body.size() : r.length;
+  const std::string &body = r.shared ? *r.shared : r.body;
+  const unsigned long long length = r.file.empty() ? body.size() : r.length;
   std::string head = "HTTP/1.1 " + std::to_string(r.status) + " " + reason(r.status) + "\r\n";
   bool text = r.type.compare(0, 5, "text/") == 0 || r.type.find("javascript") != std::string::npos || r.type.find("json") != std::string::npos;
   head += "Content-Type: " + r.type + (text ? "; charset=utf-8" : "") + "\r\n";
@@ -379,7 +383,7 @@ inline bool write_response(Conn &conn, const Response &r, bool keep, size_t piec
   head += std::string(r.etag.empty() ? "Cache-Control: no-store" : "Cache-Control: no-cache") + "\r\nConnection: " + (keep ? "keep-alive" : "close") + "\r\n\r\n";
   conn.within(30000 + static_cast<long>(length / 8)); // at least 8 KB a second
   if (!conn.write_all(head)) return false;
-  if (r.file.empty()) return conn.write_all(r.body);
+  if (r.file.empty()) return conn.write_all(body);
   fs::Reader f;   // positions past 2 GB, on the board's card too
   bool ok = f.open(r.file) && f.seek(r.offset);
   std::vector<char> chunk(piece);

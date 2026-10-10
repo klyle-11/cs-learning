@@ -78,21 +78,21 @@ struct Profile {
   int watch_ms;        // otherwise: how often the folder is looked over for changes
   bool cache_assets;   // keep index.html and the scripts in memory between requests
   bool cache_listing;  // keep the document list until a file changes...
-  bool listing_on_disk;// ...in a file beside the documents instead of in memory
+  bool listing_on_disk;// ...in a file in the served folder's hidden .hub-cache instead of in memory, with the titles for the next one
   int max_conns;       // connections served at once (each TLS connection costs tens of KB)
   int max_streams;     // open pages listening for changes
   size_t piece;        // bytes moved at a time when sending or receiving a file
   long keepalive_ms;   // how long an idle connection is kept
   unsigned long long quota_mb; // most the folder may hold in total; 0: whatever the disk has free
-  size_t sort_budget;  // most memory spent on names to sort the folders for the list; 0: no limit
+  size_t sort_budget;  // most memory spent on names to sort a folder (the list, search, a folder's files); bigger ones take more passes, or go unsorted
   int max_depth;       // folders nested deeper than this are left out: each level is stack, and the board's threads have 12 KB
   // The most of one file held in memory at once: a page of a book, a file of links, a document being mapped for
   // anchors, the part of a file searched. Larger ones are answered 413, or searched only this far in.
   size_t most_held;
 };
 static const Profile PROFILES[] = {
-    {"desktop", 200u << 20, false, 500, true, true, false, 64, 16, 64 * 1024, 5000, 20480, 0, 64, 16u << 20}, // a computer: plenty of memory, fast disk
-    {"small", 50u << 20, false, 1000, true, true, false, 24, 8, 16 * 1024, 5000, 8192, 0, 64, 4u << 20},      // a Raspberry Pi class board: under 1 GB of memory
+    {"desktop", 200u << 20, false, 500, true, true, true, 64, 16, 64 * 1024, 5000, 20480, 8u << 20, 64, 16u << 20}, // a computer: plenty of memory, fast disk
+    {"small", 50u << 20, false, 1000, true, true, true, 24, 8, 16 * 1024, 5000, 8192, 2u << 20, 64, 4u << 20},      // a Raspberry Pi class board: under 1 GB of memory
     // A microcontroller with a microSD card (FAT32, up to 32 GB) and a few hundred KB of memory
     // (the T3 V1.6.1). The card is the limit: no quota of its own. Uploads may be as large as
     // FAT32 allows: they go to the card in pieces, so the cost is time, not memory. Pages left
@@ -955,15 +955,29 @@ static void walk(const string &dir, const string &rel, Listing &ls) {
   }
 }
 
-// The entries of a folder, for search and for a folder's file list: in name order where memory allows (a computer);
-// on the board, whose memory a folder of thousands of names can outgrow, in the order the card keeps them.
+// The entries of a folder, for search and for a folder's file list: in name order when its names fit in the sort budget
+// (shared with the folders it is inside, which are held while it is gone through), and otherwise in the order the disk
+// keeps them, so that no folder's names are ever all held, however many there are.
 template <class Fn>
 static void each_entry(const string &dir, Fn &&fn) {
-  if (profile.sort_budget) { fs::each(dir, [&](const fs::Entry &e) { fn(string(e.name), e.dir, e.size, e.time); }); return; }
+  static thread_local size_t held = 0;   // what the folders being gone through on this thread hold
   struct One { string name; bool dir; uint64_t size; int64_t time; };
   std::vector<One> all;
-  fs::each(dir, [&](const fs::Entry &e) { all.push_back({e.name, e.dir, e.size, e.time}); });
+  size_t names = 0;
+  bool fits = true;
+  // What the names would take with the list grown once more (a vector may double): counted before each is added.
+  auto cost = [&](size_t more) { return held + names + more + 2 * (all.size() + 1) * sizeof(One); };
+  fs::each(dir, [&](const fs::Entry &e) {
+    if (!fits) return;
+    const size_t len = std::strlen(e.name) + 1;
+    if (profile.sort_budget && cost(len) > profile.sort_budget) { fits = false; std::vector<One>().swap(all); return; }
+    names += len;
+    all.push_back({e.name, e.dir, e.size, e.time});
+  });
+  if (!fits) { fs::each(dir, [&](const fs::Entry &e) { fn(string(e.name), e.dir, e.size, e.time); }); return; }
   std::sort(all.begin(), all.end(), [](const One &x, const One &y) { return natural_less(x.name, y.name); });
+  struct Hold { size_t &h; size_t n; ~Hold() { h -= n; } } hold{held, names + all.capacity() * sizeof(One)};
+  held += hold.n;
   for (const One &o : all) fn(o.name, o.dir, o.size, o.time);
 }
 
@@ -1332,9 +1346,30 @@ static std::atomic<unsigned long long> generation{1};
 // about (not hidden, not in node_modules, not a .tmp being written) is added,
 // removed, resized or rewritten. It is a sum, so it needs no list of paths and
 // does not depend on the order the disk gives them in.
+// Every watched file's own stamp, held compactly (the watcher keeps one between looks): the paths in one buffer, each
+// ending in a 0 byte, and a (place, stamp) per file in path order. About a third of a map of strings.
+struct Stamps {
+  std::vector<char> text;
+  std::vector<std::pair<uint32_t, long long>> at;
+  void add(const string &path, long long stamp) {
+    at.push_back({static_cast<uint32_t>(text.size()), stamp});
+    text.insert(text.end(), path.begin(), path.end());
+    text.push_back('\0');
+  }
+  const char *path(size_t i) const { return text.data() + at[i].first; }
+  long long stamp(size_t i) const { return at[i].second; }
+  size_t size() const { return at.size(); }
+  void sort() {
+    std::sort(at.begin(), at.end(), [this](const std::pair<uint32_t, long long> &x, const std::pair<uint32_t, long long> &y) { return std::strcmp(text.data() + x.first, text.data() + y.first) < 0; });
+    text.shrink_to_fit();
+    at.shrink_to_fit();
+  }
+  void swap(Stamps &o) { text.swap(o.text); at.swap(o.at); }
+  void clear() { Stamps().swap(*this); }
+};
 struct Scan {
   unsigned long long bytes = 0, files = 0, stamp = 0;
-  std::map<string, long long> *each = nullptr; // when wanted: every such file with its own stamp
+  Stamps *each = nullptr;                      // when wanted: every such file with its own stamp
   Strings *temporary = nullptr;                // when wanted: .tmp files found (a few at most)
 };
 static unsigned long long mix(unsigned long long x) { // the last step of splitmix64
@@ -1357,14 +1392,15 @@ static void scan(const string &dir, const string &rel, bool watched, Scan &s) {
     unsigned long long h = 1469598103934665603ULL;
     for (char ch : r) h = (h ^ static_cast<unsigned char>(ch)) * 1099511628211ULL;
     s.stamp += mix(h ^ static_cast<unsigned long long>(own));
-    if (s.each) (*s.each)[r] = own;
+    if (s.each) s.each->add(r, own);
   });
 }
-static Scan look_over(std::map<string, long long> *each = nullptr, Strings *temporary = nullptr) {
+static Scan look_over(Stamps *each = nullptr, Strings *temporary = nullptr) {
   Scan s;
   s.each = each;
   s.temporary = temporary;
   scan(ROOT, "", true, s);
+  if (each) each->sort();
   if (ROOT != root_now()) return s;   // this request began before another workspace was opened
   std::lock_guard<std::mutex> g(usage_lock);
   usage_count = static_cast<long long>(s.bytes);
@@ -1528,30 +1564,42 @@ static void changed(const string &abs, long long delta) {
   if (in_list) generation++;
   if (profile.sole_writer) announce(rel); // elsewhere the watcher reports it
 }
+// Each turn looks the folder over for its stamp alone (a sum over every file: see Scan), which costs a stat per file and
+// holds nothing. Only when that has moved is a list of every file's own stamp made, to say which ones changed.
 static void watch_loop() {
-  std::map<string, long long> before;
-  ROOT = root_now();
-  string watching = ROOT;
-  try { look_over(&before); } catch (...) {}
+  Stamps before;
+  unsigned long long stamp = 0;
+  bool baseline = true;   // the next list is taken as it is, with nothing announced (at start, after another workspace or a failure)
+  string watching;
   auto pinged = http::Clock::now();
   for (;;) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(profile.watch_ms));
     try {
-    ROOT = root_now();
-    // Another workspace was opened: start afresh there, with nothing to announce.
-    if (ROOT != watching) { watching = ROOT; before.clear(); look_over(&before); continue; }
-    { std::lock_guard<std::mutex> g(clients_lock); if (clients.empty()) continue; }
-    // A comment line now and then finds pages that have gone away, freeing their place.
-    if (http::Clock::now() - pinged > std::chrono::seconds(20)) { tell_clients(": ping\n\n"); pinged = http::Clock::now(); }
-    std::map<string, long long> after;
-    look_over(&after);
-    Strings files;
-    for (const auto &kv : after) { auto it = before.find(kv.first); if (it == before.end() || it->second != kv.second) files.push_back(kv.first); }
-    for (const auto &kv : before) if (!after.count(kv.first)) files.push_back(kv.first);
-    before.swap(after);
-    if (!files.empty()) generation++;
-    for (const string &file : files) announce(file);
-    } catch (...) { before.clear(); }   // out of memory on a large folder must not end the server: start the comparison again
+      ROOT = root_now();
+      if (ROOT != watching) { watching = ROOT; baseline = true; }   // another workspace was opened: start afresh there
+      bool listening;
+      { std::lock_guard<std::mutex> g(clients_lock); listening = !clients.empty(); }
+      // A comment line now and then finds pages that have gone away, freeing their place.
+      if (listening && http::Clock::now() - pinged > std::chrono::seconds(20)) { tell_clients(": ping\n\n"); pinged = http::Clock::now(); }
+      if (baseline || (listening && look_over().stamp != stamp)) {
+        Stamps after;
+        after.text.reserve(before.text.size() + 4096);   // about the size it was, rather than grown by doubling
+        after.at.reserve(before.size() + 64);
+        stamp = look_over(&after).stamp;
+        Strings files;
+        // Both in path order: one walk down the two finds what was added, removed or changed.
+        for (size_t i = 0, j = 0; !baseline && (i < before.size() || j < after.size());) {
+          const int c = i == before.size() ? 1 : j == after.size() ? -1 : std::strcmp(before.path(i), after.path(j));
+          if (c < 0) files.push_back(before.path(i++));        // gone
+          else if (c > 0) files.push_back(after.path(j++));    // new
+          else { if (before.stamp(i) != after.stamp(j)) files.push_back(after.path(j)); i++; j++; }
+        }
+        before.swap(after);
+        if (!files.empty() || baseline) generation++;
+        baseline = false;
+        for (const string &file : files) announce(file);
+      }
+    } catch (...) { before.clear(); baseline = true; }   // out of memory on a large folder must not end the server: start the comparison again
+    std::this_thread::sleep_for(std::chrono::milliseconds(profile.watch_ms));
   }
 }
 
@@ -1559,9 +1607,13 @@ static void watch_loop() {
 
 // The page and its scripts, kept in memory on machines that can spare it and
 // re-read only when the file on disk changes.
-struct CachedFile { long long stamp; string body; };
+// The answers that send one share it (never a copy each), and the cache is bounded: a file over the profile's
+// most_held, or one that would take the cache past most_held in all, is sent from disk instead. (On the T3-S3 the
+// document engine's 2.6 MB WebAssembly is: its 2 MB of PSRAM could not hold it.)
+struct CachedFile { long long stamp; std::shared_ptr<const string> body; };
 static std::mutex cache_lock;
 static std::map<string, CachedFile> asset_cache;
+static size_t asset_bytes = 0;   // what the cache holds
 
 static long long stamp_of(const string &abs) {
   struct stat st;
@@ -1585,11 +1637,25 @@ static http::Response asset_response(const string &abs, const char *type) {
   http::Response r;
   r.type = type;
   r.etag = "\"" + std::to_string(stamp) + "\"";
-  std::lock_guard<std::mutex> g(cache_lock);
-  CachedFile &c = asset_cache[abs];
-  if (c.stamp != stamp || c.body.empty()) { if (!read_file(abs, c.body)) return http::error(404, "no such file"); c.stamp = stamp; }
-  r.body = c.body;
-  return r;
+  {
+    std::lock_guard<std::mutex> g(cache_lock);
+    auto it = asset_cache.find(abs);
+    if (it != asset_cache.end() && it->second.stamp == stamp) { r.shared = it->second.body; return r; }
+    if (it != asset_cache.end()) { asset_bytes -= it->second.body->size(); asset_cache.erase(it); }   // changed on disk
+    uint64_t size = 0;
+    if (fs::file_size(abs, size) && size <= profile.most_held && asset_bytes + size <= profile.most_held) {
+      auto body = std::make_shared<string>();
+      if (read_file(abs, *body)) {
+        asset_bytes += body->size();
+        asset_cache[abs] = {stamp, body};
+        r.shared = std::move(body);
+        return r;
+      }
+    }
+  }
+  http::Response from_disk = file_response(abs, type);   // too large to keep, or no room left for it
+  from_disk.etag = r.etag;
+  return from_disk;
 }
 // One number that changes whenever a file pages care about is added, removed, resized or rewritten (see look_over),
 // worked out at most once per watch interval: a burst of requests for the list costs one look over the folder, not one
@@ -1623,16 +1689,18 @@ static unsigned long long tree_stamp() {
 // in a hidden folder beside the documents (CACHE). Each new list is a new file;
 // an old one is deleted once the last answer still sending it has finished.
 static string CACHE;
+// What the cache's files take is part of what the home folder holds: counted while that is the workspace open.
+static void cache_counted(long long delta) { if (starts_with(CACHE + "/", ROOT + "/") && ROOT == root_now()) used_more(delta); }
 struct ListFile {
   string path, titles;      // the list, and its titles for the next one (see OldTitles)
   uint64_t size = 0, titles_size = 0;
   ~ListFile() {
-    if (::unlink(path.c_str()) == 0) used_more(-static_cast<long long>(size));
-    if (::unlink(titles.c_str()) == 0) used_more(-static_cast<long long>(titles_size));
+    if (::unlink(path.c_str()) == 0) cache_counted(-static_cast<long long>(size));
+    if (!titles.empty() && ::unlink(titles.c_str()) == 0) cache_counted(-static_cast<long long>(titles_size));
   }
 };
 static std::mutex listing_lock;  // one list made at a time: two pages asking at once share the work
-static string listing_mem;
+static std::shared_ptr<const string> listing_mem;   // the list, when it is kept in memory
 static std::shared_ptr<ListFile> listing_file;
 static unsigned long long listing_gen = 0, listing_stamp = 0, listing_made = 0;
 static string listing_root;      // the workspace it is the list of
@@ -1673,7 +1741,7 @@ static std::shared_ptr<ListFile> make_list_file() {
   titles.flush();
   if (std::fclose(f.release()) != 0 || !out.ok || !fs::file_size(file->path, file->size)) return nullptr;
   if (std::fclose(t.release()) != 0 || !titles.ok || !fs::file_size(file->titles, file->titles_size)) file->titles_size = 0;
-  used_more(static_cast<long long>(file->size + file->titles_size));
+  cache_counted(static_cast<long long>(file->size + file->titles_size));
   return file;
 }
 
@@ -2398,15 +2466,21 @@ static http::Response answer(http::Request &req) {
     const unsigned long long gen = generation.load(), stamp = profile.sole_writer ? 0 : tree_stamp();
     if (!listing_ok || gen != listing_gen || stamp != listing_stamp || ROOT != listing_root) {
       std::shared_ptr<ListFile> file = profile.listing_on_disk ? make_list_file() : nullptr;
-      listing_mem.clear();
-      if (!file) { out.mem = &listing_mem; make_list(out); listing_mem.shrink_to_fit(); } // in memory, also when the card is too full for the file
+      listing_mem.reset();
+      if (!file) { // in memory, also when the card is too full for the file
+        auto text = std::make_shared<string>();
+        out.mem = text.get();
+        make_list(out);
+        text->shrink_to_fit();
+        listing_mem = std::move(text);
+      }
       listing_file = file;
       listing_gen = gen;
       listing_stamp = stamp;
       listing_root = ROOT;
       listing_ok = true;
     }
-    if (!listing_file) { r.body = listing_mem; return r; }
+    if (!listing_file) { r.shared = listing_mem; return r; }
     r = file_response(listing_file->path, "application/json");
     r.keep = listing_file;
     return r;
@@ -2573,18 +2647,17 @@ static http::Response answer(http::Request &req) {
       file = std::make_shared<ListFile>();
       { std::lock_guard<std::mutex> g(listing_lock); file->path = CACHE + "/files-" + std::to_string(++listing_made) + ".json"; }
       make_dirs(CACHE);
-      if (!(f = std::fopen(file->path.c_str(), "wb"))) return http::error(500, "could not list the folder");
-      out.file = f;
-    } else {
-      out.mem = &r.body;
+      if (!(f = std::fopen(file->path.c_str(), "wb"))) file.reset();   // a folder that cannot be written to: in memory instead
     }
+    if (f) out.file = f;
+    else out.mem = &r.body;
     out.put("[");
     walk_files(abs, join(parts), names.p, out, first);
     out.put("]");
     out.flush();
     if (!file) return r;
     if (std::fclose(f) != 0 || !out.ok || !fs::file_size(file->path, file->size)) return http::error(507, "storage is full");
-    used_more(static_cast<long long>(file->size));
+    cache_counted(static_cast<long long>(file->size));
     r = file_response(file->path, "application/json");
     r.keep = file;
     return r;
@@ -3119,7 +3192,7 @@ static http::Response route(http::Request &req) {
   // A page file the browser already has: say so, and send nothing. Done last,
   // so the answer carries the same headers the file itself would (a browser
   // applies them to the copy it holds).
-  if (!r.etag.empty() && r.status == 200 && req.header("if-none-match") == r.etag) { r.status = 304; r.body.clear(); r.file.clear(); r.length = 0; }
+  if (!r.etag.empty() && r.status == 200 && req.header("if-none-match") == r.etag) { r.status = 304; r.body.clear(); r.shared.reset(); r.file.clear(); r.length = 0; }
   return r;
 }
 
