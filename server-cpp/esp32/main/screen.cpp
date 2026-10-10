@@ -146,6 +146,7 @@ static void screen_task(void *) {
   bool all = true;
   int64_t asked = 0, changed_at = esp_timer_get_time();
   bool dim = false;
+  uint32_t still_sum = 0;
   int64_t info_until = 0;
   for (unsigned frame = 0;; frame++) {
     const int64_t t = esp_timer_get_time();
@@ -163,10 +164,13 @@ static void screen_task(void *) {
       else std::snprintf(mem, sizeof mem, "RAM %uK free", ram);
       std::snprintf(v.say[2], sizeof v.say[2], "%.21s", mem);
     }
+    // After ten minutes with nothing new, turn it down: an OLED wears where it
+    // stays lit. Judged by screen_sum, which leaves out what moves by itself:
+    // compared frame to frame, the star and the address taking turns with the
+    // name kept it from ever dimming.
+    const uint32_t sum = screen_sum(now, status, v);
+    if (sum != still_sum) { still_sum = sum; changed_at = t; }
     draw_screen(now, status, v, frame);
-    // After ten minutes with nothing new but the star, turn it down: an OLED
-    // wears where it stays lit.
-    if (std::memcmp(now.px + 2 * Canvas::W, shown.px + 2 * Canvas::W, sizeof now.px - 2 * Canvas::W) != 0) changed_at = t;
     const bool want_dim = t - changed_at > 600 * 1000000LL;
     if (want_dim != dim) { command({0x81, static_cast<uint8_t>(want_dim ? 0x08 : 0xCF)}); dim = want_dim; }
     if (!flush(now, shown, all)) { all = true; vTaskDelay(pdMS_TO_TICKS(1000)); continue; } // a glitch on the bus: send it all again

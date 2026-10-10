@@ -2,7 +2,7 @@
 // board's own (BoardView). Kept apart from the driver so a computer can draw
 // it too: tools/screen-preview.cpp.
 //
-//   Learner-servr           ✦     the title in serif, the star turning beside it
+//   Learner-servr           ✦     the title in serif, the star beside it (star_*.hpp)
 //   192.168.1.42:443              where to point a browser (alternating with hub.local)
 //   ·························
 //   ● Kai's iPhone   192.168.1.23 devices with a page open (●) or heard from lately (○)
@@ -15,10 +15,14 @@
 #pragma once
 
 #include <cctype>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 
 #include "canvas.hpp"
+#include "star_burst.hpp"
+#include "star_tall.hpp"
+#include "star_wide.hpp"
 #include "status.hpp"
 
 struct BoardView {
@@ -28,49 +32,21 @@ struct BoardView {
   char name[24] = "";              // the name on the network, "hub.local", if it has one
 };
 
-// The star, in thin lines, tall and narrow (it reaches 7 pixels up and down
-// and under 4 to the sides): a hollow four-pointed star, out of which four
-// short diagonal rays grow and fall back; a dotted diamond, tall like the star,
-// opens around it as the rays peak, and a spark twinkles at its right. It stays
-// upright: turned, an outline this small stops looking like a star. One cycle
-// takes 64 frames, about five seconds at 80 ms a frame.
+// The star beside the title: three designs, one file each, to compare and
+// choose (menuconfig, Hub, "Star beside the title"; for PlatformIO a define in
+// platformio.ini). The tall one unless another is chosen; "take turns" shows
+// each for one cycle in turn (tall, wide, burst), to compare on the board.
 inline void draw_star(Canvas &c, int cx, int cy, unsigned frame) {
-  const float pi = 3.14159265f, t = static_cast<float>(frame % 64) / 64.0f;
-  const float up = 7.4f, side = 3.6f, waist = 1.9f, narrow = 0.7f; // narrow: how much the waist and rays are pulled in sideways
-  auto at = [&](float r, float a, float sx, int &x, int &y) {
-    x = cx + static_cast<int>(std::lround(r * std::sin(a) * sx));
-    y = cy - static_cast<int>(std::lround(r * std::cos(a)));
-  };
-  int xs[8], ys[8];
-  for (int i = 0; i < 8; i++) {
-    const float a = static_cast<float>(i) * pi / 4;
-    if (i % 2) at(waist, a, narrow, xs[i], ys[i]);
-    else at(i % 4 == 0 ? up : side, a, 1, xs[i], ys[i]);
-  }
-  for (int i = 0; i < 8; i++) c.line(xs[i], ys[i], xs[(i + 1) % 8], ys[(i + 1) % 8]);
-  c.set(cx, cy);
-  const float grow = std::sin(pi * t);
-  if (grow > 0.1f) for (int i = 0; i < 4; i++) { // the rays, between the points
-    int x0, y0, x1, y1;
-    const float a = pi / 4 + static_cast<float>(i) * pi / 2;
-    at(waist + 1.0f, a, narrow, x0, y0);
-    at(waist + 1.0f + 2.4f * grow, a, narrow, x1, y1);
-    c.line(x0, y0, x1, y1);
-  }
-  if (t > 0.4f && t < 0.7f) { // the diamond, opening: as tall as it is twice wide
-    const int r = 5 + static_cast<int>(20.0f * (t - 0.4f));
-    for (int i = 0; i <= r; i += 2) {
-      const int dx = i / 2, dy = r - i;
-      c.set(cx + dx, cy - dy); c.set(cx - dx, cy + dy); c.set(cx + dx, cy + dy); c.set(cx - dx, cy - dy);
-    }
-  }
-  const unsigned spark = frame % 40; // a pixel, a small cross, a pixel
-  for (int k = 0; k < 2; k++) {
-    const unsigned s0 = k ? 20 : 0;
-    const int sx = cx + 6, sy = k ? cy + 5 : cy - 5;
-    if (spark >= s0 && spark < s0 + 4) c.set(sx, sy);
-    if (spark == s0 + 1 || spark == s0 + 2) { c.set(sx - 1, sy); c.set(sx + 1, sy); c.set(sx, sy - 1); c.set(sx, sy + 1); }
-  }
+#if defined(CONFIG_HUB_STAR_WIDE)
+  draw_star_wide(c, cx, cy, frame);
+#elif defined(CONFIG_HUB_STAR_BURST)
+  draw_star_burst(c, cx, cy, frame);
+#elif defined(CONFIG_HUB_STAR_TURNS)
+  static void (*const stars[])(Canvas &, int, int, unsigned) = {draw_star_tall, draw_star_wide, draw_star_burst};
+  stars[frame / 64 % 3](c, cx, cy, frame);
+#else
+  draw_star_tall(c, cx, cy, frame);
+#endif
 }
 
 // The start the addresses on screen all share, in whole parts and at most the
@@ -92,6 +68,10 @@ inline void draw_screen(Canvas &c, const HubStatus &s, const BoardView &b, unsig
   c.clear();
   c.title(0, 2);
   draw_star(c, 118, 7, frame);
+  // The diamonds reach a row or two below the title's band: cut there, so the
+  // star stays in the top 16 rows (yellow on two-colour screens) and clear of
+  // the address.
+  c.fill(104, 16, 24, 8, false);
 
   // Where to find it: the address, and every few seconds the name instead.
   char line[64];
@@ -153,4 +133,22 @@ inline void draw_screen(Canvas &c, const HubStatus &s, const BoardView &b, unsig
     c.text(w < 128 ? (128 - w) / 2 : 0, 56, bottom);
     c.invert(0, 55, 128, 9);
   }
+}
+
+// What the screen says, as a number that changes when it does: the screen
+// below the title drawn as at frame 0, and every device, the ones on later
+// pages too. What moves by itself (the star, the address and the name taking
+// turns, the pages turning over) leaves it alone, so ten minutes of the same
+// number means nothing new to show (screen.cpp dims it then). Draws into `c`.
+inline uint32_t screen_sum(Canvas &c, const HubStatus &s, const BoardView &b) {
+  uint32_t sum = 2166136261u; // FNV-1a
+  auto mix = [&sum](const char *p, size_t n) { for (size_t i = 0; i < n && p[i]; i++) sum = (sum ^ static_cast<uint8_t>(p[i])) * 16777619u; };
+  draw_screen(c, s, b, 0);
+  for (size_t i = 2 * Canvas::W; i < sizeof c.px; i++) sum = (sum ^ c.px[i]) * 16777619u;
+  for (int i = 0; i < s.peer_count; i++) {
+    mix(s.peers[i].name, sizeof s.peers[i].name);
+    mix(s.peers[i].ip, sizeof s.peers[i].ip);
+    sum = (sum ^ (s.peers[i].live ? 1u : 2u)) * 16777619u;
+  }
+  return sum;
 }

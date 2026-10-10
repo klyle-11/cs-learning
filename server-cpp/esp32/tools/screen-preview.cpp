@@ -2,7 +2,8 @@
 // layout or the star before flashing it.
 //
 //   c++ -std=c++17 -I main -I ../src tools/screen-preview.cpp -o /tmp/screen-preview
-//   /tmp/screen-preview out-dir      -> out-dir/devices.png, pairing.png, ..., star-00.png ... star-63.png
+//   /tmp/screen-preview out-dir      -> out-dir/devices.png, pairing.png, ...,
+//                                       star-tall-00.png ... star-tall-63.png, the same for wide and burst
 //
 // Pixels are drawn 4 times larger, in the yellow-over-blue of the two-colour
 // 0.96" modules (the top 16 rows yellow); single-colour ones look the same in one colour.
@@ -128,12 +129,16 @@ int main(int argc, char **argv) {
   draw_screen(c, s, b, 10);
   save_png(dir + "/wifi-lost.png", c);
 
-  for (unsigned f = 0; f < 64; f++) {
-    Canvas star;
-    draw_star(star, 118, 7, f);
-    char name[32];
-    std::snprintf(name, sizeof name, "/star-%02u.png", f);
-    save_png(dir + name, star);
-  }
+  // Each star design through one cycle, alone, to compare (star_*.hpp).
+  const struct { const char *name; void (*draw)(Canvas &, int, int, unsigned); } stars[] = {
+      {"tall", draw_star_tall}, {"wide", draw_star_wide}, {"burst", draw_star_burst}};
+  for (const auto &st : stars)
+    for (unsigned f = 0; f < 64; f++) {
+      Canvas star;
+      st.draw(star, 118, 7, f);
+      char name[40];
+      std::snprintf(name, sizeof name, "/star-%s-%02u.png", st.name, f);
+      save_png(dir + name, star);
+    }
   std::printf("written to %s\n", dir.c_str());
 }

@@ -36,6 +36,10 @@ Third request:
 - [x] A narrower, taller star
 - [x] A larger upload limit from the reader with the T3-S3: 4 GB (FAT32's limit) on both boards; the reader now asks the server for its limit instead of assuming 50 MB, and says which files were left out and why
 
+Fourth request:
+- [x] Keep copies of the older star designs to compare: one file each (`main/star_tall.hpp`, `star_wide.hpp`, `star_burst.hpp`), chosen in menuconfig, with "take turns" to see all three on the board; side by side in `docs/stars.gif` and `docs/stars.png`
+- [ ] Choose one, on the board ("take turns"); then the other two can be deleted
+
 ## Done on this branch
 
 A full 32 GB card in a few hundred KB:
@@ -79,6 +83,10 @@ Third round:
 - [x] T3-S3 V1.3 build: pins by chip (`main/board_pins.h`), PSRAM on, TLS buffers in PSRAM, console on the USB-C port, an `esp32-psram` profile (8 connections, 12 open pages, page and scripts kept in memory, 512 KB to sort folder names), the BOOT button showing the board's details on the screen
 - [x] Upload limit 4 GB on both boards; a stalled upload gives up after 30 s without data; the reader uses the server's limit, sends big files only by "Upload a folder" (straight from disk), and lists what it left out
 - [x] The OLED: a taller, narrower star; device addresses without the start they all share
+
+Fourth round:
+- [x] Three star designs kept side by side, one file each, chosen in menuconfig or shown in turn
+- [x] The screen dims again: it never did, because the star and the address taking turns with the name counted as something new every few seconds; now only what the screen says counts (`screen_sum`). The tall and wide stars' diamonds also reached two rows into the blue part of two-colour screens: cut at the title's band
 
 ## To try on the board
 

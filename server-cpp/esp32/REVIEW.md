@@ -80,6 +80,7 @@ The second board shares every line of the server and nearly all of the board cod
 - It never makes the server walk the card: it reads the count already kept, and only once the server is up.
 - It runs below the server in priority: under load the star stutters, the server does not.
 - Device addresses are shortened only when all of them, and the board's, share their first two parts; then the board's own, whole on the line above, carries the part left out. One address from elsewhere (a VPN) and all are shown whole, so a shortened one is never ambiguous.
+- [x] **It never dimmed** (found in the fourth round). "Nothing new for ten minutes" was judged by comparing each frame with the last below the title, but the address and the name take turns there every three seconds, more than four devices turn over in pages, and the tall star's diamond reached two rows below the title: something always changed. *Now:* `screen_sum` (`main/screen_draw.hpp`) gives a number for what the screen says (drawn as at frame 0, and every device, those on later pages too), and only a change in it counts; the star is cut at the title's band. Checked on a computer: ten idle minutes, no change counted (299 before); a device opening or closing a page, leaving from the second page, a notice, an alert, each counted.
 
 ## Updates
 

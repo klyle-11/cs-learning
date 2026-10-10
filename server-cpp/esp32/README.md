@@ -28,19 +28,37 @@ On the V1.6.1, GPIO 2 is also a boot-mode pin: if flashing fails with a card in,
 
 ![the star](docs/screen.gif)
 
-- Top: **Learner-servr** in serif (DejaVu Serif, drawn to pixels by `tools/make-title.py`) and the star, in thin lines, tall and narrow: a hollow four-pointed star whose short diagonal rays grow and fall back, a tall dotted diamond opening as they peak, a spark at its side. About five seconds a cycle.
+- Top: **Learner-servr** in serif (DejaVu Serif, drawn to pixels by `tools/make-title.py`) and the star, in thin lines, tall and narrow: a hollow four-pointed star whose short diagonal rays grow and fall back, a tall dotted diamond opening as they peak, a spark at its side. About five seconds a cycle. Two other designs are kept to compare (below, "Choosing the star").
 - On the T3-S3, the BOOT button wakes the screen and shows, for eight seconds, the board, the firmware version, how long it has been up, and free memory (internal and PSRAM).
 - Under it, the address to type: the board's IP (and port if not 443), every few seconds `hub.local` instead.
 - The rest: devices with a page open (●) or heard from in the last two minutes (○), name and IP, four at a time (when every address shares its start with the board's, as 192.168… does at home, only what follows is shown: "1.23" for 192.168.1.23, and the board's own address above shows the rest); while a **pairing code** is on offer, the code large, the time left, and the start of the certificate authority's fingerprint to compare with the trust page; during an update, a progress bar; at start-up and when something is wrong, what is happening and what to do.
 - Bottom line, reversed, for a few seconds: what just happened ("Paired: Kai's iPhone", "Removed: …", "Storage is full"), or until it is over, "Wi-Fi lost: rejoining".
 
-After ten minutes with nothing new it dims: an OLED wears where it stays lit. Only the bytes that changed are sent each frame (the star: a few dozen; a full screen is a kilobyte), from a task below the server in priority.
+After ten minutes with nothing new it dims: an OLED wears where it stays lit. What moves by itself (the star, the address and name taking turns, the device pages turning over) does not count as new. Only the bytes that changed are sent each frame (the star: a few dozen; a full screen is a kilobyte), from a task below the server in priority.
 
-To change the layout or the star, edit `main/screen_draw.hpp` and look at it on a computer first:
+### Choosing the star
+
+Three designs, one file each; only the chosen one is built into the firmware (all three with "take turns"):
+
+![the three stars](docs/stars.gif)
+
+![the three stars, frame by frame](docs/stars.png)
+
+| | File | What it does |
+|---|---|---|
+| 1 | `main/star_tall.hpp` | **Tall and narrow**, the one in use: a hollow four-pointed star, short diagonal rays, a tall dotted diamond |
+| 2 | `main/star_wide.hpp` | **Wide**, the one before it: as wide as it is tall; the rays make it an eight-pointed compass star for a moment, the diamond opens square |
+| 3 | `main/star_burst.hpp` | **Burst**, the first draft: a breathing four-pointed star, a smaller one turned an eighth growing out of it, a dotted ring, sparks at opposite corners |
+
+To pick one: menuconfig, Hub, "Star beside the title" (`idf.py -B build-esp32 -D SDKCONFIG=build-esp32/sdkconfig menuconfig`, then build and flash). "Take turns" shows all three on the board, one cycle each (tall, wide, burst, about five seconds each), to judge them on the real screen, where a pixel looks different from in a picture. For PlatformIO, uncomment the `CONFIG_HUB_STAR_…` define in `platformio.ini`. Once you have chosen, the other two files can stay or go: delete one and take its line out of `draw_star` in `main/screen_draw.hpp`.
+
+To change the layout or a star, edit `main/screen_draw.hpp` or the star's file and look at it on a computer first:
 
 ```
 c++ -std=c++17 -I main -I ../src tools/screen-preview.cpp -o /tmp/screen-preview && /tmp/screen-preview /tmp/screens
 ```
+
+It writes each screen, and every frame of each star (`star-tall-00.png` … `star-burst-63.png`). Add `-DCONFIG_HUB_STAR_WIDE` (or `_BURST`) to the first command to see the screens with that star.
 
 An SH1106 instead of an SSD1306 (some clones), or a screen upside down: menuconfig, Hub ("The OLED is an SH1106", "mounted the other way up"); for PlatformIO the two defines at the bottom of `platformio.ini`.
 

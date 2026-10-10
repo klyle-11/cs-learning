@@ -23,4 +23,19 @@ menu "Hub"
     config HUB_OLED_FLIP
         bool "The OLED is mounted the other way up"
         default n
+    choice HUB_STAR
+        prompt "Star beside the title"
+        default HUB_STAR_TALL
+        help
+            Three designs, one file each (main/star_*.hpp). To see them side by
+            side on a computer: tools/screen-preview.cpp, or docs/stars.gif.
+        config HUB_STAR_TALL
+            bool "Tall and narrow (the current one)"
+        config HUB_STAR_WIDE
+            bool "Wide: the earlier one, as wide as it is tall"
+        config HUB_STAR_BURST
+            bool "Burst: the first draft, two stars and a ring"
+        config HUB_STAR_TURNS
+            bool "Take turns: tall, wide, burst, one cycle each, to compare on the board"
+    endchoice
 endmenu
