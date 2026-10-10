@@ -52,6 +52,9 @@ check: clean hubd
 test: hubd
 	./test/contract.sh
 	./test/links.sh
+# The server's memory on 20,000 files, on every profile, against a ceiling for each (Linux only).
+memory: hubd
+	./test/memory.sh
 test-own: build/hubd-own$(EXE)
 	HUBD=build/hubd-own$(EXE) ./test/contract.sh
 	HUBD=build/hubd-own$(EXE) ./test/links.sh
@@ -77,4 +80,4 @@ card:
 clean:
 	rm -rf build hubd hubd.exe
 
-.PHONY: check test test-own clean card
+.PHONY: check test test-own memory clean card
