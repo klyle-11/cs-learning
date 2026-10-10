@@ -1,0 +1,4 @@
+# Fetched by ESP-IDF's component manager on the first build (needs the internet).
+# Without it the board still works, only not as NAME.local (board.cpp checks for mdns.h).
+dependencies:
+  espressif/mdns: "^1.4.0"

@@ -59,10 +59,12 @@ Stored in `notes/notes.json`.
 
 | Request | Answer |
 |---|---|
-| `GET /api/notes` | all notes |
+| `GET /api/notes` | all notes. 500 if `notes.json` exists but cannot be read (C++ server; see below) |
 | `POST /api/notes` | body needs `doc` and one of `text`, `quote`. Returns the new note. `status` is `open` with text, `highlight` without |
 | `PUT /api/notes/<id>` | updates any of `text`, `quote`, `heading`, `headingText`, `type`; other keys are ignored. A highlight that gains text becomes `open`. 404 for an unknown id |
 | `DELETE /api/notes/<id>` | `{ "ok": true }`, or 404 |
+
+If `notes.json` (or `hub.json`, for `PUT /api/config` and `DELETE /api/folder`) exists but cannot be read or parsed, the C++ server changes nothing and answers 500 `… could not be read, so nothing was changed; it is left as it is`, rather than treating it as empty and writing a list with only the new change. On the board a save cut short by a power cut is put right at the next start. The Node server still treats such a file as empty.
 
 ## Uploads and workspaces
 
@@ -154,7 +156,8 @@ The C++ server measures the folder once and then keeps count as it writes (uploa
 - 1 MB for JSON bodies (both servers), and the profile's upload limit for uploads (413), decided from `Content-Length` before the body is read
 - `Content-Length` only; chunked request bodies are refused (400), and so is a length larger than the machine can count (413; on the board sizes are 32 bits)
 - a body gets 30 seconds plus its size at 32 KB a second; an answer gets 30 seconds plus its size at 8 KB a second
-- a fixed number of connections at once (64 on a computer, 4 on the ESP32); the rest are turned away. An idle connection is kept for its next request for 5 seconds (2 on the ESP32)
+- a fixed number of connections at once (64 on a computer, 4 on the ESP32); the rest wait unaccepted until a place frees up, and on the ESP32 also until there is memory for one more (48 KB free, a 20 KB block; one connection is always let in). An idle connection is kept for its next request for 5 seconds (2 on the ESP32)
+- open pages listening for changes: 16 on a computer, 6 on the ESP32 (503 beyond, or when memory is short); one that has closed frees its place at once
 - files are sent and received a piece at a time, never held whole in memory; on the board files of 2 to 4 GB (the most FAT32 holds) are read through FatFS, past the 2 GB limit of the board's `off_t`
 - an error in one connection ends that connection only
 - listens on `127.0.0.1` unless started with `--host 0.0.0.0`

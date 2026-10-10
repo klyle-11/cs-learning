@@ -5,7 +5,7 @@
 // Everything arriving here is untrusted, so every size and every wait has a
 // limit, set before anything is allocated:
 //   - 16 KB of headers; a body limit chosen per route by the handler
-//   - a fixed number of connections at once; the rest are turned away
+//   - a fixed number of connections at once; the rest wait to be taken in
 //   - a deadline for the handshake, for the headers, and for the body (which
 //     grows with its size, so a slow upload is fine but a stalled one is not)
 // Bodies and files are moved in pieces, never held whole in memory.
@@ -93,12 +93,14 @@ class Conn {
  public:
   int fd;
   bool local;                 // the other end is this machine itself
+  std::string peer;           // its address ("192.168.1.23")
+  std::string who;            // for a page listening for events: the paired device it belongs to
   bool tls = false;
   mbedtls_ssl_context ssl;
   Clock::time_point deadline; // nothing waits past this
   std::string ahead;          // bytes already read from the wire but not yet used
 
-  Conn(int socket, bool is_local) : fd(socket), local(is_local) {
+  Conn(int socket, bool is_local, std::string address) : fd(socket), local(is_local), peer(std::move(address)) {
     ::fcntl(fd, F_SETFL, ::fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
     within(15000);
   }
@@ -308,7 +310,11 @@ struct Options {
   std::string host = "127.0.0.1";
   int port = 4321;
   Tls *tls = nullptr;
-  int max_conns = 64;      // connections served at once
+  int max_conns = 64;      // connections served at once; more wait to be taken in
+  // Whether there is memory for one more connection. While there is not,
+  // newcomers wait (unaccepted, so they cost nothing) instead of being turned away.
+  std::function<bool()> admit;
+  std::function<void()> listening; // called once the port is open
   long keepalive_ms = 5000; // how long an idle connection is kept for its next request
   size_t piece = 16384;    // bytes moved at a time when sending a file
 };
@@ -522,7 +528,12 @@ inline int serve(const Options &opt, Handler handler) {
   if (::inet_pton(AF_INET, opt.host.c_str(), &addr.sin_addr) != 1) { std::fprintf(stderr, "bad host address: %s\n", opt.host.c_str()); return 1; }
   if (::bind(srv, reinterpret_cast<sockaddr *>(&addr), sizeof addr) < 0) { std::perror("bind"); return 1; }
   if (::listen(srv, 16) < 0) { std::perror("listen"); return 1; }
+  if (opt.listening) opt.listening();
   for (;;) {
+    // Full, or short of memory: leave the next one waiting on the listening
+    // socket until a place frees up. A browser waits; a refused one shows an error.
+    // One connection is always let in: with none open, memory is as free as it gets.
+    while (active().load() >= opt.max_conns || (active().load() > 0 && opt.admit && !opt.admit())) std::this_thread::sleep_for(std::chrono::milliseconds(20));
     sockaddr_in peer{};
     socklen_t len = sizeof peer;
     int fd = ::accept(srv, reinterpret_cast<sockaddr *>(&peer), &len);
@@ -531,14 +542,14 @@ inline int serve(const Options &opt, Handler handler) {
     ::setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof yes);
 #endif
     ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof yes);
-    // Full: turn the newcomer away rather than start a thread for it.
-    if (active().load() >= opt.max_conns) { ::close(fd); continue; }
     bool local = (ntohl(peer.sin_addr.s_addr) >> 24) == 127;
+    char address[INET_ADDRSTRLEN] = "";
+    ::inet_ntop(AF_INET, &peer.sin_addr, address, sizeof address);
     active()++;
     try {
-      std::thread([fd, local, handler, opt] {
+      std::thread([fd, local, ip = std::string(address), handler, opt] {
         // Nothing that goes wrong with one connection may end the process.
-        try { handle_connection(std::make_shared<Conn>(fd, local), handler, opt); } catch (...) {}
+        try { handle_connection(std::make_shared<Conn>(fd, local, ip), handler, opt); } catch (...) {}
         active()--;
       }).detach();
     } catch (...) { // no thread to be had

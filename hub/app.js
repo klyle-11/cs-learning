@@ -336,6 +336,15 @@ function offerUpload(files) {
 // Send the files one at a time. `workspace` set: they become a workspace of
 // their own (the top folder name is dropped); otherwise they join this one.
 async function runUpload(files, workspace, folder, front, lock) {
+  uploading = true;
+  try { await sendUpload(files, workspace, folder, front, lock); } finally {
+    uploading = false;
+    // What this upload changed is in the list it fetched at the end; anything else (notes) is still due.
+    for (const f of changedFiles) if (!f.endsWith('notes.json')) changedFiles.delete(f);
+    if (changedFiles.size && !changeTimer) changeTimer = setTimeout(applyChanges, 250);
+  }
+}
+async function sendUpload(files, workspace, folder, front, lock) {
   const line = el('p');
   let box;
   showGate(`Upload “${folder}”`, (card) => { box = card; card.append(line); });
@@ -2622,17 +2631,21 @@ function listen() {
   events.onmessage = onFileChange;
 }
 // Changes come in bursts (a folder of files uploaded, a notes file rewritten
-// twice), and every list fetched means the server walks the whole folder; on
-// the board that takes seconds. So changes are gathered until a quarter of a
-// second passes without one, and then dealt with once.
+// twice), and every list fetched means the server looks over the whole folder;
+// on the board that takes a while. So changes are gathered for a quarter of a
+// second and dealt with together, and while they keep coming (another device
+// uploading a thousand files, one at a time) the list is fetched at most once
+// every three seconds. During this page's own upload nothing is fetched: it
+// fetches the list once at the end.
 const changedFiles = new Set();
-let changeTimer = 0;
+let changeTimer = 0, changesApplied = 0, uploading = false;
 function onFileChange(e) {
   changedFiles.add(JSON.parse(e.data).file);
-  clearTimeout(changeTimer);
-  changeTimer = setTimeout(applyChanges, 250);
+  if (!changeTimer && !uploading) changeTimer = setTimeout(applyChanges, Math.max(250, changesApplied + 3000 - Date.now()));
 }
 async function applyChanges() {
+  changeTimer = 0;
+  changesApplied = Date.now();
   const files = [...changedFiles];
   changedFiles.clear();
   if (files.some((f) => f.endsWith('notes.json'))) await loadNotes();

@@ -1,7 +1,13 @@
-# 4 MB of flash. The program gets most of it; "state" holds the certificates
-# and the list of paired devices, which must not live on the removable card.
+# 4 MB of flash. Two slots for the program, so an update is written into the
+# one not running and the board can go back if the new one fails (update.cpp);
+# "state" holds the certificates and the list of paired devices, which must not
+# live on the removable card. "state" is where it was before slots were added,
+# so paired devices and the certificate authority survive the change; the new
+# table itself has to be flashed by USB once.
 # Name,   Type, SubType, Offset,   Size
-nvs,      data, nvs,     0x9000,   0x6000
+nvs,      data, nvs,     0x9000,   0x4000
+otadata,  data, ota,     0xd000,   0x2000
 phy_init, data, phy,     0xf000,   0x1000
-factory,  app,  factory, 0x10000,  0x2C0000
+ota_0,    app,  ota_0,   0x10000,  0x160000
+ota_1,    app,  ota_1,   0x170000, 0x160000
 state,    data, fat,     0x2D0000, 0x100000

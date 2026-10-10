@@ -25,5 +25,17 @@ CONFIG_MBEDTLS_THREADING_PTHREAD=y
 CONFIG_MBEDTLS_HARDWARE_AES=y
 CONFIG_MBEDTLS_HARDWARE_SHA=y
 CONFIG_MBEDTLS_HARDWARE_MPI=y
-CONFIG_LWIP_MAX_SOCKETS=10
+# The listening socket, 4 connections being served, up to 6 open pages kept
+# listening for changes, and the clock, name and update lookups.
+CONFIG_LWIP_MAX_SOCKETS=16
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+# Updates: a new firmware that crashes or cannot serve before it is kept
+# (update.cpp, update_keep) is undone by the bootloader at the next start.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+# Root certificates for the HTTPS connection to GitHub: the common set (most
+# of the web), smaller than the full one. The release signature is what decides.
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y
+# The server listens on IPv4 only (http.hpp); leaving IPv6 out of the network stack
+# keeps the program small enough to leave room in its update slot.
+CONFIG_LWIP_IPV6=n
