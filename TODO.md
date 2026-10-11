@@ -1,5 +1,31 @@
 # Hub — to do
 
+## Certificate security audit (11 October)
+
+- [x] Audit the live S3 public chain/IP and disposable legacy/current chains; document C01–C08 in `server-cpp/esp32/CERTIFICATE-AUDIT.md`.
+- [x] Restrict newly generated CA/issuer EKU to TLS server authentication; reject entropy/flush/close failures and silent replacement of partial authority state. Correct downloaded-file fingerprint instructions and overbroad “this hub only” claims.
+- [ ] Deliberately replace the existing unrestricted-purpose issuer/root and remove the old root from every device; a firmware flash does not change existing valid certificates. Choose narrower names/addresses or a design without a local issuing CA before migration.
+- [x] Disable automatic state formatting and provide offline `PrepareState` for explicit blank-hardware provisioning; ordinary updates never write it. [ ] Hardware mount-failure/recovery verification and physical key protection; do not silently burn eFuses.
+- [x] Label Wi-Fi reason/RSSI/BSSID and use timer-based bounded reconnect backoff; move six-second BOOT detection to elapsed-time checks in the screen task, independent of maintenance delays. [ ] Flash and collect Wi-Fi reason logs; actual radio/AP cause remains unverified.
+- [x] Add a six-second physical BOOT hold to offer a new pairing code on S3; fix the reader's claim that a code is always being offered. [ ] Flash and verify the button/OLED; diagnose intermittent TLS/API failures on affected paired browsers.
+
+## Board stability after the first hardware logs (11 October)
+
+- [x] Correct TLS TCP EOF/reset mapping; capture native transport errors and wire counts; label pairing-state loading/session rejection without secrets; allow eight seconds for reader startup authentication. [ ] Deploy and diagnose missing browser credentials versus missing saved device records; current direct API reachability does not establish stable multi-device operation.
+
+- [x] Expose the embedded firmware ELF SHA-256, release number and build time in `/api/device` and Settings; print the matching ID after PowerShell builds. S3 compile, Windows contract and focused browser checks pass. Flash and reader copy are required before the board can display it.
+
+- [x] Add allocation size/capability/task labels, contextual TLS failures, reset reason, and separate internal/DMA/PSRAM telemetry; compile S3 firmware.
+- [x] Reduce S3 connections/event streams to 6/6, idle connections to two seconds; recheck memory after accept, and require internal memory for OTA admission.
+- [x] Serialize service-worker shell installation/background refreshes, load PDF/engine assets when used, and suppress tag-only reload notices while retaining policy-change notifications.
+- [x] Preserve FatFS probe errors and require three consecutive device failures before restarting; allocator/lock errors do not imply card removal.
+- [ ] Flash this firmware and copy the updated reader with `make card`; play audio while loading documents/PDFs and uploading, recording pool minima, largest blocks, allocation failures and boot reasons. See `server-cpp/esp32/REVIEW.md` for the run sequence.
+- [x] Add boot/workspace/generation-based `/api/docs` validators and browser reuse; scratch 500-document unchanged response falls from 51,885 bytes to zero. Aggregate note counts once per tree redraw.
+- [x] Release disconnected event streams during quiet uptime, bound stalled sends and TLS session caching, reserve admission during idle OTA installation (B02), skip small permanent S3 asset allocations and reduce transfer chunks to 4 KB. Hardware load/OTA testing remains open.
+- [x] Refresh card free-space snapshots after mutations outside the OLED task; refresh browser settings after coalesced write events and when opened, with no periodic storage polling. Isolate values by hub/workspace and display zero and two decimal places in GB.
+- [x] Add PowerShell build/card/flash/local-release orchestration (`server-cpp/esp32/tools/board.ps1`); test builds, dry-run flash and scratch reader copying. Actual flashing/publication is separate.
+- [ ] Measure DMA/internal headroom under several devices before changing PSRAM allocation thresholds, task stacks, TCP window or SPI speed. Finish durable-save recovery (B01), and measure audio and loading on hardware.
+
 ## From the review (`REVIEW.md`), in order
 
 The second review pass (3 October 2026) found the reader private in the ways the first pass asked for, with one serious new item and a set of smaller ones. Numbers in brackets are findings in `REVIEW.md`. This order replaces the old one where they differ.

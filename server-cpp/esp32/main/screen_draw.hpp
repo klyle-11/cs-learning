@@ -153,7 +153,7 @@ inline void draw_screen(Canvas &c, const HubStatus &s, const BoardView &b, unsig
   } else if (s.peer_count == 0) {
     c.text(0, top, s.running ? "No one connected" : "");
     if (s.running && s.free_known) {
-      std::snprintf(line, sizeof line, "%.1f GB free on card", static_cast<double>(s.free) / (1024.0 * 1024.0 * 1024.0));
+      std::snprintf(line, sizeof line, "%.2f GB free on card", static_cast<double>(s.free) / (1024.0 * 1024.0 * 1024.0));
       c.text_fit(0, top + 10, line, 128);
     }
   } else {

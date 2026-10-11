@@ -1224,7 +1224,7 @@ connect-src 'self' https://desk.local:4321 https://pi.local
 404 {"error": "no such doc"}
 ## page file has a tag
 yes
-Cache-Control: no-cache
+Cache-Control: private, no-cache
 ## page file, already held
 304 0
 ## page, already held, keeps its policy

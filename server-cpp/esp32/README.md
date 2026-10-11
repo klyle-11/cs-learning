@@ -2,9 +2,23 @@
 
 The hub's server running on an ESP32 board, with the documents on a microSD card of up to 32 GB and a status screen. Two boards: the **T3 LoRa32 V1.6.1** (ESP32) and the **T3-S3 V1.3** (ESP32-S3 with 2 MB PSRAM). Same server code as on a computer (`../src`); this folder adds what only the board needs. Branch: `claude/esp32-32gb-memory-efficiency-n3dz1c`. Its plan, with every request made on the branch, is [TODO.md](TODO.md); its review [REVIEW.md](REVIEW.md); whether it is built the right way, [ARCHITECTURE.md](ARCHITECTURE.md).
 
-**Not yet run on a board.** Everything here builds (ESP-IDF 5.4.1) and the server parts are tested on a computer with the board's settings (`--profile esp32`); the board-only parts (screen, Wi-Fi, card, updates) are checked by compiling and reading, not by running. The first flash is where they meet the hardware.
+**First S3 hardware run: 10–11 October 2026.** The owner reports slow loads, audio interruptions and allocation failures. The [hardware assessment](REVIEW.md#first-hardware-failure-assessment-11-october) records fixes and remaining measurements. The latest S3 builds with ESP-IDF 5.4.4; the new stability changes have not been flashed yet.
 
 ## The boards
+
+### Certificate state survives normal updates
+
+Use normal `Flash`/`All` updates; do not use `erase-flash` for routine changes. A full erase deletes the CA keys and pairing records. Neither RESET nor a six-second BOOT hold creates a replacement CA. Hold BOOT after the server is running; holding RST only keeps the chip reset. The firmware's former “first start: making certificates” text appeared on every boot and was misleading.
+
+State-mount errors now stop startup without formatting anything. Do not erase state to treat a Wi-Fi or TLS problem. Restore the existing identity if its storage is damaged. Changing certificate policy in firmware retains an existing valid CA until an explicit migration.
+
+**Blank new hardware only:** `./server-cpp/esp32/tools/board.ps1 PrepareState` generates `build/empty-state.bin` locally; it never writes the board. Its geometry follows `partitions.csv` (currently offset `0x390000`, size `0x70000`). For deliberate first setup on blank hardware, use the configured ESP-IDF Python/esptool to write this image at that offset, then normal firmware flash. Writing it over existing state destroys the old CA and pairings. Normal Flash/All never includes it. Do not use this image on the current working board.
+
+Wi-Fi diagnosis now logs `hub-wifi` reason, RSSI and BSSID, plus reconnect delay/internal free memory. The supplied `auth → init` sequence shows authentication attempts failing; distinguish timeout, rejected credentials/security, AP deauthentication and low signal using the reason log before changing router settings. Reconnection uses bounded 1–15-second backoff without sleeping in the event loop. No WPA/security settings are weakened.
+
+Security: read [the certificate audit](CERTIFICATE-AUDIT.md) before installing the hub's root on a device used for unrelated work/personal activity. Existing issuer certificates have broader capabilities than originally described. Firmware updates preserve valid certificate state; they do not remove old trust from phones/computers.
+
+Updated S3 source supports holding BOOT for six seconds to offer a fresh ten-minute pairing code on OLED and USB serial output. A short press still changes screens. Startup offers a code only when no devices are saved, so RESET does not generate one once devices have paired. The physical hold needs the new firmware and hardware verification; code generation is not exposed to unpaired web visitors.
 
 | | T3 LoRa32 V1.6.1 | T3-S3 V1.3 (and V1.2) |
 |---|---|---|
@@ -16,7 +30,7 @@ The hub's server running on an ESP32 board, with the documents on a microSD card
 | Buttons | RESET | RESET, BOOT (GPIO 0): shows the board's details on the screen |
 | LED (held off), battery | 25, ADC 35 (not used yet) | 37, ADC 1 (not used yet) |
 | USB | through a USB-serial chip | the chip's own USB, on USB-C |
-| Profile (limits) | `esp32`: 4 connections at once, 6 open pages | `esp32-psram`: 8 connections, 12 open pages, page and scripts kept in memory |
+| Profile (limits) | `esp32`: 4 connections at once, 6 open pages | `esp32-psram`: 6 connections, 6 open pages, bounded page/script cache |
 
 Pins from LilyGO's own board definitions; `main/board_pins.h` picks them by chip, so there is nothing to choose but the build target. The LoRa radio on both (SX1276 on the V1.6.1, SX1262 at 915 MHz on yours) is left alone.
 
@@ -70,6 +84,8 @@ An SH1106 instead of an SSD1306 (some clones), or a screen upside down: menuconf
 
 ## Preparing the card
 
+Settings shows the running board's firmware version, build time and full firmware build ID (the app ELF SHA-256 embedded by ESP-IDF). Compare that ID with the ELF SHA-256 shown by `python -m esptool image_info --version 2 build/hub.bin` using your installed ESP-IDF tools. The reader assets on the card are updated separately.
+
 A FAT32 card. Cards up to 32 GB (SDHC) come formatted FAT32; larger ones (SDXC) come as exFAT, which this build does not read: reformat as FAT32 or use 32 GB.
 
 ```
@@ -87,6 +103,36 @@ name=hub
 At start-up the board copies the network into its own flash and the name into its settings, then **deletes `wifi.txt`** from the card, so the password does not travel with a card that goes in and out of other computers. To change network, put a new `wifi.txt` on the card. `name` is optional (`hub` if left out): the board is then `hub.local` on the network. The top of the card is outside what the server shows, so the file is never served.
 
 ## Building and flashing
+
+### One command from Windows PowerShell
+
+After the first ESP-IDF target/configuration/build, [tools/board.ps1](tools/board.ps1) reuses that build's exact compiler, Python, CMake and Ninja paths. It coordinates MSYS2 card preparation and ESP-IDF flashing without switching terminals. It does not run `set-target`, reset menuconfig, format the card, erase flash or create signing keys. Run from the repository root:
+
+```powershell
+# Reader and firmware changes together (replace E:/ and COM7 with your devices):
+./server-cpp/esp32/tools/board.ps1 All -CardRoot E:/ -Port COM7 -Monitor
+
+# Firmware-only change: rebuild and flash, with the existing reader on the card:
+./server-cpp/esp32/tools/board.ps1 Flash -Port COM7 -Monitor
+
+# Reader-only change: mounted FAT32 card, board powered off:
+./server-cpp/esp32/tools/board.ps1 Card -CardRoot E:/
+
+# Build without touching the board; preview a flash without performing it:
+./server-cpp/esp32/tools/board.ps1 Build
+./server-cpp/esp32/tools/board.ps1 Flash -Port COM7 -WhatIf
+
+# Build and sign local OTA artifacts with an existing configured signing key:
+./server-cpp/esp32/tools/board.ps1 Release
+```
+
+`All` builds, runs `make card` (including gzip), pauses for safe ejection and reinsertion, then flashes; `-Monitor` opens serial output afterward (Ctrl+] exits). Close an existing monitor before flashing. `Card` checks the selected drive is FAT32 and refuses the system drive. MSYS2 defaults to `C:/msys64`; override with `-MsysRoot`. Other already configured builds use `-BuildDir build-esp32` or an absolute build path. Reader dependencies must already be installed with `npm install` in `hub`.
+
+You do **not** need `make card` for every firmware flash. Use it when `hub/` reader assets or installed reader libraries change, or when preparing a new card. Changes to `server-cpp/src/` or `esp32/main/` need a firmware rebuild/flash. Ordinary documents can be uploaded through the reader. A change spanning both parts needs both steps.
+
+`Release` calls the existing Bash signing script, so Bash remains an implementation detail inside this one command. It prepares `build/release/`; publication remains a separate explicit `gh release create ...` command. Configure the repository and public signing key and flash once by USB before using OTA; the present local build has OTA disabled. Increment `main/version.h` for a new OTA version. Firmware OTA updates the program slot only: it does **not** update the reader files on the SD card. No remote reader-bundle updater exists yet.
+
+Validation: `Build` and `-WhatIf` were run on Windows against the existing IDF 5.4.4 S3 build. Actual USB flashing, serial monitoring, FAT32-drive selection and signing/publication were not performed by this change.
 
 ESP-IDF 5.4 (the build this branch is checked with):
 
@@ -112,7 +158,7 @@ pio run -d server-cpp/esp32 -e t3 -t upload && pio device monitor -d server-cpp/
 
 ## Connecting
 
-**Home Wi-Fi.** The board joins as an ordinary device (station), with `wifi.txt` or the build's settings. If the network cannot be joined, the screen says so after 20 seconds and keeps trying.
+**Home Wi-Fi.** The board joins as an ordinary device (station), with `wifi.txt` or the build's settings. Both boards use **2.4 GHz Wi-Fi**; the S3 cannot join a 5 GHz-only SSID ([Espressif specifications](https://www.espressif.com/en/products/socs/esp32-s3)). A dual-band router works through its 2.4 GHz band. A phone/computer on the router's 5 GHz band can still reach the board if the router bridges the bands and does not isolate clients. If the network cannot be joined, the screen says so after 20 seconds and keeps trying.
 
 **A name instead of a number.** Three ways, from least to most work:
 

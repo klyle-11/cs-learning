@@ -34,6 +34,8 @@
 #include "esp_heap_caps.h"
 #include "esp_idf_version.h"
 #include "esp_log.h"
+#include "esp_rom_sys.h"
+#include "esp_timer.h"
 #include "esp_netif.h"
 #include "esp_netif_sntp.h"
 #include "esp_pthread.h"
@@ -81,12 +83,38 @@ int hub_main(int argc, char **argv);
 #endif
 
 static const char *TAG = "hub";
+// No heap allocations or normal log formatting from the allocation failure
+// callback: it may run exactly when those facilities have no room left.
+static void allocation_failed(size_t bytes, uint32_t caps, const char *function) {
+  esp_rom_printf("hub-alloc: requested=%u caps=0x%x allocator=%s task=%s\n",
+                 static_cast<unsigned>(bytes), static_cast<unsigned>(caps), function,
+                 xPortInIsrContext() ? "ISR" : pcTaskGetName(nullptr));
+}
+static void memory_report(const char *phase) {
+  const uint32_t internal = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+  const uint32_t dma = MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA;
+  ESP_LOGI("hub-memory", "phase=%s internal free=%u min=%u largest=%u; DMA free=%u largest=%u; PSRAM free=%u min=%u largest=%u",
+           phase, static_cast<unsigned>(heap_caps_get_free_size(internal)),
+           static_cast<unsigned>(heap_caps_get_minimum_free_size(internal)),
+           static_cast<unsigned>(heap_caps_get_largest_free_block(internal)),
+           static_cast<unsigned>(heap_caps_get_free_size(dma)),
+           static_cast<unsigned>(heap_caps_get_largest_free_block(dma)),
+           static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+           static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM)),
+           static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)));
+}
 static const char CARD[] = "/sdcard";
 static EventGroupHandle_t wifi_events;
 static const EventBits_t GOT_IP = 1;
 static char ip_text[16] = "";
 static char name_text[32] = CONFIG_HUB_NAME;
 static bool had_ip = false;
+static esp_timer_handle_t wifi_retry_timer;
+static unsigned wifi_failures = 0;
+static void retry_wifi(void *) {
+  const esp_err_t rc = esp_wifi_connect();
+  if (rc != ESP_OK) ESP_LOGW("hub-wifi", "connect failed: %s", esp_err_to_name(rc));
+}
 
 extern "C" const char *board_ip() { return ip_text[0] ? ip_text : nullptr; }
 extern "C" const char *board_name() { return name_text[0] ? name_text : nullptr; }
@@ -108,13 +136,22 @@ static void on_event(void *, esp_event_base_t base, int32_t id, void *data) {
   if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
     xEventGroupClearBits(wifi_events, GOT_IP);
     if (had_ip) screen_alert("Wi-Fi lost: rejoining");
-    vTaskDelay(pdMS_TO_TICKS(1000)); // not in a tight loop while the router is away
-    esp_wifi_connect();
+    const auto *lost = static_cast<wifi_event_sta_disconnected_t *>(data);
+    const unsigned delay_ms = std::min(15000u, 1000u << std::min(wifi_failures++, 4u));
+    ESP_LOGW("hub-wifi", "disconnected reason=%u rssi=%d bssid=%02x:%02x:%02x:%02x:%02x:%02x retry_ms=%u internal_free=%u",
+             lost->reason, lost->rssi, lost->bssid[0], lost->bssid[1], lost->bssid[2], lost->bssid[3], lost->bssid[4], lost->bssid[5], delay_ms,
+             static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
+    esp_timer_stop(wifi_retry_timer);
+    const esp_err_t scheduled = esp_timer_start_once(wifi_retry_timer, static_cast<uint64_t>(delay_ms) * 1000);
+    if (scheduled != ESP_OK) ESP_LOGE("hub-wifi", "cannot schedule reconnect: %s", esp_err_to_name(scheduled));
   }
   if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
     auto *got = static_cast<ip_event_got_ip_t *>(data);
     std::snprintf(ip_text, sizeof ip_text, IPSTR, IP2STR(&got->ip_info.ip));
     had_ip = true;
+    wifi_failures = 0;
+    esp_timer_stop(wifi_retry_timer);
+    ESP_LOGI("hub-wifi", "IP acquired: %s", ip_text);
     screen_alert(nullptr);
     xEventGroupSetBits(wifi_events, GOT_IP);
   }
@@ -155,6 +192,10 @@ static bool start_wifi() {
   esp_netif_t *sta = esp_netif_create_default_wifi_sta();
   wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
   ESP_ERROR_CHECK(esp_wifi_init(&init));
+  esp_timer_create_args_t retry = {};
+  retry.callback = retry_wifi;
+  retry.name = "wifi-retry";
+  ESP_ERROR_CHECK(esp_timer_create(&retry, &wifi_retry_timer));
   ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_event, nullptr));
   ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_event, nullptr));
   ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
@@ -245,9 +286,11 @@ static bool mount_state() {
   // partition is a few small files read at start and rarely written.
   esp_vfs_fat_mount_config_t mount = {};
   mount.max_files = 3;
-  mount.format_if_mount_failed = true; // the state partition is formatted on first boot
+  mount.format_if_mount_failed = false; // identity loss is never automatic recovery
   wl_handle_t wl;
-  return esp_vfs_fat_spiflash_mount_rw_wl("/state", "state", &mount, &wl) == ESP_OK;
+  const esp_err_t rc = esp_vfs_fat_spiflash_mount_rw_wl("/state", "state", &mount, &wl);
+  if (rc != ESP_OK) ESP_LOGE("hub-state", "mount failed: %s; state NOT formatted; restore existing identity or explicitly provision blank hardware", esp_err_to_name(rc));
+  return rc == ESP_OK;
 }
 
 static bool mount_card() {
@@ -290,9 +333,13 @@ static bool mount_card() {
 // started with, and FatFS cannot take a new card from under its own feet). And
 // a new firmware that has served for a minute is kept.
 static void watch_task(void *) {
-  int served_for = 0, ticks = 0;
+  int served_for = 0, ticks = 0, card_failures = 0;
   for (;;) {
     vTaskDelay(pdMS_TO_TICKS(3000));
+    hub_maintenance(ticks % 10 == 0);
+    if (ticks % 10 == 0) {
+      memory_report("watch"); // 30 s, including the first five minutes
+    }
     if (++ticks == 100) {
       // After five minutes: how close each task of the board's own came to the
       // end of its stack (sizes chosen by estimate; this is the measurement).
@@ -301,21 +348,34 @@ static void watch_task(void *) {
       ESP_LOGI(TAG, "memory: %u bytes free, the least so far %u, largest block %u", static_cast<unsigned>(esp_get_free_heap_size()),
                static_cast<unsigned>(esp_get_minimum_free_heap_size()), static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
     }
-    bool dir;
-    uint64_t size;
-    if (!fs::info(std::string(CARD) + "/hub", dir, size)) {
-      ESP_LOGE(TAG, "the SD card is gone; restarting");
-      screen_say("SD card removed.", "Restarting...");
-      vTaskDelay(pdMS_TO_TICKS(3000));
-      esp_restart();
+    // f_stat can fail for allocator exhaustion or lock timeout as well as a
+    // missing card. Preserve its reason, and require repeated device failures
+    // before restarting. The old bool check called every failure card removal.
+    char path[32];
+    FILINFO info;
+    FRESULT card = board_fat_path("/sdcard/hub", path, sizeof path) ? f_stat(path, &info) : FR_INVALID_DRIVE;
+    if (card != FR_OK) {
+      const bool device_failure = card == FR_NOT_READY || card == FR_DISK_ERR;
+      card_failures = device_failure ? card_failures + 1 : 0;
+      ESP_LOGW("hub-card", "probe failed FatFS=%d device_failures=%d/3", static_cast<int>(card), card_failures);
+      memory_report("card-probe-failed");
+      if (card_failures >= 3) {
+        ESP_LOGE(TAG, "SD card unavailable after three device failures; restarting");
+        screen_say("SD card unavailable.", "Restarting...");
+        vTaskDelay(pdMS_TO_TICKS(3000));
+        esp_restart();
+      }
+      continue;
     }
+    card_failures = 0;
     HubStatus s;
     hub_status(s);
     if (s.running && served_for < 60 && (served_for += 3) >= 60) update_keep();
   }
 }
 
-// The BOOT button (T3-S3): wakes the screen and cycles status, details and clock.
+// The BOOT button (T3-S3): short press cycles screens; a six-second hold offers
+// pairing through screen_task. The interrupt only requests screen navigation.
 // Called in an interrupt: it only raises a flag.
 static void IRAM_ATTR on_button(void *) { screen_info(); }
 static void start_button() {
@@ -340,6 +400,9 @@ static void led_off() {
 }
 
 static void start() {
+  heap_caps_register_failed_alloc_callback(allocation_failed);
+  ESP_LOGI(TAG, "boot reset_reason=%d (esp_reset_reason_t)", static_cast<int>(esp_reset_reason()));
+  memory_report("boot");
   led_off();
   esp_err_t nvs = nvs_flash_init();
   if (nvs == ESP_ERR_NVS_NO_FREE_PAGES || nvs == ESP_ERR_NVS_NEW_VERSION_FOUND) { nvs_flash_erase(); nvs_flash_init(); }
@@ -353,7 +416,7 @@ static void start() {
   if (!mount_state()) {
     ESP_LOGE(TAG, "cannot mount the state partition");
     update_give_up();
-    screen_say("Flash storage failed.", "Reflash by USB", "(see README).");
+    screen_say("State mount failed.", "No auto-format.", "Check serial/README.");
     return;
   }
   int card_waits = 0;
@@ -383,7 +446,7 @@ static void start() {
   }
   screen_say("Setting the clock...");
   set_clock();
-  screen_say("Starting the server.", "(first start: making", "certificates)");
+  screen_say("Starting the server.", "Loading saved", "certificate identity.");
 
   // Each connection runs on its own thread; a TLS handshake needs more stack
   // than the default. The setting is taken from the thread that creates them,
@@ -391,6 +454,7 @@ static void start() {
   // and sets it there.
   esp_pthread_cfg_t threads = esp_pthread_get_default_config();
   threads.stack_size = 16 * 1024;
+  threads.thread_name = "hub-server";
   esp_pthread_set_cfg(&threads);
 
   static char port[8];
@@ -402,6 +466,7 @@ static void start() {
     std::thread([] {
       esp_pthread_cfg_t each = esp_pthread_get_default_config();
       each.stack_size = 12 * 1024;
+      each.thread_name = "hub-http";
       esp_pthread_set_cfg(&each);
       hub_main(sizeof args / sizeof args[0], args); // only returns if it could not start
       ESP_LOGE(TAG, "the server stopped");
@@ -435,6 +500,7 @@ static void start() {
            static_cast<unsigned>(esp_get_free_heap_size()), static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
   if (xTaskCreate(watch_task, "watch", 6144, nullptr, 2, nullptr) != pdPASS) ESP_LOGE(TAG, "no memory for the watch task: a card taken out will not be noticed");
   update_start();
+  memory_report("serving");
 }
 
 #ifdef ARDUINO

@@ -4,6 +4,9 @@
 
 #include <cstdint>
 
+void hub_refresh_storage(); // refresh free space after writes, outside the screen task
+void hub_pairing_request(); // local physical button; never an unauthenticated HTTP route
+
 struct HubPeer {
   char name[28];  // the name the device was paired under
   char ip[16];    // where its last request came from
@@ -29,3 +32,6 @@ struct HubStatus {
 void hub_status(HubStatus &out);
 // Connections being served right now: something to wait for before an update.
 int hub_busy();
+void hub_maintenance(bool ping = false); // prune streams; optionally probe idle peers without walking storage
+bool hub_update_begin(); // reserve admission only while no handlers/streams remain
+void hub_update_end();

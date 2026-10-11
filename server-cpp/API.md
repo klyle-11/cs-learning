@@ -1,5 +1,11 @@
 # Hub HTTP API
 
+Certificate audit (11 October): see `esp32/CERTIFICATE-AUDIT.md`. `/hub-ca.crt` distributes only the public root, intentionally before pairing; its network download requires independent fingerprint verification before trust installation. New roots/issuers are restricted to serverAuth EKU; existing persisted certificates are retained. Incomplete existing authority state now stops startup instead of silently rotating identity. Pairing code generation remains behind authenticated `/api/pair/code`; updated S3 firmware also accepts a physical BOOT hold, without a new unauthenticated network route. RNG failure in code generation returns 503.
+
+Board-only `GET /api/device` memory diagnostics now also expose byte counts `internalFree`, `internalLeast`, `internalLargest` (internal, byte-addressable RAM), `dmaFree`, `dmaLargest` (internal DMA-capable RAM), and `psramLargest`. Existing `heapFree`, `heapLeast`, `heapLargest`, and `psramFree` remain. These pools overlap; do not add them. Free totals cannot establish that a contiguous task stack or crypto buffer fits. The S3 profile now permits six ordinary connections and six retained event streams, with a two-second idle keep-alive timeout, within the configured 16-socket budget.
+
+Both compressed and plain page assets send `Vary: Accept-Encoding`. Browser reload notices compare decoded bytes and Content-Security-Policy when an asset's tag changes; an encoding/timestamp change alone no longer announces a new reader.
+
 The contract between the page (`hub/index.html`) and whichever server is behind it. `server-cpp/hubd` implements it. `test/contract.sh` sends 260 requests and compares the answers with those recorded in `test/expected.txt` (the first 123 date from when `hubd` and the Node server it replaced answered identically). The page, its scripts and the trust routes are public; everything else needs a paired device (see Security).
 
 All JSON bodies are UTF-8. Errors are `{ "error": "message" }` with a 4xx or 5xx status. Paths are relative to the folder being served, use `/`, and may never contain `..`.
@@ -155,6 +161,8 @@ The server compares modification times and sizes at an interval set by the devic
 
 `GET /api/device` → what the server detected and the limits it chose:
 
+On ESP32, also includes `firmwareBuildId` (64 lowercase hex characters: ESP-IDF's embedded app ELF SHA-256), `firmwareVersion` (OTA release number), `firmwareBuiltAt` (build date/time from the app descriptor, with no timezone implied), and `firmwareIdfVersion`. Settings displays the release, build time and selectable full build ID from the connected board. The build ID identifies the firmware, not the card's reader assets.
+
 ```json
 { "profile": "desktop", "cores": 8, "memoryMB": 8192, "maxUploadMB": 200,
   "watchMs": 500, "cacheAssets": true, "cacheListing": true }
@@ -226,7 +234,9 @@ The page's own files (the page, its scripts, the manifest and icons) carry an `E
 
 **The workspace's name.** `title` in `/api/config` is the front page's heading, else `title` in `hub.json`, else `--title` if the server was started with one (the board passes `Learner-servr`), else the folder's name. `front` is `null` when the workspace has no `FRONTPAGE.md`; the page then makes a front page of its own (the name, and everything in the workspace under it), and saving an edit of it writes the file.
 
-**6. Storage.** Uploads and new notes are refused with 507 `storage is full` when the folder would pass its quota (`--quota-mb`, `HUB_QUOTA_MB`; default by profile: 20 GB on a computer, none on the board) or the disk would be left with under 16 MB. On the board the disk is the card, and its free space comes from FatFS's own count.
+**6. Storage.** Uploads and new notes are refused with 507 `storage is full` when the folder would pass its quota (`--quota-mb`, `HUB_QUOTA_MB`; default by profile: 20 GB on a computer, none on the board) or the disk would be left with under 16 MB. On the board the disk is the card, and its free space comes from FatFS's own count. Completed mutation requests refresh the OLED snapshot outside the drawing task and emit a named SSE `storage` event with `{}` data. Browser settings refresh after a coalesced burst of changes and when opened; there is no periodic storage polling. Values belong to the current hub/workspace. GB displays use two decimal places, so small writes may not change the rounded number. Removed folders retain their disk space until permanently purged.
+
+**Document-list revalidation (11 October).** `/api/docs` supplies a weak ETag containing a boot epoch, workspace identity, list generation and scan stamp. Matching `If-None-Match` returns an empty 304 after the usual access/workspace checks. Validators are private and require revalidation (`Cache-Control: private, no-cache`); the list varies on workspace, Authorization and Cookie. The reader requests revalidation and lets the browser reuse its cached list. Server restart, workspace switch and list changes invalidate the validator.
 
 The C++ server measures the folder once and then keeps count as it writes (uploads, notes, settings, removed folders). On the board that count stays exact, because nothing else writes to the card. On a computer, where other programs do, the count is refreshed by every look over the folder (the change watcher, the document list) and redone when older than 3 seconds.
 

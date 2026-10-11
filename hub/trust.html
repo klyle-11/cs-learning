@@ -27,17 +27,18 @@
   <p id="state" class="state">Checking how this page reached you…</p>
 
   <p>The hub encrypts everything it sends. To do that it shows your device a certificate, and your device has never met the hub, so the browser warns you. You fix that once per device by installing the hub's own <b>certificate authority</b>: a small file that says "certificates signed by this hub are genuine".</p>
-  <p><small>It can vouch for this hub only: the hub's own names, and addresses on a home network. It cannot vouch for a website, and browsers enforce that. It is public, not a secret. The authority's own private key was used once, when it was made, and is not kept anywhere.</small></p>
+  <p><small>This authority is limited to configured hub names, other <code>.local</code> names and private-network IP addresses. Those limits are broader than this one board: a stolen issuer key could impersonate another local device. It is public, not a secret; the issuer's private signing key stays on the hub. The root authority's own private key is not saved.</small></p>
   <p><small><b>Replacing an older one?</b> A hub set up before October 2026 used an authority called "Hub local authority", which had no such limit. If this device has it, remove it: on an iPhone or iPad, Settings → General → VPN &amp; Device Management → "Hub local authority" → Remove Profile; on a Mac, Keychain Access → search for "Hub local authority" → delete it. Then install the new one below.</small></p>
 
   <h2>1. Check it is the right hub</h2>
-  <p>The hub printed a fingerprint when it started (the board shows it on its screen). It must match this one:</p>
+  <p>The hub printed a full SHA-256 fingerprint when it started. The board's OLED shows only an abbreviation; use the full USB serial output for verification. It must match this one:</p>
   <p><code id="print">…</code></p>
   <p><small><b>Why this matters.</b> Until the authority is installed, this page and the file below come over a connection that is not encrypted yet. Someone else on the same network could swap the file, and the fingerprint shown here, for their own; this device would then trust them, and they could read everything it sends to the hub. What they cannot change is what the hub itself printed. So compare with that, character for character, not with anything else this browser shows. If they differ, do not install it.</small></p>
   <p><small><b>Without the network at all:</b> copy the file from the hub's computer to this device directly (AirDrop, a cable, a USB stick) and install it from there. The hub printed where it is (<code>ca.pem</code> in its state folder); it is the same file as the download below.</small></p>
 
   <h2>2. Download the authority</h2>
   <p><a class="btn" href="/hub-ca.crt" download="hub-ca.crt">Download hub-ca.crt</a></p>
+  <p><b>Verify the downloaded certificate before installing it.</b> Compare its actual SHA-256 certificate fingerprint, using certificate details or a trusted certificate tool, with the full fingerprint in the hub's USB serial output or trusted terminal. Matching this web page alone is insufficient: an attacker could leave its displayed fingerprint unchanged while replacing the download. The OLED shows only an abbreviated fingerprint. If you cannot verify the file, transfer the public certificate through a trusted connection instead of installing an unchecked network download.</p>
 
   <h2>3. Install it</h2>
   <div id="steps">

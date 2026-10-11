@@ -17,6 +17,8 @@
 #ifdef ESP_PLATFORM
 #include "esp_heap_caps.h"
 #include "esp_system.h"
+#include "esp_app_desc.h"
+#include "../esp32/main/version.h"
 #endif
 
 #include <algorithm>
@@ -101,22 +103,26 @@ static const Profile PROFILES[] = {
     // unpacked, a document split into blocks), so 32 KB of it at most.
     {"esp32", FAT32_MAX, true, 0, false, true, true, 4, 6, 4 * 1024, 2000, 0, 32 * 1024, 10, 32 * 1024},
     // The same with 2 MB or more of PSRAM (the T3-S3): TLS keeps its buffers there (mbedTLS
-    // set to allocate outside), so only each connection's stack takes the internal memory;
+    // set to allocate outside); stacks, socket bookkeeping and AES DMA buffers
+    // still need internal memory. Six handlers plus six streams leave room in
+    // the 16-socket pool for the listener and network services.
     // the page and scripts are kept in memory, and folders of thousands sort in one pass.
     // Blocks over 16 KB go to PSRAM by themselves (CONFIG_SPIRAM_USE_MALLOC), so a file of 1 MB may be worked on whole.
-    {"esp32-psram", FAT32_MAX, true, 0, true, true, true, 8, 12, 8 * 1024, 5000, 0, 512 * 1024, 10, 1u << 20},
+    {"esp32-psram", FAT32_MAX, true, 0, true, true, true, 6, 6, 4 * 1024, 2000, 0, 512 * 1024, 10, 1u << 20},
 };
 static Profile profile = PROFILES[0];
+static std::atomic<bool> update_reserved{false};
 
 // Whether there is memory for one more connection or open page. On the board a
 // TLS connection needs a 16 KB block for an incoming record, and a thread
 // stack; without them a newcomer waits (http::serve) or is refused, rather than
 // failing halfway through and taking memory others need.
-// With PSRAM, TLS buffers go there and only the stack (12 KB) needs internal memory.
+// With PSRAM, TLS records go there, but stacks, TCP and AES DMA still need internal memory.
 static bool memory_for_one_more() {
+  if (update_reserved.load()) return false;
 #ifdef ESP_PLATFORM
   if (heap_caps_get_total_size(MALLOC_CAP_SPIRAM) > 0)
-    return heap_caps_get_free_size(MALLOC_CAP_INTERNAL) > 40 * 1024 && heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) > 16 * 1024 &&
+    return heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) > 64 * 1024 && heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) > 24 * 1024 &&
            heap_caps_get_free_size(MALLOC_CAP_SPIRAM) > 96 * 1024;
   return esp_get_free_heap_size() > 48 * 1024 && heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) > 20 * 1024;
 #else
@@ -1150,12 +1156,20 @@ static int pair_fails_away = 0;                 // wrong codes from pages of oth
 
 static void load_devices() {
   string text;
-  Json file(secure::slurp(STATE + "/devices.json", text) ? cJSON_Parse(text.c_str()) : nullptr);
+  const string path = STATE + "/devices.json";
+  const bool readable = secure::slurp(path, text);
+  Json file(readable ? cJSON_Parse(text.c_str()) : nullptr);
   const cJSON *d;
   cJSON_ArrayForEach(d, cJSON_GetObjectItemCaseSensitive(file.p, "devices")) {
     Device dev{str_of(d, "id"), str_of(d, "name"), str_of(d, "hash"), str_of(d, "created"), str_of(d, "seen")};
     if (!dev.id.empty() && dev.hash.size() == 64) devices.push_back(dev);
   }
+#ifdef ESP_PLATFORM
+  ESP_LOGI("hub-auth", "pairing-state=%s loaded_devices=%u",
+           !readable ? (is_file(path) ? "unreadable" : "missing") :
+           !cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(file.p, "devices")) ? "invalid" : "loaded",
+           static_cast<unsigned>(devices.size()));
+#endif
 }
 static bool save_devices() {
   Json file(cJSON_CreateObject());
@@ -1174,6 +1188,7 @@ static bool save_devices() {
 // Offer a new pairing code for ten minutes. Call with auth_lock held.
 static string offer_code(bool announce) {
   pair_code = secure::random_code(8);
+  if (pair_code.empty()) { pair_until = http::Clock::now(); return ""; }
   pair_until = http::Clock::now() + std::chrono::minutes(10);
   pair_fails = pair_fails_away = 0;
   if (announce) {
@@ -1181,6 +1196,10 @@ static string offer_code(bool announce) {
     std::fflush(stdout);
   }
   return pair_code;
+}
+void hub_pairing_request() {
+  std::lock_guard<std::mutex> g(auth_lock);
+  offer_code(true);
 }
 static string cookie_of(const http::Request &req, const string &name) {
   const string &all = req.header("cookie");
@@ -1242,17 +1261,21 @@ static thread_local string renew_cookie;   // set when this request's cookie sho
 // a plain-HTTP hub replace a cookie of the same name that an HTTPS one marked Secure, so pairing with it never held.
 // The name from before, "hub_device", is still read, so a device paired then stays paired.
 static string COOKIE = "hub_device";
+static thread_local const char *auth_failure = "none";
 static string device_of(const http::Request &req, bool cross) {
   string cookie = bearer_of(req);
   const bool by_cookie = cookie.empty() && !cross;
   if (by_cookie) cookie = cookie_of(req, COOKIE);
   if (by_cookie && cookie.empty()) cookie = cookie_of(req, "hub_device");
+  auth_failure = cookie.empty() ? "missing-credential" : "malformed-credential";
   size_t dot = cookie.find('.');
   if (dot != string::npos) {
+    auth_failure = "unknown-device";
     string id = cookie.substr(0, dot), hash = secure::sha256_hex(cookie.substr(dot + 1)), today = now_iso().substr(0, 10);
     std::lock_guard<std::mutex> g(auth_lock);
     for (Device &d : devices) {
-      if (d.id != id || !secure::same(d.hash, hash)) continue;
+      if (d.id != id) continue;
+      if (!secure::same(d.hash, hash)) { auth_failure = "token-mismatch"; continue; }
       if (d.seen != today) { d.seen = today; save_devices(); if (by_cookie) renew_cookie = cookie; } // one small write a day; the cookie's year starts again
       return d.id;
     }
@@ -1459,14 +1482,20 @@ static unsigned long long used_bytes() {
 }
 static void used_more(long long n) { std::lock_guard<std::mutex> g(usage_lock); if (usage_known) usage_count += n; }
 // What the disk has free (on the board: the card, from FatFS's own count). ~0 if unknown.
-static unsigned long long free_bytes() {
+static unsigned long long free_bytes(const string &root = ROOT) {
   uint64_t total = 0, free = 0;
-  const bool known = fs::space(ROOT, total, free);
+  const bool known = fs::space(root, total, free);
   {
     std::scoped_lock g(root_lock, usage_lock);
-    if (ROOT == open_root) { status_free = free; status_free_known = known; }
+    if (root == open_root) { status_free = free; status_free_known = known; }
   }
   return known ? free : ~0ULL;
+}
+// A completed write refreshes the OLED snapshot; drawing never reads the card.
+void hub_refresh_storage() {
+  if (update_reserved.load()) return;
+  const string root = root_now();
+  if (!root.empty()) free_bytes(root);
 }
 // ---- removed folders ------------------------------------------------------------------------
 // A folder taken out of the workspace is moved, not deleted: into .removed/ in the workspace, a hidden name, so it is
@@ -1545,6 +1574,16 @@ static void tell_clients(const string &line) {
     if (!clients[i]->gone() && clients[i]->write_all(line)) i++;
     else clients.erase(clients.begin() + static_cast<long>(i));
   }
+}
+// The board has no filesystem watcher, so disconnected SSE sessions otherwise
+// keep their TLS/socket memory until the next write or visitor. No allocation
+// or disk walk is needed to release them during quiet uptime.
+void hub_maintenance(bool ping) {
+  {
+    std::lock_guard<std::mutex> g(clients_lock);
+    clients.erase(std::remove_if(clients.begin(), clients.end(), [](const std::shared_ptr<http::Conn> &c) { return c->gone(); }), clients.end());
+  }
+  if (ping) tell_clients(": ping\n\n"); // detect peers lost without sending FIN, even on an idle card
 }
 static void announce(const string &rel) {
   Json msg(cJSON_CreateObject());
@@ -1659,7 +1698,9 @@ static http::Response asset_response(const string &abs, const char *type) {
       return r;
     }
   }
-  return asset_plain(abs, type);
+  http::Response r = asset_plain(abs, type);
+  r.extra += "Vary: Accept-Encoding\r\n";
+  return r;
 }
 static http::Response asset_plain(const string &abs, const char *type) {
   long long stamp = stamp_of(abs);
@@ -1674,7 +1715,15 @@ static http::Response asset_plain(const string &abs, const char *type) {
     if (it != asset_cache.end() && it->second.stamp == stamp) { r.shared = it->second.body; return r; }
     if (it != asset_cache.end()) { asset_bytes -= it->second.body->size(); asset_cache.erase(it); }   // changed on disk
     uint64_t size = 0;
-    if (fs::file_size(abs, size) && size <= profile.most_held && asset_bytes + size <= profile.most_held) {
+    const bool sized = fs::file_size(abs, size);
+    bool cache_buffer = true;
+#if defined(ESP_PLATFORM) && defined(CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL)
+    // Small ordinary allocations prefer internal RAM and would stay there for
+    // the whole uptime. Let the browser cache these small assets instead;
+    // retain only buffers large enough to prefer PSRAM on the S3.
+    cache_buffer = size > CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL;
+#endif
+    if (sized && cache_buffer && size <= profile.most_held && asset_bytes + size <= profile.most_held) {
       auto body = std::make_shared<string>();
       if (read_file(abs, *body)) {
         asset_bytes += body->size();
@@ -2336,7 +2385,21 @@ static http::Response answer(http::Request &req) {
   }
 
   const string device = device_of(req, cross);
-  if (device.empty()) return http::error(401, "pairing required");
+  if (device.empty()) {
+#ifdef ESP_PLATFORM
+    // Rate limit session diagnostics; never log the cookie, token or hash.
+    if (p == "/api/session") {
+      static std::atomic<long long> last{0};
+      const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(http::Clock::now().time_since_epoch()).count();
+      long long previous = last.load();
+      if (ms - previous >= 10000 && last.compare_exchange_strong(previous, ms)) {
+        std::lock_guard<std::mutex> g(auth_lock);
+        ESP_LOGW("hub-auth", "session-rejected peer=%s reason=%s loaded_devices=%u", req.conn->peer.c_str(), auth_failure, static_cast<unsigned>(devices.size()));
+      }
+    }
+#endif
+    return http::error(401, "pairing required");
+  }
   saw(device, req.conn->peer);
 
   // A page names the workspace it shows. A request from a page still showing one that is no longer open is refused
@@ -2353,6 +2416,7 @@ static http::Response answer(http::Request &req) {
   if (p == "/api/pair/code" && m == "POST") {
     std::lock_guard<std::mutex> g(auth_lock);
     string code = offer_code(false);
+    if (code.empty()) return http::error(503, "cannot generate a pairing code");
     Json out(cJSON_CreateObject());
     cJSON_AddStringToObject(out.p, "code", (code.substr(0, 4) + "-" + code.substr(4)).c_str());
     cJSON_AddNumberToObject(out.p, "minutes", 10);
@@ -2511,8 +2575,17 @@ static http::Response answer(http::Request &req) {
       listing_root = ROOT;
       listing_ok = true;
     }
+    // Epoch prevents a reboot's generation=1 from validating a previous boot's
+    // list. Workspace and scan stamp prevent reuse across workspaces/edits.
+    static const string epoch = secure::random_hex(8);
+    const string tag = epoch.empty() ? "" : "W/\"docs-" + epoch + "-" + workspace_id(ROOT) + "-" + std::to_string(listing_gen) + "-" + std::to_string(listing_stamp) + "\"";
+    r.etag = tag;
+    r.extra = "Vary: X-Hub-Workspace, Authorization, Cookie\r\n";
+    if (!tag.empty() && req.header("if-none-match") == tag) { r.status = 304; return r; }
     if (!listing_file) { r.shared = listing_mem; return r; }
     r = file_response(listing_file->path, "application/json");
+    r.etag = tag;
+    r.extra += "Vary: X-Hub-Workspace, Authorization, Cookie\r\n";
     r.keep = listing_file;
     return r;
   }
@@ -2532,11 +2605,25 @@ static http::Response answer(http::Request &req) {
     cJSON_AddNumberToObject(d.p, "quotaMB", static_cast<double>(quota_bytes >> 20));
 #ifdef ESP_PLATFORM
     // Memory now, the least there has been since start-up, and the largest
+    const esp_app_desc_t *app = esp_app_get_description();
+    char build_id[65];
+    for (size_t i = 0; i < sizeof(app->app_elf_sha256); ++i)
+      std::snprintf(build_id + i * 2, 3, "%02x", app->app_elf_sha256[i]);
+    cJSON_AddStringToObject(d.p, "firmwareBuildId", build_id);
+    cJSON_AddNumberToObject(d.p, "firmwareVersion", HUB_VERSION);
+    cJSON_AddStringToObject(d.p, "firmwareBuiltAt", (string(app->date) + " " + app->time).c_str());
+    cJSON_AddStringToObject(d.p, "firmwareIdfVersion", app->idf_ver);
     // single block (what a large allocation can actually get).
     cJSON_AddNumberToObject(d.p, "heapFree", esp_get_free_heap_size());
     cJSON_AddNumberToObject(d.p, "heapLeast", esp_get_minimum_free_heap_size());
     cJSON_AddNumberToObject(d.p, "heapLargest", static_cast<double>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
     cJSON_AddNumberToObject(d.p, "psramFree", static_cast<double>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)));
+    cJSON_AddNumberToObject(d.p, "internalFree", static_cast<double>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
+    cJSON_AddNumberToObject(d.p, "internalLeast", static_cast<double>(heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
+    cJSON_AddNumberToObject(d.p, "internalLargest", static_cast<double>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
+    cJSON_AddNumberToObject(d.p, "dmaFree", static_cast<double>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA)));
+    cJSON_AddNumberToObject(d.p, "dmaLargest", static_cast<double>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA)));
+    cJSON_AddNumberToObject(d.p, "psramLargest", static_cast<double>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)));
 #endif
     return json_response(d.p);
   }
@@ -3195,6 +3282,16 @@ void hub_status(HubStatus &out) {
   }
 }
 int hub_busy() { return http::active().load(); }
+bool hub_update_begin() {
+  bool expected = false;
+  if (!update_reserved.compare_exchange_strong(expected, true)) return false;
+  // No uploads, streams or audio transfers may be interrupted by installation.
+  hub_maintenance();
+  std::lock_guard<std::mutex> g(clients_lock);
+  if (http::active().load() != 0 || !clients.empty()) { update_reserved = false; return false; }
+  return true;
+}
+void hub_update_end() { update_reserved = false; }
 
 // Every answer leaves with the headers that say what a browser may do with it.
 static http::Response route(http::Request &req) {
@@ -3202,6 +3299,12 @@ static http::Response route(http::Request &req) {
   renew_cookie.clear();
   http::Response r = answer(req);
   if (r.hold) return r;
+  if (req.method == "POST" || req.method == "PUT" || req.method == "DELETE") {
+    // Also covers hidden/state files, permanent purges and failed writes that
+    // cleaned up temporary files. Readers coalesce this with ordinary events.
+    if (profile.sole_writer) hub_refresh_storage();
+    tell_clients("event: storage\ndata: {}\n\n");
+  }
   if (!renew_cookie.empty() && r.extra.find("Set-Cookie") == string::npos) r.extra += device_cookie(renew_cookie, req.tls);
 
   bool page = req.method == "GET" && (req.path == "/" || req.path == "/trust") && r.status == 200;
@@ -3327,6 +3430,7 @@ int main(int argc, char **argv) {
                 certs.ca_fingerprint.c_str(), certs.ca_path.c_str());
     if (make_cert) return 0;
     if (!tls.load(certs.cert_path, certs.key_path, err)) { std::fprintf(stderr, "TLS: %s\n", err.c_str()); return 1; }
+    if (profile.sole_writer) mbedtls_ssl_cache_set_max_entries(&tls.cache, profile.max_conns * 2);
     tls_on = true;
     ca_fingerprint_text = certs.ca_fingerprint.substr(0, 23);
   } else if (!loopback(host)) {

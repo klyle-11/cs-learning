@@ -117,6 +117,45 @@ const savedLine = (p) => p.evaluate(() => document.getElementById('saved').textC
 
 // ---- the checks ---------------------------------------------------------------------------
 const checks = [
+  ['storage', async (t) => {
+    const p = await page(t);
+    let free = 2 ** 30, requests = 0;
+    await p.route('**/api/storage', (r) => {
+      requests++;
+      return r.fulfill({ json: { used: 0, quota: 0, free } });
+    });
+    await p.clock.install();
+    await p.goto(base + '/');
+    await until(p, () => /1.00 GB free/.test(document.getElementById('privacy').textContent));
+    await Promise.all([p.waitForResponse('**/api/storage'), p.locator('#settingsBtn').click()]);
+    const before = requests;
+    free = 0;
+    await api('/api/upload?path=storage-refresh.md', 'POST', '# Space changed');
+    await p.waitForTimeout(100);
+    await p.clock.fastForward(1000);
+    await until(p, () => /0 MB free/.test(document.getElementById('privacy').textContent));
+    check(t, requests === before + 1, 'a write refreshes open settings, including zero, with one coalesced request');
+    await p.locator('#settingsBtn').click();
+    await p.clock.fastForward(31000);
+    check(t, requests === before + 1, 'closed settings do not poll storage');
+  }],
+  ['firmware', async (t) => {
+    const p = await page(t);
+    let buildId = 'a'.repeat(64);
+    await p.route('**/api/device', (r) => r.fulfill({ json: {
+      profile: 'esp32-psram', maxUpload: 1024, firmwareVersion: 1,
+      firmwareBuiltAt: 'Oct 11 2026 12:00:00', firmwareBuildId: buildId,
+    } }));
+    await p.goto(base + '/');
+    await p.locator('#settingsBtn').click();
+    await until(p, (id) => document.getElementById('privacy').textContent.includes(id), buildId);
+    check(t, await p.locator('#privacy').textContent().then((s) => s.includes('Firmware v1')), 'settings identifies the running firmware');
+    await p.locator('#settingsBtn').click();
+    buildId = 'b'.repeat(64);
+    await p.locator('#settingsBtn').click();
+    await until(p, (id) => document.getElementById('privacy').textContent.includes(id), buildId);
+    check(t, !(await p.locator('#privacy').textContent()).includes('a'.repeat(64)), 'reopening settings refreshes the firmware build ID');
+  }],
   ['starts', async (t) => {
     const p = await page(t);
     await p.goto(base + '/');
@@ -339,8 +378,9 @@ try {
   console.error('could not run: ' + (e.message || e));
   failed = failed || 1;
 } finally {
-  await browser?.close().catch(() => {});
   server?.kill();
+  // Close server-held event streams before waiting for Chromium to shut down.
+  await browser?.close().catch(() => {});
 }
 console.log(failed ? `FAIL: ${failed} of ${run.length} checks (the scratch copy is in ${work})` : `PASS: ${run.length} checks`);
 if (!failed) rmSync(work, { recursive: true, force: true });

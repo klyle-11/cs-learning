@@ -1,5 +1,17 @@
 # The hub's certificate authority
 
+## Current security correction — 11 October 2026
+
+Persistence follow-up: normal reset, a BOOT pairing hold, Wi-Fi reconnection and normal firmware flashing preserve the saved CA. The misleading “first start: making certificates” startup message is removed. Firmware now refuses to format a failed state mount; blank new hardware requires explicit state provisioning. `erase-flash` physically removes the state partition, so an erased CA cannot survive without a separately preserved copy; do not use full erase for routine updates. Even a firmware change to CA policy does not automatically rotate valid existing identity. Certificate replacement is an explicit migration. See the ESP32 README's state provisioning section.
+
+The historical assurances below that this authority trusts “only the hub” are too strong. It covers other `.local` hosts and permitted private IP ranges. More seriously, the existing board issuer lacks an EKU purpose restriction: disposable legacy-chain tests accepted unrelated S/MIME and Windows code-signing certificates with a stolen issuer key. This is a capability finding, not evidence of compromise. Newly generated roots/issuers now restrict purpose to TLS server authentication, but existing roots and issuers are **not** replaced by flashing firmware. Removing/replacing installed device trust requires a deliberate migration; simply adding a new root while leaving the old one trusted retains the old risk.
+
+The actual public certificate from `192.168.1.171:443` passes chain/IP checks against its downloaded public CA. That does not independently authenticate the download. Verify the **downloaded certificate's** full SHA-256 fingerprint using a trusted tool against trusted USB serial output; matching a fingerprint displayed on an unauthenticated page alone is insufficient. OLED fingerprints are abbreviated. The trust page now explains this.
+
+New issuance fails on missing entropy, checks flush/close failures, and refuses to silently replace partially missing certificate state. Restoring incomplete state or explicitly replacing the authority is now required; automatic migration from an old unlimited authority also requires deliberate replacement. The board still permits state formatting after a mount failure. Current build configuration has flash encryption/secure boot disabled; actual hardware eFuse protection was not inspected. No installed trust, live certificates or hardware security fuses were changed by this audit.
+
+See [the full certificate audit](server-cpp/esp32/CERTIFICATE-AUDIT.md) for attack prerequisites, tested constraints, residual risks and migration requirements. The 3 October device inventory and fingerprints below are historical; they do not describe this S3 board.
+
 What happened on 3 October 2026, what to do on each device, how to check for trouble, and how to keep this manageable from here on. Written for the person who owns the hub and the devices; no background assumed.
 
 Every fact in this file was re-checked against this Mac and the code on 3 October at 14:40. Where something is known only from reading, or was not tried, it says so.

@@ -19,7 +19,16 @@ const ENGINE = ['index', 'client', 'worker', 'wasm/marginalia_wasm', 'selection'
 const LATER = ['/vendor/pdf.mjs', '/vendor/pdf.worker.mjs', ...ENGINE, '/js/engine-worker.js'];
 const WAIT = 8000;   // how long the check behind a served file may take
 
-self.addEventListener('install', (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL).then(() => Promise.all(LATER.map((u) => c.add(u).catch(() => {}))))).then(() => self.skipWaiting())));
+// One transfer at a time: a board also needs sockets, internal RAM and airtime
+// for audio. PDF/engine files are cached when used, rather than all at install.
+self.addEventListener('install', (e) => e.waitUntil((async () => {
+  const cache = await caches.open(CACHE);
+  for (const key of SHELL) {
+    const response = await refresh(cache, key, null);
+    if (!response.ok) throw new Error(`Shell file unavailable: ${key}`);
+  }
+  await self.skipWaiting();
+})()));
 self.addEventListener('activate', (e) => e.waitUntil((async () => {
   for (const k of await caches.keys()) if (k !== CACHE) await caches.delete(k);
   await self.clients.claim();
@@ -45,7 +54,18 @@ self.addEventListener('fetch', (e) => {
 
 // Fetch a file from the server and keep it. If it differs from the copy that
 // was just served, tell the open pages.
-async function refresh(cache, key, held) {
+let refreshTail = Promise.resolve();
+const refreshing = new Map();
+function refresh(cache, key, held) {
+  if (refreshing.has(key)) return refreshing.get(key);
+  const previous = held && held.clone(); // the browser may consume held while this waits
+  const pending = refreshTail.then(() => refreshOne(cache, key, previous));
+  refreshTail = pending.catch(() => {});
+  refreshing.set(key, pending);
+  pending.then(() => refreshing.delete(key), () => refreshing.delete(key));
+  return pending;
+}
+async function refreshOne(cache, key, held) {
   const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), WAIT);
   try {
     // 'no-cache': the browser asks the server whether its copy is still current, and only a changed file is sent again.
@@ -53,7 +73,14 @@ async function refresh(cache, key, held) {
     if (!r.ok) return r;
     await cache.put(key, r.clone());
     const was = held && held.headers.get('etag'), now = r.headers.get('etag');
-    if (held && was && now && was !== now) for (const c of await self.clients.matchAll()) c.postMessage({ type: 'page-updated' });
+    // Tags describe a representation (gzip/plain, timestamps), not firmware.
+    // Fetch decodes gzip: compare actual bytes before claiming a page update.
+    if (held && was && now && was !== now) {
+      const before = new Uint8Array(await held.arrayBuffer()), after = new Uint8Array(await r.clone().arrayBuffer());
+      if (held.headers.get('content-security-policy') !== r.headers.get('content-security-policy') ||
+          before.length !== after.length || before.some((b, i) => b !== after[i]))
+        for (const c of await self.clients.matchAll()) c.postMessage({ type: 'page-updated', path: key });
+    }
     return r;
   } finally { clearTimeout(timer); }
 }

@@ -93,14 +93,28 @@ inline void set_option(int fd, int level, int name) {
 }
 // Why the last receive or send did not move any bytes.
 enum class Why { again, interrupted, failed };
-inline Why why() {
+inline int socket_error() {
 #ifdef _WIN32
-  int e = WSAGetLastError();
-  return e == WSAEWOULDBLOCK ? Why::again : e == WSAEINTR ? Why::interrupted : Why::failed;
+  return WSAGetLastError();
 #else
-  return errno == EINTR ? Why::interrupted : (errno == EAGAIN || errno == EWOULDBLOCK) ? Why::again : Why::failed;
+  return errno;
 #endif
 }
+inline bool socket_reset(int e) {
+#ifdef _WIN32
+  return e == WSAECONNRESET;
+#else
+  return e == ECONNRESET || e == EPIPE;
+#endif
+}
+inline Why why(int e) {
+#ifdef _WIN32
+  return e == WSAEWOULDBLOCK ? Why::again : e == WSAEINTR ? Why::interrupted : Why::failed;
+#else
+  return e == EINTR ? Why::interrupted : (e == EAGAIN || e == EWOULDBLOCK) ? Why::again : Why::failed;
+#endif
+}
+inline Why why() { return why(socket_error()); }
 // Bytes moved, 0 when the other side has closed (receive), or negative: then ask why().
 inline long receive(int fd, void *out, size_t len, bool peek = false) {
 #ifdef _WIN32

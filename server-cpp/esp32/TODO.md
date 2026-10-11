@@ -1,5 +1,7 @@
 # Board plan (branch `claude/esp32-32gb-memory-efficiency-n3dz1c`)
 
+Latest, 11 October: labelled allocation/TLS/pool/reset/HTTP-stack diagnostics, S3 admission and cache limits, idle SSE cleanup/heartbeat, bounded stalled writes, OTA reservation (B02), safer card-fault detection, serialized reader fetches, content-based reload detection, document-list revalidation, one-pass note counts, event-driven storage display and PowerShell deployment orchestration are implemented. See the first hardware assessment in REVIEW.md and the project TODO. B01 durable-save recovery, hardware audio/uptime/OTA validation and non-S3 verification remain open. Firmware has been built but not flashed by this work.
+
 The ESP32 side of the hub, for two boards (LilyGO T3 V1.6.1 and T3-S3 V1.3): what was asked for on this branch and where it stands, what is done, what has to be tried on a board, and what comes next. The project-wide plan is `../../TODO.md`; this branch's review is [REVIEW.md](REVIEW.md), its architecture evaluation [ARCHITECTURE.md](ARCHITECTURE.md), how to use it [README.md](README.md).
 
 ## What was asked for on this branch

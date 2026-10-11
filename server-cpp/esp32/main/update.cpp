@@ -202,8 +202,11 @@ static void check_once() {
 }
 
 static bool update_ready() {
-  return hub_busy() == 0 && esp_get_free_heap_size() >= 90 * 1024 &&
-         heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) >= 24 * 1024;
+  // A large PSRAM total cannot supply an internal task stack or DMA buffer.
+  const uint32_t internal = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+  return hub_busy() == 0 && heap_caps_get_free_size(internal) >= 90 * 1024 &&
+         heap_caps_get_largest_free_block(internal) >= 24 * 1024 &&
+         (heap_caps_get_total_size(MALLOC_CAP_SPIRAM) == 0 || heap_caps_get_free_size(MALLOC_CAP_SPIRAM) >= 96 * 1024);
 }
 
 static void update_task(void *) {
@@ -211,9 +214,14 @@ static void update_task(void *) {
   for (;;) {
     // Wait (up to an hour) for a quiet moment with memory to spare.
     for (int i = 0; i < 60 && !update_ready(); i++) vTaskDelay(pdMS_TO_TICKS(60 * 1000));
-    // Codex (B02, partial): timing out never grants permission to update.
-    // Admission/draining throughout the download still needs a separate gate.
-    if (update_ready()) check_once();
+    // Timing out never grants permission; reserve admission for the complete
+    // check/install, and defer if live reader streams remain.
+    if (update_ready() && hub_update_begin()) {
+      // Hold admission throughout download/installation. Live SSE sessions
+      // defer the update too; the check must never reboot an active reader.
+      struct Release { ~Release() { hub_update_end(); } } release;
+      check_once();
+    }
     else ESP_LOGI(TAG, "update deferred: still busy or short of memory");
     vTaskDelay(pdMS_TO_TICKS(static_cast<uint32_t>(CONFIG_HUB_UPDATE_HOURS) * 3600 * 1000));
   }

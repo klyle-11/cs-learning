@@ -27,6 +27,8 @@
 #include "screen_draw.hpp"
 #include "screen_clock.hpp"
 #include "screen_mode.hpp"
+#include "hold_button.hpp"
+#include "driver/gpio.h"
 #include "version.h"
 
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 2, 0)
@@ -149,8 +151,13 @@ static void screen_task(void *) {
   int64_t asked = 0;
   bool dim = false;
   ScreenMode mode;
+  HoldButton pairing_button;
   for (unsigned frame = 0;; frame++) {
     const int64_t t = esp_timer_get_time();
+    if (BOARD_BUTTON >= 0 && pairing_button.update(t, gpio_get_level(static_cast<gpio_num_t>(BOARD_BUTTON < 0 ? 0 : BOARD_BUTTON)) == 0)) {
+      if (status.running) hub_pairing_request();
+      else ESP_LOGW("hub-pair", "BOOT held, but server is not serving yet; code not offered");
+    }
     if (t - asked > 500000) { hub_status(status); asked = t; }
     BoardView v;
     { std::lock_guard<std::mutex> g(view_lock); v = view; }

@@ -36,6 +36,12 @@
 
 #include "fs.hpp"
 #include "secure.hpp"
+#ifdef ESP_PLATFORM
+#include "esp_heap_caps.h"
+#include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#endif
 
 namespace http {
 
@@ -89,6 +95,10 @@ class Conn {
   bool local;                 // the other end is this machine itself
   std::string peer;           // its address ("192.168.1.23")
   std::string who;            // for a page listening for events: the paired device it belongs to
+  std::string operation;      // current request path for a failed TLS transfer
+  int transport_error = 0;    // captured immediately after a failed socket call
+  const char *transport = "none";
+  size_t received_bytes = 0, sent_bytes = 0; // encrypted wire bytes for TLS
   bool tls = false;
   mbedtls_ssl_context ssl;
   Clock::time_point deadline; // nothing waits past this
@@ -110,18 +120,31 @@ class Conn {
   Conn &operator=(const Conn &) = delete;
 
   void within(long ms) { deadline = Clock::now() + std::chrono::milliseconds(ms); }
+  void tls_error(const char *stage, int rc) const {
+#ifdef ESP_PLATFORM
+    ESP_LOGW("hub-tls", "stage=%s fd=%d peer=%s path=%.160s rc=%d (-0x%x) transport=%s socket_error=%d wire_rx=%u wire_tx=%u internal_free=%u internal_largest=%u dma_largest=%u",
+             stage, fd, peer.c_str(), operation.empty() ? "<headers>" : operation.c_str(), rc, static_cast<unsigned>(-rc),
+             transport, transport_error, static_cast<unsigned>(received_bytes), static_cast<unsigned>(sent_bytes),
+             static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+             static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+             static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA)));
+#else
+    (void)stage; (void)rc;
+#endif
+  }
 
   // Start TLS. False if the other side does not finish the handshake in time.
   bool handshake(Tls &settings, long ms) {
     mbedtls_ssl_init(&ssl);
     tls = true;
-    if (mbedtls_ssl_setup(&ssl, &settings.conf) != 0) return false;
+    int setup = mbedtls_ssl_setup(&ssl, &settings.conf);
+    if (setup != 0) { tls_error("setup", setup); return false; }
     mbedtls_ssl_set_bio(&ssl, this, bio_send, bio_recv, nullptr);
     within(ms);
     for (;;) {
       int rc = mbedtls_ssl_handshake(&ssl);
       if (rc == 0) return true;
-      if (rc != MBEDTLS_ERR_SSL_WANT_READ && rc != MBEDTLS_ERR_SSL_WANT_WRITE) return false;
+      if (rc != MBEDTLS_ERR_SSL_WANT_READ && rc != MBEDTLS_ERR_SSL_WANT_WRITE) { tls_error("handshake", rc); return false; }
     }
   }
 
@@ -150,8 +173,11 @@ class Conn {
     for (;;) {
       int rc = mbedtls_ssl_read(&ssl, reinterpret_cast<unsigned char *>(out), len);
       if (rc >= 0) return rc;
-      if (rc == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) return 0;
-      if (rc != MBEDTLS_ERR_SSL_WANT_READ && rc != MBEDTLS_ERR_SSL_WANT_WRITE && rc != MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET) return -1;
+      if (rc == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY || rc == MBEDTLS_ERR_SSL_CONN_EOF) return 0;
+      if (rc != MBEDTLS_ERR_SSL_WANT_READ && rc != MBEDTLS_ERR_SSL_WANT_WRITE && rc != MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET) {
+        if (rc != MBEDTLS_ERR_SSL_TIMEOUT) tls_error("read", rc);
+        return -1;
+      }
     }
   }
 
@@ -162,6 +188,7 @@ class Conn {
       else {
         n = mbedtls_ssl_write(&ssl, reinterpret_cast<const unsigned char *>(data), len);
         if (n == MBEDTLS_ERR_SSL_WANT_READ || n == MBEDTLS_ERR_SSL_WANT_WRITE) continue;
+        if (n < 0) tls_error("write", static_cast<int>(n));
       }
       if (n <= 0) return false;
       data += n;
@@ -187,32 +214,42 @@ class Conn {
     return sys::wait_ready(fd, to_read, static_cast<int>(std::min<long long>(left, 60000)));
   }
   long raw_recv(unsigned char *out, size_t len) {
+    transport_error = 0;
+    transport = "read";
     for (;;) {
       long n = sys::receive(fd, out, len);
-      if (n >= 0) return n;
-      sys::Why why = sys::why();
+      if (n >= 0) { received_bytes += static_cast<size_t>(n); if (!n) transport = "eof"; return n; }
+      int error = sys::socket_error();
+      sys::Why why = sys::why(error);
       if (why == sys::Why::interrupted) continue;
-      if (why == sys::Why::failed) return -1;
-      if (!wait(true)) return -2;
+      if (why == sys::Why::failed) { transport_error = error; transport = sys::socket_reset(error) ? "reset" : "read-error"; return -1; }
+      if (!wait(true)) { transport = "read-timeout"; return -2; }
     }
   }
   long raw_send(const unsigned char *data, size_t len) {
+    transport_error = 0;
+    transport = "write";
     for (;;) {
       long n = sys::send_some(fd, data, len);
-      if (n >= 0) return n;
-      sys::Why why = sys::why();
+      if (n >= 0) { sent_bytes += static_cast<size_t>(n); return n; }
+      int error = sys::socket_error();
+      sys::Why why = sys::why(error);
       if (why == sys::Why::interrupted) continue;
-      if (why == sys::Why::failed) return -1;
-      if (!wait(false)) return -2;
+      if (why == sys::Why::failed) { transport_error = error; transport = sys::socket_reset(error) ? "reset" : "write-error"; return -1; }
+      if (!wait(false)) { transport = "write-timeout"; return -2; }
     }
   }
   static int bio_send(void *self, const unsigned char *data, size_t len) {
-    long n = static_cast<Conn *>(self)->raw_send(data, len);
-    return n >= 0 ? static_cast<int>(n) : n == -2 ? MBEDTLS_ERR_SSL_TIMEOUT : MBEDTLS_ERR_NET_SEND_FAILED;
+    auto *conn = static_cast<Conn *>(self);
+    long n = conn->raw_send(data, len);
+    return n >= 0 ? static_cast<int>(n) : n == -2 ? MBEDTLS_ERR_SSL_TIMEOUT : sys::socket_reset(conn->transport_error) ? MBEDTLS_ERR_NET_CONN_RESET : MBEDTLS_ERR_NET_SEND_FAILED;
   }
   static int bio_recv(void *self, unsigned char *out, size_t len) {
-    long n = static_cast<Conn *>(self)->raw_recv(out, len);
-    return n > 0 ? static_cast<int>(n) : n == 0 ? MBEDTLS_ERR_NET_CONN_RESET : n == -2 ? MBEDTLS_ERR_SSL_TIMEOUT : MBEDTLS_ERR_NET_RECV_FAILED;
+    auto *conn = static_cast<Conn *>(self);
+    long n = conn->raw_recv(out, len);
+    // mbedTLS's receive contract uses zero for TCP EOF; a reset requires an
+    // actual socket error. Request bodies still reject any premature EOF.
+    return n >= 0 ? static_cast<int>(n) : n == -2 ? MBEDTLS_ERR_SSL_TIMEOUT : sys::socket_reset(conn->transport_error) ? MBEDTLS_ERR_NET_CONN_RESET : MBEDTLS_ERR_NET_RECV_FAILED;
   }
 };
 
@@ -380,7 +417,7 @@ inline bool write_response(Conn &conn, const Response &r, bool keep, size_t piec
   head += "Content-Length: " + std::to_string(length) + "\r\n";
   if (!r.etag.empty()) head += "ETag: " + r.etag + "\r\n";
   // Kept by the browser only where it can ask whether its copy is still current; everything else, never.
-  head += std::string(r.etag.empty() ? "Cache-Control: no-store" : "Cache-Control: no-cache") + "\r\nConnection: " + (keep ? "keep-alive" : "close") + "\r\n\r\n";
+  head += std::string(r.etag.empty() ? "Cache-Control: no-store" : "Cache-Control: private, no-cache") + "\r\nConnection: " + (keep ? "keep-alive" : "close") + "\r\n\r\n";
   conn.within(30000 + static_cast<long>(length / 8)); // at least 8 KB a second
   if (!conn.write_all(head)) return false;
   if (r.file.empty()) return conn.write_all(body);
@@ -391,7 +428,7 @@ inline bool write_response(Conn &conn, const Response &r, bool keep, size_t piec
   while (ok && left > 0) {
     size_t n = f.read(chunk.data(), static_cast<size_t>(std::min<unsigned long long>(chunk.size(), left)));
     if (n == 0) ok = false; // the file shrank after its size was announced
-    else { ok = conn.write_all(chunk.data(), n); left -= n; }
+    else { conn.within(30000); ok = conn.write_all(chunk.data(), n); left -= n; }
   }
   return ok && left == 0;
 }
@@ -508,10 +545,15 @@ inline void handle_connection(std::shared_ptr<Conn> conn, const Handler &handler
       return;
     }
     req.plain_on_tls = plain_on_tls;
+    conn->operation = req.path;
     Response res;
     try {
       res = handler(req);
     } catch (const std::bad_alloc &) {
+#ifdef ESP_PLATFORM
+      ESP_LOGW("hub-http", "request allocation failed fd=%d path=%.160s internal_free=%u", conn->fd, req.path.c_str(),
+               static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
+#endif
       res = error(503, "out of memory");
       res.close = true;
     } catch (...) {
@@ -549,6 +591,10 @@ inline int serve(const Options &opt, Handler handler) {
     sockaddr_in peer{};
     int fd = sys::accept_from(srv, peer);
     if (fd < 0) continue;
+    // accept may have blocked while existing requests consumed the headroom.
+    // Recheck before allocating a stack, even when no handler is active (SSE
+    // sockets and background tasks still consume memory in that state).
+    if (opt.admit && !opt.admit()) { sys::close_socket(fd); continue; }
 #ifdef SO_NOSIGPIPE
     sys::set_option(fd, SOL_SOCKET, SO_NOSIGPIPE);
 #endif
@@ -557,13 +603,28 @@ inline int serve(const Options &opt, Handler handler) {
     char address[INET_ADDRSTRLEN] = "";
     ::inet_ntop(AF_INET, &peer.sin_addr, address, sizeof address);
     active()++;
+    // Pair admission with OTA reservation: either an update sees us active,
+    // or we see its reservation before creating the connection task.
+    if (opt.admit && !opt.admit()) { active()--; sys::close_socket(fd); continue; }
     try {
       std::thread([fd, local, ip = std::string(address), handler, opt] {
         // Nothing that goes wrong with one connection may end the process.
         try { handle_connection(std::make_shared<Conn>(fd, local, ip), handler, opt); } catch (...) {}
+#ifdef ESP_PLATFORM
+        static std::atomic<unsigned> least{UINT_MAX};
+        const unsigned unused = static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr));
+        unsigned old = least.load();
+        while (unused < old && !least.compare_exchange_weak(old, unused)) {}
+        if (unused < old) ESP_LOGI("hub-stack", "HTTP minimum unused stack=%u bytes", unused);
+#endif
         active()--;
       }).detach();
     } catch (...) { // no thread to be had
+#ifdef ESP_PLATFORM
+      ESP_LOGW("hub-http", "thread-create failed peer=%s active=%d internal_free=%u internal_largest=%u", address, active().load(),
+               static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+               static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
+#endif
       active()--;
       sys::close_socket(fd);
     }

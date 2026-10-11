@@ -63,9 +63,10 @@ async function call(url, opts = {}) {
     // Each request names the workspace this page shows: the hub refuses one from a page left showing a workspace that is
     // no longer open (412), so nothing here is read from, or written into, the one that is (see workspaceMoved).
     const headers = { ...opts.headers, ...(config.workspace ? { 'X-Hub-Workspace': config.workspace } : {}), ...(hub.url ? { Authorization: 'Bearer ' + hubToken(hub.url) } : {}) };
-    const r = await fetch(hub.url + url, { ...opts, headers, signal: ctl.signal });
+    const r = await fetch(hub.url + url, { ...(url === '/api/docs' ? { cache: 'no-cache' } : {}), ...opts, headers, signal: ctl.signal });
     clearTimeout(timer);
     setOnline(true);
+    if (opts.method && opts.method !== 'GET' && opts.method !== 'HEAD') invalidateStorage();
     if (r.status === 412 && r.headers.get('X-Hub-Workspace')) workspaceMoved();
     // 401: this device is not (or no longer) paired with the server.
     if (r.status === 401 && !opts.quiet) askToPair();
@@ -388,6 +389,7 @@ $('sideToggle').onclick = () => { setSideOpen(!state.sideOpen); save(); if (stat
 function setSettingsOpen(open) {
   $('settings').hidden = !open;
   $('settingsBtn').setAttribute('aria-expanded', open);
+  if (open) { storageAt = 0; renderPrivacy(); loadUploadLimit(); }
 }
 $('settingsBtn').onclick = () => setSettingsOpen($('settings').hidden);
 $('netBrief').onclick = () => setSettingsOpen(true);
@@ -680,13 +682,19 @@ let uploadLimit = 50 * 1024 * 1024;
 // Whether the server is a board (its profile says). What to do about a server older than the page differs: a
 // computer's is started again; a board is restarted, and if that changes nothing its card or firmware is the old one.
 let onBoard = false;
+let firmware = null, firmwareFor = '';
 const startAgain = () => (onBoard ? 'reboot the board (if this still shows, copy the page to its card again with "make card", or flash the newer firmware)' : 'stop it and start it again (npm start)');
 async function loadUploadLimit() {
+  const origin = hub.url;
   try {
     const r = await call('/api/device', { quiet: true });
     const d = r.ok ? await r.json() : null;
+    if (origin !== hub.url) return;
     if (d?.maxUpload > 0) uploadLimit = d.maxUpload;
     onBoard = /^esp32/.test(d?.profile || '');
+    firmware = d?.firmwareBuildId ? d : null;
+    firmwareFor = origin;
+    renderPrivacy();
   } catch { /* the old limit stands */ }
 }
 
@@ -1141,7 +1149,7 @@ function askToPair() {
     onEnter(name, tryIt);
     if (hub.url) card.append(el('p', '', `“${hub.name}” (${hub.url}) is another hub, and this device has not been introduced to it yet.`));
     card.append(
-      el('p', '', 'This server only answers devices it has been introduced to. It is offering a code: on first start it prints one in its terminal (the board shows it on its screen); after that, any paired device can make one under “devices…”.'),
+      el('p', '', 'This server only answers paired devices. A first-start code, when offered, appears in its terminal and on the board’s screen for 10 minutes. If none is showing, an already paired device can make one under Settings → devices…. On firmware with physical pairing support, hold the board’s BOOT button for 6 seconds to offer a fresh code.'),
       codeWrap, nameWrap, go, msg);
     if (plain) card.append(el('p', 'say', 'This connection is not encrypted, so the code and everything after it could be read on the network.'));
     else if (at.protocol === 'https:') {
@@ -1350,14 +1358,30 @@ async function askDurable() {
   try { durable = (await navigator.storage.persisted()) || (await navigator.storage.persist()); } catch { return; }
   renderPrivacy();
 }
-const mb = (n) => (n >= 1 << 30 ? (n / (1 << 30)).toFixed(1) + ' GB' : Math.max(1, Math.round(n / (1 << 20))) + ' MB');
-let storage = null, storageAt = 0;
+const mb = (n) => (n >= 1 << 30 ? (n / (1 << 30)).toFixed(2) + ' GB' : (n === 0 ? 0 : Math.max(1, Math.round(n / (1 << 20)))) + ' MB');
+let storage = null, storageAt = 0, storageFor = '', storagePending = false, storageDirty = false, storageTimer = 0;
+const storageIdentity = () => hub.url + '\n' + config.workspace;
+function invalidateStorage() {
+  storageDirty = true;
+  clearTimeout(storageTimer);
+  storageTimer = setTimeout(() => {
+    if (!document.hidden && !$('settings')?.hidden) { storageAt = 0; renderPrivacy(); }
+  }, 300); // one refresh after a burst of writes, no periodic polling
+}
 function renderPrivacy() {
   const box = $('privacy');
   if (!box) return;
+  const identity = storageIdentity();
+  if (storageFor !== identity) { storageFor = identity; storage = null; storageAt = 0; storageDirty = true; }
   const line = (label, text, cls) => { const d = el('div', cls || ''); d.append(el('b', '', label + ' '), text); return d; };
   const link = (text, fn, title) => { const b = el('button', '', text); b.onclick = fn; if (title) b.title = title; return b; };
   const rows = [];
+  if (firmware && firmwareFor === hub.url) {
+    rows.push(line('Firmware', `v${firmware.firmwareVersion} · built ${firmware.firmwareBuiltAt}`));
+    const build = el('code', '', firmware.firmwareBuildId);
+    build.style.overflowWrap = 'anywhere';
+    rows.push(line('Firmware build ID', build));
+  }
   // How the page reached the server.
   const at = new URL(hub.url || location.href), here = /^(localhost|127\.|\[::1\])/.test(at.host);
   if (hub.url) rows.push(line('Viewing', `${hub.name} (${at.host})`));
@@ -1386,12 +1410,19 @@ function renderPrivacy() {
     if (!durable) d.title = 'Browsers keep an installed app\'s storage (Add to Home Screen, or Install) and that of sites you use often. Nothing here expires by itself.';
     rows.push(d);
   }
-  if (storage) rows.push(line('Server storage', mb(storage.used) + ' used' + (storage.quota ? ' of ' + mb(storage.quota) : '') + (storage.free ? ', ' + mb(storage.free) + ' free on its disk' : '')));
+  if (storage) rows.push(line('Server storage', mb(storage.used) + ' used' + (storage.quota ? ' of ' + mb(storage.quota) : '') + (storage.free != null ? ', ' + mb(storage.free) + ' free on its disk' : '')));
   box.replaceChildren(...rows);
-  // How full the server is: asked for at most twice a minute.
-  if (session && net.online && Date.now() - storageAt > 30000) {
+  // Read on first use, opening settings, or after a storage-change event.
+  if (session && net.online && !storagePending && storageAt === 0) {
     storageAt = Date.now();
-    call('/api/storage', { quiet: true }).then((r) => (r.ok ? r.json() : null)).then((s) => { if (s) { storage = s; renderPrivacy(); } }).catch(() => {});
+    storagePending = true;
+    storageDirty = false;
+    call('/api/storage', { quiet: true }).then((r) => (r.ok ? r.json() : null)).then((s) => {
+      if (s && identity === storageIdentity()) { storage = s; renderPrivacy(); }
+    }).catch(() => { storageAt = 0; }).finally(() => {
+      storagePending = false;
+      if (storageDirty) invalidateStorage();
+    });
   }
 }
 function showDevices() {
@@ -2588,6 +2619,13 @@ function holdOpen(det, key) {
 }
 function renderTree() {
   showOnlyKept();
+  // One pass over notes, rather than filtering them for every file/book row.
+  const counts = new Map();
+  for (const note of notes) {
+    counts.set(note.doc, (counts.get(note.doc) || 0) + 1);
+    const at = note.doc?.search(/\.epub\//i);
+    if (at >= 0) { const book = note.doc.slice(0, at + 5); counts.set(book, (counts.get(book) || 0) + 1); }
+  }
   const y = treeEl.scrollTop, tools = (renderTree.tools ||= $('treeTools'));   // taken from the list before it is emptied
   if (tools) tools.onclick = tools.ondblclick = (e) => e.stopPropagation();   // a press on a button there is not one on the line
   treeEl.innerHTML = '';
@@ -2600,7 +2638,7 @@ function renderTree() {
     node.files.push(d);
   }
   // The first line is the workspace's front page, under the workspace's name. At its end: make a group, add files, upload a folder.
-  const front = docs.find((d) => d.front), frontRow = front ? fileRow(front, config.title || 'Front page') : null, head = front && matchesFind(front) ? frontRow : el('div', 'file bare');
+  const front = docs.find((d) => d.front), frontRow = front ? fileRow(front, config.title || 'Front page', counts) : null, head = front && matchesFind(front) ? frontRow : el('div', 'file bare');
   head.classList.add('head');
   // Its keep mark is not on the line, where the room goes to the name: it is on the home button over the list, between the title and the house.
   const st = frontRow?.querySelector('.st');
@@ -2611,7 +2649,7 @@ function renderTree() {
   const draw = (node, parent, prefix) => {
     // A folder's own front page comes first, under that name.
     const fp = prefix ? node.files.find((f) => isFront(f.path)) : null;
-    if (fp) parent.append(fileRow(fp, gateOf(fp.path) ? 'Locked: open to unlock' : 'Front page'));
+    if (fp) parent.append(fileRow(fp, gateOf(fp.path) ? 'Locked: open to unlock' : 'Front page', counts));
     // A folder's pictures and videos are one line, its gallery, not a line each
     // (while finding, each file that matches is still listed).
     const shots = finding || !prefix ? [] : node.files.filter((f) => isImage(f.path) || isVideo(f.path));
@@ -2628,7 +2666,7 @@ function renderTree() {
       if (u) {
         // A lone document that is text is read as it is: no page stands before it. Inside another folder it is the file's own line.
         const text = u.type === 'one' && !!u.path && !isBinary(u.path) && u.page.endsWith('/');
-        if (text && prefix) { const row = fileRow(docOf(u.path)); row.title = u.path; parent.append(row); continue; }
+        if (text && prefix) { const row = fileRow(docOf(u.path), undefined, counts); row.title = u.path; parent.append(row); continue; }
         const says = u.type === 'one' ? (u.book || u.path).split('/').pop() + ', in ' + u.folder : `${u.type === 'set' ? u.kids.length + u.own : u.count} in ${u.folder}`;
         addPin(parent.appendChild(leafRow(u.folder, text ? u.path : u.page, [], lineName(u.folder), says)).firstChild, whole);
         continue;
@@ -2652,14 +2690,14 @@ function renderTree() {
       }
       if (!finding) {
         // A book is one line that opens it: its chapters are in the outline.
-        if (/\.epub$/i.test(name)) { if (sub.files.length) parent.append(bookRow(prefix + name, sub.files)); continue; }
+        if (/\.epub$/i.test(name)) { if (sub.files.length) parent.append(bookRow(prefix + name, sub.files, counts)); continue; }
         // A folder of nothing but pictures, videos and sound files is one line
         // too: its front page if it has one (the page lists them), or else its
         // gallery or music page. Only a folder that also holds documents, or
         // folders, opens out.
         // A folder inside another that holds one file and nothing else is that file's line, under the file's own name: no folder to open for it.
         if (prefix && sub.files.length === 1 && !Object.keys(sub.dirs).length && !gateOf(sub.files[0].path)) {
-          const only = sub.files[0], row = fileRow(only, isFront(only.path) ? label : undefined);
+          const only = sub.files[0], row = fileRow(only, isFront(only.path) ? label : undefined, counts);
           row.title = only.path;
           parent.append(row);
           continue;
@@ -2692,7 +2730,7 @@ function renderTree() {
       draw(sub, kids, prefix + name + '/');
       parent.append(det);
     }
-    for (const f of node.files) if (f !== fp && !shots.includes(f) && !songs.includes(f)) parent.append(fileRow(f, /\.epub\//i.test(f.path) ? pageTitle(f) : undefined));   // a page of a book goes by its name in the contents
+    for (const f of node.files) if (f !== fp && !shots.includes(f) && !songs.includes(f)) parent.append(fileRow(f, /\.epub\//i.test(f.path) ? pageTitle(f) : undefined, counts));   // a page of a book goes by its name in the contents
   };
   // Sections. What hub.json lists under "starter" (the material every copy
   // begins with) is kept together, first. Each other top-level folder, added
@@ -2981,7 +3019,7 @@ const hereOf = (d) => (d.book ? d.pages.every((p) => kept.has(p.path)) : kept.ha
 // A book as one line: pressing it opens the page last read in it, or its first.
 // The mark at its end keeps a copy of every page on this device, or removes them.
 const inBook = (book, path) => !!path && path.startsWith(book + '/');
-function bookRow(book, pages) {
+function bookRow(book, pages, counts) {
   const row = el('div', 'file');
   row.tabIndex = 0;
   row.setAttribute('role', 'button');
@@ -2992,7 +3030,7 @@ function bookRow(book, pages) {
   const sign = kindIcon('docs');
   coverInto(sign, () => coverUrl(book));
   row.append(sign, el('span', 'name', givenName(book).replace(/\.epub$/i, '')));
-  const n = notes.filter((x) => inBook(book, x.doc)).length;
+  const n = counts.get(book) || 0;
   if (n) row.append(el('small', '', n));
   row.append(plusBtn(() => bookTarget({ book, pages })));
   const missing = pages.filter((d) => !kept.has(d.path) && !isPending(d.path)), here = !missing.length;
@@ -3054,7 +3092,7 @@ function plusBtn(target) {
   plus.onclick = (e) => { e.preventDefault(); e.stopPropagation(); openDoc(target(), { keep: true }); };
   return plus;
 }
-function fileRow(d, label) {
+function fileRow(d, label, counts) {
   const row = el('div', 'file');
   row.tabIndex = 0;
   row.setAttribute('role', 'button');
@@ -3063,7 +3101,7 @@ function fileRow(d, label) {
   if (state.panes.some((p) => p.tabs.includes(d.path))) row.classList.add('open');
   if (d.path === activeDoc()) row.classList.add('active');
   row.append(el('span', 'name', label || showName(d.path)));
-  const n = notes.filter((x) => x.doc === d.path).length;
+  const n = counts.get(d.path) || 0;
   if (n) row.append(el('small', '', n));
   row.append(plusBtn(() => d.path));
   // Where this file is: waiting to be sent, copied to this device, or on the server only.
@@ -7072,6 +7110,7 @@ function listen() {
   events.onerror = probe;
   events.onopen = () => setOnline(true);
   events.onmessage = onFileChange;
+  events.addEventListener('storage', invalidateStorage);
 }
 // Changes come in bursts (a folder of files uploaded, a notes file rewritten
 // twice), and every list fetched means the server looks over the whole folder;
@@ -7084,6 +7123,7 @@ function listen() {
 const changedFiles = new Set();
 let changeTimer = 0, changesApplied = 0, uploading = false;
 function onFileChange(e) {
+  invalidateStorage();
   const said = JSON.parse(e.data);
   if (said.workspace) { if (said.workspace !== config.workspace) workspaceMoved(); return; }
   changedFiles.add(said.file);
@@ -7130,7 +7170,7 @@ $('moved').onclick = () => { location.href = '/'; };
   loadHubs();
   // Then find out whether the server knows this device.
   try {
-    const r = await call('/api/session', { quiet: true, wait: 3000 });
+    const r = await call('/api/session', { quiet: true, wait: 8000 });
     if (r.status === 401) return askToPair();
     if (r.ok) session = await r.json();
   } catch { /* not reachable: carry on with what is on this device */ }

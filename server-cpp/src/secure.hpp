@@ -13,7 +13,7 @@
 //   cert.pem    what the server presents: signed by the issuer, re-issued
 //               whenever the machine's addresses change or it nears its end.
 //
-// So a device that trusts this authority trusts the hub and only the hub.
+// The TLS scope also includes other .local names and private network addresses.
 // Whoever copies the state folder gets a key that can pretend to be the hub,
 // not one that can pretend to be a bank.
 #pragma once
@@ -142,6 +142,10 @@ inline bool spit(const string &path, const string &data, int mode) {
     std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
     if (!f) return false;
     f.write(data.data(), static_cast<std::streamsize>(data.size()));
+    if (!f) return false;
+    f.flush();
+    if (!f) return false;
+    f.close();
     if (!f) return false;
   }
   sys::owner_only(tmp, mode);
@@ -286,7 +290,11 @@ inline string write_cert(Key &subject, Key &issuer, const string &subject_name, 
   mbedtls_x509write_cert crt;
   mbedtls_x509write_crt_init(&crt);
   unsigned char serial[16];
-  random_bytes(serial, sizeof serial);
+  if (!random_bytes(serial, sizeof serial)) {
+    mbedtls_x509write_crt_free(&crt);
+    err = "cannot generate a certificate serial: entropy unavailable";
+    return "";
+  }
   serial[0] = static_cast<unsigned char>((serial[0] & 0x7f) | 0x01); // positive and non-zero
   std::time_t now = std::time(nullptr);
   string from = cert_time(now - 86400), to = cert_time(now + static_cast<std::time_t>(days) * 86400);
@@ -325,7 +333,9 @@ inline string write_cert(Key &subject, Key &issuer, const string &subject_name, 
   if (!rc) rc = mbedtls_x509write_crt_set_subject_key_identifier(&crt);
   if (!rc) rc = mbedtls_x509write_crt_set_authority_key_identifier(&crt);
   if (!rc) rc = mbedtls_x509write_crt_set_key_usage(&crt, is_ca ? MBEDTLS_X509_KU_KEY_CERT_SIGN | MBEDTLS_X509_KU_CRL_SIGN : MBEDTLS_X509_KU_DIGITAL_SIGNATURE);
-  if (!rc && !is_ca) rc = mbedtls_x509write_crt_set_ext_key_usage(&crt, &server_auth);
+  // Restrict retained issuers as well as leaves to TLS server authentication.
+  // DNS/IP constraints alone do not constrain S/MIME or signing purposes.
+  if (!rc) rc = mbedtls_x509write_crt_set_ext_key_usage(&crt, &server_auth);
   if (!rc && !names.empty()) rc = mbedtls_x509write_crt_set_subject_alternative_name(&crt, sans.data());
   // Critical: a program that does not understand the limits must refuse the certificate, not ignore them.
   if (!rc && !limits.empty()) rc = mbedtls_x509write_crt_set_extension(&crt, MBEDTLS_OID_NAME_CONSTRAINTS, MBEDTLS_OID_SIZE(MBEDTLS_OID_NAME_CONSTRAINTS), 1, limits.data(), limits.size());
@@ -395,6 +405,17 @@ inline bool ensure_certs(const string &dir, std::vector<string> names, Certs &ou
   string ca_pem, issuer_pem, issuer_key_pem, zone_text;
   std::vector<string> zones;
   const bool have = !renew && slurp(out.ca_path, ca_pem) && slurp(issuer_path, issuer_pem) && slurp(issuer_key_path, issuer_key_pem) && slurp(zones_path, zone_text);
+  if (!have && !renew) {
+    // A partial save or missing file is not permission to change the identity
+    // already installed on people's devices. Initial empty state is allowed.
+    for (const string &p : {out.ca_path, issuer_path, issuer_key_path, zones_path, old_key_path, out.cert_path, out.key_path, names_path}) {
+      struct stat st;
+      if (::stat(p.c_str(), &st) == 0) {
+        err = "incomplete certificate authority in " + dir + "; restore its files or deliberately use --new-authority (devices must replace their trust)";
+        return false;
+      }
+    }
+  }
   if (have) {
     if (!issuer_key.load(issuer_key_pem)) { err = "cannot read " + issuer_key_path; return false; }
     std::istringstream lines(zone_text);
@@ -420,6 +441,7 @@ inline bool ensure_certs(const string &dir, std::vector<string> names, Certs &ou
     out.new_authority = true;
   }
   out.ca_fingerprint = fingerprint(ca_pem);
+  if (out.ca_fingerprint.empty()) { err = "cannot parse the existing authority certificate"; return false; }
 
   // Only names the issuer may vouch for go into the certificate: one name
   // outside its limits would make browsers refuse the whole certificate.

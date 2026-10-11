@@ -108,6 +108,8 @@ Not yet tried on a Pi. The first-build checklist above applies, without the Wind
 
 ## Still to do for Windows
 
+11 October 2026: portable socket error capture/reset classification and the TLS BIO EOF correction pass a UCRT64 loopback regression test (wire bytes, ordinary FIN, timeout, forced RST and rejected incomplete request body). POSIX helpers are implemented; Linux/macOS runtime validation was not performed for this follow-up.
+
 10 October 2026, ESP32 review at `0f5b884`: the isolated `hubd-own.exe` built successfully. The 260-request contract comparison differed only on three missing font files (both `@fontsource` packages are absent locally); expected answers were left unchanged. The standalone links test skipped for lack of symbolic-link privileges. OLED clock/rendering and screen-transition tests compiled and passed with UCRT64; these are host tests, not a firmware build. See `server-cpp/esp32/REVIEW.md`, seventh round.
 
 - A full session in a browser, and a second device (the last open line of the checklist).
