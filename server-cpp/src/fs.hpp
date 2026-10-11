@@ -92,19 +92,25 @@ bool each(const std::string &dir, Fn &&fn) {
   bool opened = fat_opendir(dir, fd, on_card);
   if (on_card) {
     if (!opened) return false;
+    // Codex (B10): release directory resources even if allocation or fn throws.
+    struct CloseDir { FF_DIR *dir; ~CloseDir() { f_closedir(dir); } } close{&fd};
     // Held on the heap: with long names it is about 300 bytes, and callers recurse.
     std::unique_ptr<FILINFO> fi(new FILINFO);
-    while (f_readdir(&fd, fi.get()) == FR_OK && fi->fname[0]) {
+    FRESULT result;
+    while ((result = f_readdir(&fd, fi.get())) == FR_OK && fi->fname[0]) {
       Entry e{fi->fname, (fi->fattrib & AM_DIR) != 0, fi->fsize, fat_time(*fi)};
       fn(e);
     }
-    f_closedir(&fd);
-    return true;
+    return result == FR_OK;
   }
 #endif
   DIR *d = ::opendir(dir.c_str());
   if (!d) return false;
-  while (dirent *de = ::readdir(d)) {
+  struct CloseDir { DIR *dir; ~CloseDir() { ::closedir(dir); } } close{d};
+  for (;;) {
+    errno = 0;
+    dirent *de = ::readdir(d);
+    if (!de) return errno == 0;
     const char *name = de->d_name;
     if (name[0] == '.' && (name[1] == '\0' || (name[1] == '.' && name[2] == '\0'))) continue;
     struct stat st;
@@ -117,8 +123,6 @@ bool each(const std::string &dir, Fn &&fn) {
     Entry e{name, S_ISDIR(st.st_mode), size_of(st), static_cast<int64_t>(st.st_mtime)};
     fn(e);
   }
-  ::closedir(d);
-  return true;
 }
 
 // What `path` is. False if it does not exist (or is neither a file nor a folder).

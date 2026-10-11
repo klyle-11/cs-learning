@@ -7,3 +7,4 @@ marginalia-engine-integration/
 .DS_Store
 # The server's own cache in a folder it serves (the document list, its titles): remade at each start
 .hub-cache/
+server-cpp/esp32/wifi.txt

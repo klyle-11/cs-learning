@@ -2,7 +2,7 @@
 // serving the same hub/index.html.
 //
 //   hubd <folder> [--port 4321] [--host 127.0.0.1] [--www <folder>/hub] [--profile desktop|small|esp32]
-//        [--state <dir>] [--tls] [--insecure-http] [--pair-local] [--allow-host <name>] [--quota-mb <n>]
+//        [--state <dir>] [--tls] [--insecure-http] [--pair-local] [--allow-host <name>] [--quota-mb <n>] [--title <name>]
 //   hubd --make-cert [--state <dir>] [--allow-host <name>]
 //
 // Who may use it (see ../API.md, "Security"): requests must name a host this
@@ -500,11 +500,13 @@ static cJSON *read_settings_file(bool &intact) {
 }
 static cJSON *read_settings_file() { bool intact; return read_settings_file(intact); }
 
+// The name of a workspace that has none of its own (--title); empty: the folder's name.
+static string default_title;
 // Settings as the page sees them: file contents, defaults filled in, plus
 // "front" (the landing page, if there is one) and "root".
 static cJSON *read_config() {
   cJSON *cfg = read_settings_file();
-  if (!has_str(cfg, "title")) set_str(cfg, "title", basename_of(ROOT));
+  if (!has_str(cfg, "title")) set_str(cfg, "title", default_title.empty() ? basename_of(ROOT) : default_title);
   if (!cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(cfg, "side"))) { cJSON_DeleteItemFromObjectCaseSensitive(cfg, "side"); cJSON_AddItemToObject(cfg, "side", cJSON_CreateArray()); }
   if (!cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(cfg, "ignore"))) {
     cJSON_DeleteItemFromObjectCaseSensitive(cfg, "ignore");
@@ -1338,6 +1340,9 @@ static unsigned long long quota_bytes = 0;      // 0: no limit but the disk's fr
 static std::mutex usage_lock;
 static long long usage_count = 0;
 static bool usage_known = false;
+// Codex (B04): refreshed by workspace-aware storage operations, never by the OLED.
+static uint64_t status_free = 0;
+static bool status_free_known = false;
 static http::Clock::time_point usage_at;
 // Moves on whenever something that can change the document list changes.
 static std::atomic<unsigned long long> generation{1};
@@ -1455,8 +1460,13 @@ static unsigned long long used_bytes() {
 static void used_more(long long n) { std::lock_guard<std::mutex> g(usage_lock); if (usage_known) usage_count += n; }
 // What the disk has free (on the board: the card, from FatFS's own count). ~0 if unknown.
 static unsigned long long free_bytes() {
-  uint64_t total, free;
-  return fs::space(ROOT, total, free) ? free : ~0ULL;
+  uint64_t total = 0, free = 0;
+  const bool known = fs::space(ROOT, total, free);
+  {
+    std::scoped_lock g(root_lock, usage_lock);
+    if (ROOT == open_root) { status_free = free; status_free_known = known; }
+  }
+  return known ? free : ~0ULL;
 }
 // ---- removed folders ------------------------------------------------------------------------
 // A folder taken out of the workspace is moved, not deleted: into .removed/ in the workspace, a hidden name, so it is
@@ -1558,6 +1568,7 @@ static bool watched_path(const string &rel, bool &in_list) {
 static void changed(const string &abs, long long delta) {
   if (!starts_with(abs, ROOT + "/") || ROOT != root_now()) return;   // the count is the open workspace's (not the state folder's, nor another workspace's)
   used_more(delta);
+  if (profile.sole_writer) free_bytes();
   const string rel = abs.substr(ROOT.size() + 1);
   bool in_list;
   if (!watched_path(rel, in_list)) return;
@@ -1840,9 +1851,8 @@ static http::Response workspaces_response() {
 }
 // Open a workspace in place of the one that is open, and remember the choice for the next start.
 static void open_workspace(const Workspace &w) {
-  { std::lock_guard<std::mutex> g(root_lock); open_root = w.root; }
+  { std::scoped_lock g(root_lock, usage_lock); open_root = w.root; usage_known = false; status_free_known = false; }
   ROOT = w.root;
-  { std::lock_guard<std::mutex> g(usage_lock); usage_known = false; }
   if (!WORKSPACES.empty()) { make_dirs(WORKSPACES); write_file(WORKSPACES + "/.current", w.home ? "" : w.name); }
   // Every open page is told at once: one still showing the workspace before goes no further with it (see answer).
   Json msg(cJSON_CreateObject());
@@ -3118,49 +3128,49 @@ void hub_status(HubStatus &out) {
   out.port = serve_port;
   out.tls = tls_on;
   std::snprintf(out.fingerprint, sizeof out.fingerprint, "%s", ca_fingerprint_text.c_str());
-  std::map<string, string> names;
+  // Codex (B04): select the newest eight directly into the fixed output.
+  // No temporary maps, sets, vectors or string copies on the screen/watch tasks.
   {
-    std::lock_guard<std::mutex> g(auth_lock);
+    std::scoped_lock g(auth_lock, clients_lock, seen_lock);
     auto left = std::chrono::duration_cast<std::chrono::seconds>(pair_until - http::Clock::now()).count();
-    if (!pair_code.empty() && left > 0) {
-      std::snprintf(out.pair_code, sizeof out.pair_code, "%s-%s", pair_code.substr(0, 4).c_str(), pair_code.substr(4).c_str());
+    if (pair_code.size() == 8 && left > 0) {
+      std::snprintf(out.pair_code, sizeof out.pair_code, "%.4s-%.4s", pair_code.c_str(), pair_code.c_str() + 4);
       out.pair_seconds = static_cast<int>(left);
     }
-    for (const Device &d : devices) names[d.id] = d.name;
-    names["local"] = "this computer";
-  }
-  std::set<string> live;
-  {
-    std::lock_guard<std::mutex> g(clients_lock);
-    for (const auto &c : clients) if (!c->gone()) live.insert(c->who); // a closed page is dropped at the next announcement; not shown as open meanwhile
-  }
-  // Devices with a page open, then those heard from in the last two minutes; most recent first.
-  std::vector<std::pair<http::Clock::time_point, HubPeer>> found;
-  {
-    std::lock_guard<std::mutex> g(seen_lock);
+    constexpr int capacity = static_cast<int>(sizeof out.peers / sizeof out.peers[0]);
+    http::Clock::time_point times[capacity]{};
     const auto recent = http::Clock::now() - std::chrono::minutes(2);
     for (const auto &kv : seen_devices) {
-      auto name = names.find(kv.first);
-      bool is_live = live.count(kv.first) != 0;
-      if (name == names.end() || (!is_live && kv.second.at < recent)) continue;
-      HubPeer p;
-      std::snprintf(p.name, sizeof p.name, "%s", name->second.c_str());
+      const char *name = kv.first == "local" ? "this computer" : nullptr;
+      if (!name) {
+        auto device = std::find_if(devices.begin(), devices.end(), [&](const Device &d) { return d.id == kv.first; });
+        if (device != devices.end()) name = device->name.c_str();
+      }
+      if (!name) continue;
+      const bool live = std::any_of(clients.begin(), clients.end(), [&](const auto &c) { return c->who == kv.first && !c->gone(); });
+      if (!live && kv.second.at < recent) continue;
+      int at = 0;
+      while (at < out.peer_count && (out.peers[at].live != live ? out.peers[at].live : times[at] >= kv.second.at)) ++at;
+      if (at == capacity) continue;
+      if (out.peer_count < capacity) ++out.peer_count;
+      for (int i = out.peer_count - 1; i > at; --i) { out.peers[i] = out.peers[i - 1]; times[i] = times[i - 1]; }
+      HubPeer &p = out.peers[at];
+      std::snprintf(p.name, sizeof p.name, "%s", name);
       std::snprintf(p.ip, sizeof p.ip, "%s", kv.second.ip.c_str());
-      p.live = is_live;
-      found.push_back({kv.second.at, p});
+      p.live = live;
+      times[at] = kv.second.at;
     }
   }
-  std::sort(found.begin(), found.end(), [](const auto &a, const auto &b) { return a.second.live != b.second.live ? a.second.live : a.first > b.first; });
-  for (const auto &f : found) if (out.peer_count < static_cast<int>(sizeof out.peers / sizeof out.peers[0])) out.peers[out.peer_count++] = f.second;
   {
     std::lock_guard<std::mutex> g(notice_lock);
     if (http::Clock::now() < notice_until) std::snprintf(out.notice, sizeof out.notice, "%s", notice_text.c_str());
   }
   // Only once serving, and only what is already counted: a screen asking must never set off a walk of the card.
   if (out.running) {
-    { std::lock_guard<std::mutex> g(usage_lock); if (usage_known && usage_count > 0) out.used = static_cast<uint64_t>(usage_count); }
-    const unsigned long long free = free_bytes();
-    out.free = free == ~0ULL ? 0 : free;
+    std::lock_guard<std::mutex> g(usage_lock);
+    if (usage_known && usage_count > 0) out.used = static_cast<uint64_t>(usage_count);
+    out.free = status_free;
+    out.free_known = status_free_known;
   }
 }
 int hub_busy() { return http::active().load(); }
@@ -3221,6 +3231,7 @@ int main(int argc, char **argv) {
     else if (a == "--workspaces" && i + 1 < argc) workspaces = argv[++i];
     else if (a == "--allow-host" && i + 1 < argc) extra_hosts.push_back(argv[++i]);
     else if (a == "--quota-mb" && i + 1 < argc) quota_mb = std::atoll(argv[++i]);
+    else if (a == "--title" && i + 1 < argc) default_title = argv[++i];
     else if (a == "--tls") want_tls = true;
     else if (a == "--insecure-http") insecure = true;
     else if (a == "--pair-local") pair_local = true;
@@ -3228,7 +3239,7 @@ int main(int argc, char **argv) {
     else if (a == "--new-authority") make_cert = new_authority = true;
     else if (a == "--help" || a == "-h") {
       std::printf("usage: hubd [folder] [--port 4321] [--host 127.0.0.1] [--www <folder>/hub] [--profile desktop|small|esp32]\n"
-                  "            [--state <dir>] [--workspaces <dir>] [--tls] [--insecure-http] [--pair-local] [--allow-host <name>] [--quota-mb <n>]\n"
+                  "            [--state <dir>] [--workspaces <dir>] [--tls] [--insecure-http] [--pair-local] [--allow-host <name>] [--quota-mb <n>] [--title <name>]\n"
                   "       hubd --make-cert [--state <dir>] [--allow-host <name>]\n"
                   "       hubd --new-authority [--state <dir>] [--allow-host <name>]\n\n"
                   "  --state         where certificates and the list of paired devices are kept (default ~/.config/hub)\n"
@@ -3239,6 +3250,7 @@ int main(int argc, char **argv) {
                   "  --pair-local    ask this machine's own browser to pair too\n"
                   "  --allow-host    another name this server may be reached by (repeatable)\n"
                   "  --quota-mb      most the folder may hold in total; 0 for no limit\n"
+                  "  --title         what a workspace is called when neither hub.json nor a front page names it (default: its folder's name)\n"
                   "  --make-cert     make or renew the certificates, print how to trust them, and stop\n"
                   "  --new-authority replace the authority devices install (each device then installs the new one once)\n");
       return 0;
@@ -3348,6 +3360,7 @@ int main(int argc, char **argv) {
   uint64_t disk_total = 0, disk_free = 0;
   if (fs::space(ROOT, disk_total, disk_free)) std::printf("disk: %llu MB free of %llu MB", static_cast<unsigned long long>(disk_free >> 20), static_cast<unsigned long long>(disk_total >> 20));
   else std::printf("disk: free space unknown");
+  free_bytes(); // seed the fixed status snapshot before the screen can show storage
   if (quota_bytes) std::printf("; the folder may hold up to %llu MB\n", quota_bytes >> 20);
   else std::printf("; the folder may fill it, less 16 MB\n");
 #ifdef ESP_PLATFORM

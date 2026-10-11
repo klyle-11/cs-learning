@@ -14,7 +14,7 @@ The hub's server running on an ESP32 board, with the documents on a microSD card
 | microSD (SPI) | MOSI 15, MISO 2, SCK 14, CS 13 | MOSI 11, MISO 2, SCK 14, CS 13 |
 | OLED, 0.96" SSD1306 (I2C, 0x3C/0x3D, no reset pin) | SDA 21, SCL 22 | SDA 18, SCL 17 |
 | Buttons | RESET | RESET, BOOT (GPIO 0): shows the board's details on the screen |
-| LED, battery | 25, ADC 35 (not used yet) | 37, ADC 1 (not used yet) |
+| LED (held off), battery | 25, ADC 35 (not used yet) | 37, ADC 1 (not used yet) |
 | USB | through a USB-serial chip | the chip's own USB, on USB-C |
 | Profile (limits) | `esp32`: 4 connections at once, 6 open pages | `esp32-psram`: 8 connections, 12 open pages, page and scripts kept in memory |
 
@@ -29,12 +29,18 @@ On the V1.6.1, GPIO 2 is also a boot-mode pin: if flashing fails with a card in,
 ![the star](docs/screen.gif)
 
 - Top: **Learner-servr** in serif (DejaVu Serif, drawn to pixels by `tools/make-title.py`) and the star, in thin lines, tall and narrow: a hollow four-pointed star whose short diagonal rays grow and fall back, a tall dotted diamond opening as they peak, a spark at its side. About five seconds a cycle. Two other designs are kept to compare (below, "Choosing the star").
-- On the T3-S3, the BOOT button wakes the screen and shows, for eight seconds, the board, the firmware version, how long it has been up, and free memory (internal and PSRAM).
+- On the T3-S3, BOOT cycles **status → board details → clock → status**. Details show the board, firmware version, uptime and free internal/PSRAM memory, and return to status after eight seconds. From the idle clock, BOOT returns to status.
 - Under it, the address to type: the board's IP (and port if not 443), every few seconds `hub.local` instead.
 - The rest: devices with a page open (●) or heard from in the last two minutes (○), name and IP, four at a time (when every address shares its start with the board's, as 192.168… does at home, only what follows is shown: "1.23" for 192.168.1.23, and the board's own address above shows the rest); while a **pairing code** is on offer, the code large, the time left, and the start of the certificate authority's fingerprint to compare with the trust page; during an update, a progress bar; at start-up and when something is wrong, what is happening and what to do.
 - Bottom line, reversed, for a few seconds: what just happened ("Paired: Kai's iPhone", "Removed: …", "Storage is full"), or until it is over, "Wi-Fi lost: rejoining".
 
-After ten minutes with nothing new it dims: an OLED wears where it stays lit. What moves by itself (the star, the address and name taking turns, the device pages turning over) does not count as new. Only the bytes that changed are sent each frame (the star: a few dozen; a full screen is a kilobyte), from a task below the server in priority.
+After ten minutes with nothing new, the **clock becomes the default screensaver and the OLED dims**. It shows the time large, in the title's serif (12-hour), with `AM` or `PM` small to its right over `EST` or `EDT`, and the weekday and date above. It is US Eastern time: EDT (UTC-4) from 2:00 on the second Sunday of March to 2:00 on the first Sunday of November, EST (UTC-5) otherwise. Until the board receives network time, it shows `--:--`, `ET` and `Time not synced`, rather than presenting the firmware build date as the current time. The figures are drawn to pixels by `tools/make-clock.py` (DejaVu Serif, like the title) into `main/clock_font.hpp`. Both boards get this idle screen; manual cycling requires the S3's BOOT button.
+
+![The clock: 12:00 PM EDT](docs/clock.png)
+
+Meaningful status changes wake the display. Pairing, updates, startup messages and alerts take priority and stay bright. Time advancing, the star and automatic address/device-page changes do not count as activity. Only changed bytes are sent to the OLED each frame.
+
+The clock's formatting and screen transitions are checked on a computer with `tools/screen-test.cpp` (build it using the same include paths as the preview below). The complete firmware and real OLED/button behavior still need validation with the supported toolchain and boards; see [the seventh review round](REVIEW.md#seventh-round-current-merge-memory-reliability-and-oled).
 
 ### Choosing the star
 

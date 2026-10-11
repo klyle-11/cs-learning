@@ -22,6 +22,7 @@ struct HubStatus {
   HubPeer peers[8];
   char notice[32] = "";    // something that just happened: a device paired, the card is full
   uint64_t used = 0, free = 0;
+  bool free_known = false; // cached by a storage operation; zero can mean a full card
 };
 
 // Fills `out` (hub.cpp). Safe to call from any thread.

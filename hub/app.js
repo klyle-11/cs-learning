@@ -35,7 +35,11 @@ let hubs = [], hub = HOME;
 const hubToken = (url) => (store.get('hub:tokens') || {})[url] || '';
 // Settings as a hub sent them, marked with the hub they came from: `root` is
 // what everything kept on this device is filed under.
-const ours = (c) => { if (hub.url) c.root = hub.url + ' ' + c.root; return c; };
+const ours = (c) => { if (hub.url) c.root = hub.url + ' ' + c.root; return homeOf(c); };
+// A workspace with no FRONTPAGE.md of its own (files put straight on a card, say) still has a front page: one made
+// here, with the workspace's name and everything in it under that (see applyLocks, fetchDoc). Editing it saves a real one.
+const HOME_PAGE = 'FRONTPAGE.md';
+function homeOf(c) { if (!c.front) { c.front = HOME_PAGE; c.frontMade = true; } return c; }
 const configSlot = () => 'hub:config' + (hub.url ? ':' + hub.url : '');
 function switchHub(url, doc) {
   store.set('hub:at', url);
@@ -511,7 +515,7 @@ function setTabTitle() {
 async function loadConfig() {
   // Without the server, fall back to the settings seen last time.
   try { config = ours(await api('/api/config')); store.set(configSlot(), config); }
-  catch (e) { const last = store.get(configSlot()); if (!last) throw e; config = last; }
+  catch (e) { const last = store.get(configSlot()); if (!last) throw e; config = homeOf(last); }
   titleEl.textContent = config.title;
   setTabTitle();
 }
@@ -607,7 +611,7 @@ async function updateFolder(folder) {
   }))) return closeGate();
   let have;
   try { have = new Map((await api('/api/files?path=' + encodeURIComponent(folder))).map((f) => [f.asked || f.path, f])); }   // a file saved under a shorter name, by the one it was given
-  catch (e) { return done(e.offline ? 'The server is not reachable.' : 'The server that is running is older than this: stop it and start it again (npm start), then press "update\u2026" once more.'); }
+  catch (e) { return done(e.offline ? 'The server is not reachable.' : `${onBoard ? 'The board' : 'The server that is running'} is older than this: ${startAgain()}, then press "update\u2026" once more.`); }
   // New: not in the copy. Changed: another size, or touched on this device after its copy was made (two seconds' grace: some disks keep time in steps).
   const send = [];
   let skipped = 0;
@@ -673,11 +677,16 @@ async function droppedFolders(data) {
 // /api/device: on a board, as much as the card's FAT32 holds, 4 GB); the Node
 // server has no such answer and takes 50 MB. Asked once, at start.
 let uploadLimit = 50 * 1024 * 1024;
+// Whether the server is a board (its profile says). What to do about a server older than the page differs: a
+// computer's is started again; a board is restarted, and if that changes nothing its card or firmware is the old one.
+let onBoard = false;
+const startAgain = () => (onBoard ? 'reboot the board (if this still shows, copy the page to its card again with "make card", or flash the newer firmware)' : 'stop it and start it again (npm start)');
 async function loadUploadLimit() {
   try {
     const r = await call('/api/device', { quiet: true });
     const d = r.ok ? await r.json() : null;
     if (d?.maxUpload > 0) uploadLimit = d.maxUpload;
+    onBoard = /^esp32/.test(d?.profile || '');
   } catch { /* the old limit stands */ }
 }
 
@@ -923,7 +932,7 @@ const net = { online: true, said: '' };
 let outbox = [], pendingFiles = [], kept = new Set(), flushing = false;
 const keyOf = (path) => config.root + '|' + path;
 const isPending = (path) => pendingFiles.some((f) => f.path === path);
-const canKeep = () => true;   // documents, and (one at a time, or by their own "keep all") music, pictures and video
+const canKeep = (path) => !docOf(path)?.made;   // documents, and (one at a time, or by their own "keep all") music, pictures and video
 function saveLocal() {
   store.set('notes:' + config.root, notes);
   store.set('outbox:' + config.root, outbox);
@@ -2054,6 +2063,7 @@ function applyLocks() {
     if (isCover(d.path)) { covers.set(folderOf(d.path), d.path); return false; }
     return true;
   });
+  if (config.frontMade && !docs.some((d) => d.path === HOME_PAGE)) docs.unshift({ path: HOME_PAGE, group: '', title: config.title, side: false, front: true, made: true });
   // A locked folder is reached through its front page; one without gets a stand-in to carry the lock screen.
   for (const f of Object.keys(locks())) {
     if (gateOf(frontOf(f)) === f && !docs.some((d) => d.path === frontOf(f)) && allDocs.some((d) => d.path.startsWith(f + '/')))
@@ -3408,6 +3418,7 @@ function slugify(text, used) {
 // Source files are shown as one fenced code block, tagged with their language.
 const LANG = { c: 'c', h: 'c', cpp: 'cpp', hpp: 'cpp', cc: 'cpp', py: 'python', js: 'javascript', ts: 'typescript', rs: 'rust', go: 'go', java: 'java', sh: 'bash', Makefile: 'makefile' };
 async function fetchDoc(path) {
+  if (docOf(path)?.made) return `# ${config.title}\n`;   // the front page made for a workspace that has none
   let text = await docText(path);
   if (text == null) return '# Not on this device\n\nThe server is not reachable, and no copy of this document was kept here.\n';
   if (path.endsWith('.md')) return text;
@@ -3467,9 +3478,11 @@ function scrollTurns(frame, d) {
 // A document that fails to draw says so in its own pane; the rest of the reader carries on.
 async function showDoc(pane, hash, keepScroll) {
   parkVideo(views[pane]?.body);
+  const root = views[pane]?.root;
+  root?.classList.add('loading');   // a spinner, if this takes more than a moment (see .pane.loading)
   try { await drawDoc(pane, hash, keepScroll); }
   catch (e) { if (e?.offline) throw e; views[pane]?.body.replaceChildren(problemBox(e, 'This document could not be shown')); }
-  finally { lightboxSync(); }
+  finally { root?.classList.remove('loading'); lightboxSync(); }
 }
 async function drawDoc(pane, hash, keepScroll) {
   const v = views[pane], path = state.panes[pane].active;
@@ -4615,7 +4628,7 @@ async function drawPdf(pane, path, box, bar, copy) {
     // No PDF.js to be had: without the server, it was never kept on this device; with it, the server is one from before it had PDF.js, still running since then.
     status.textContent = pdfLib ? 'This PDF could not be drawn here' + (e?.message ? ' (' + e.message + ')' : '') + '.' + (copy ? '' : ' "open in new tab" hands it to the PDF viewer of this device.')
       : !net.online ? 'What the reader draws a PDF with is not on this device yet: open the reader once with the server in reach, and from then on a kept PDF is drawn here without it.'
-      : 'The server that is running is older than the reader\'s PDF pages: stop it and start it again (npm start), and the PDF is drawn here, every page.';
+      : `${onBoard ? 'The board does not have' : 'The server that is running is older than'} the reader's PDF pages: ${startAgain()}, and the PDF is drawn here, every page.`;
     return;
   }
   if (!scroller.isConnected) { forget(); doc.destroy(); return; }
@@ -5491,7 +5504,15 @@ function showGallery(pane, path) {
   else { appendBrowse(article, pane, folder, kind, 'browse:' + path); addCover(article, folder); }
   addCrumbs(article, pane, folder, path);
   // A folder with no front page has these under the page made for it, as a front page has them (not the inbox, which is the reader's own).
-  if (folder && kind !== 'inbox') { const acts = el('div', 'editFront'); acts.append(...folderActs(folder)); article.append(acts); }
+  if (folder && kind !== 'inbox') {
+    const acts = el('div', 'editFront'), say = el('button', '', 'describe…');
+    // No front page yet: this gives the folder one (a title and a description), which then stands for it.
+    say.title = 'Give this folder a front page: a title and a description of your own';
+    say.onclick = () => editFront(pane, `# ${folder.split('/').pop()}\n\n`, folder, () => openDoc(frontOf(folder), { pane }));
+    if (!docOf(frontOf(folder)) && !path.endsWith(':music')) acts.append(say);
+    acts.append(...folderActs(folder));
+    article.append(acts);
+  }
   ensureSlider(article);
   if (folder && kind !== 'inbox') addLockTop(article, folder);
   scroller.addEventListener('scroll', () => keepPlace(path, scroller.scrollTop), { passive: true });
@@ -5716,13 +5737,13 @@ function appendBrowse(article, pane, folder, first = null, key = 'browse:' + fol
 }
 
 // The front page can be edited in place; it is saved back to FRONTPAGE.md.
-function editFront(pane, md, folder = '') {
+function editFront(pane, md, folder = '', after = null) {
   editing = true;
   const box = el('div', 'frontEditor'), ta = el('textarea');
   ta.value = md;
   const done = async () => { editing = false; await showDoc(pane); chrome(); };
   const saveBtn = el('button', '', 'Save');
-  saveBtn.onclick = async () => { await api('/api/front', 'PUT', { markdown: ta.value, folder }); await loadConfig(); await loadDocs(); done(); };
+  saveBtn.onclick = async () => { await api('/api/front', 'PUT', { markdown: ta.value, folder }); await loadConfig(); await loadDocs(); if (after) { editing = false; after(); } else done(); };
   const cancel = el('button', '', 'Cancel');
   cancel.onclick = done;
   box.append(el('p', '', 'Markdown. The first "# Heading" is the title; everything after it is the description.'), ta, saveBtn, cancel);

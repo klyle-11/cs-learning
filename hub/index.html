@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>Reader</title>
+<title>Art-servr</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="icon" href="/icon-192.png">
 <meta name="theme-color" content="#fdfcf7">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Reader">
+<meta name="apple-mobile-web-app-title" content="Art-servr">
 <style>
   :root {
     --serif: "Iowan Old Style", Palatino, "Palatino Linotype", Georgia, serif;
@@ -373,6 +373,17 @@
   .getting { position: relative; }
   .getting::after { content: ''; position: absolute; left: 0; bottom: 0; z-index: 1; height: 2px; width: var(--got, 0%); background: var(--accent); transition: width .15s linear; pointer-events: none; }
   .body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  /* Still fetching: a spinner, shown only when it takes longer than a moment. In a pane while what it shows is on
+     its way (showDoc), on its tab, and in place of the panes and the file list until the reader has started. */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes spinIn { to { opacity: 1; } }
+  .pane.loading { position: relative; }
+  .pane.loading::after, #panes:empty::before, #tree:empty::before { content: ''; box-sizing: border-box; width: 26px; height: 26px; border: 3px solid var(--rule); border-top-color: var(--accent); border-radius: 50%; opacity: 0; animation: spin .8s linear infinite, spinIn .2s .3s forwards; }
+  .pane.loading::after { position: absolute; top: 96px; left: calc(50% - 13px); z-index: 3; pointer-events: none; }
+  #panes:empty::before { margin: 96px auto 0; }
+  #tree:empty::before { display: block; width: 18px; height: 18px; border-width: 2px; margin: 16px auto; }
+  .pane.loading .tab.active::before { content: ''; display: inline-block; box-sizing: border-box; width: 10px; height: 10px; margin-right: 6px; border: 2px solid var(--rule); border-top-color: var(--accent); border-radius: 50%; opacity: 0; animation: spin .8s linear infinite, spinIn .2s .3s forwards; }
+  @media (prefers-reduced-motion: reduce) { .pane.loading::after, #panes:empty::before, #tree:empty::before, .pane.loading .tab.active::before { animation: spinIn .2s .3s forwards; border-top-color: var(--rule); border-style: dotted; } }
   /* a document scrolls up and down only; wide tables and code scroll inside themselves */
   .scroller { flex: 1; overflow-y: auto; overflow-x: hidden; overscroll-behavior-x: none; padding: 0 32px; }
   .body iframe { flex: 1; width: 100%; border: 0; background: #fff; }
@@ -1100,8 +1111,8 @@
   <nav id="side" aria-label="Files and outline">
     <div id="sideHead">
       <h1 id="hubHome" role="button" tabindex="0" title="Go to the front page"><span id="hubTitle"></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8M5 10v10h5v-6h4v6h5V10"/></svg></h1>
-      <button id="notesToggle" class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16"/><path d="M15 4v16"/></svg></button>
       <button id="sideToggle" class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16"/><path d="M9 4v16"/></svg></button>
+      <button id="notesToggle" class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16"/><path d="M15 4v16"/></svg></button>
       <button id="settingsBtn" class="ic" aria-expanded="false" aria-controls="settings" aria-label="Settings" title="Settings: text, connection, this device"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
     </div>
     <div id="settings" hidden>

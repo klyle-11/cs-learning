@@ -62,6 +62,7 @@
 #include "status.hpp"
 #include "update.h"
 #include "version.h"
+#include "wifi_settings.hpp"
 
 int hub_main(int argc, char **argv);
 
@@ -127,33 +128,16 @@ static void on_event(void *, esp_event_base_t base, int32_t id, void *data) {
 // and the name into NVS; then the file is deleted, so the password does not
 // stay on a card that is often taken out and put in other computers. The card's
 // top folder is outside what the server shows (/sdcard/hub), so it is never served.
-static bool read_wifi_file(wifi_config_t &wc) {
+static int read_wifi_file(wifi_config_t &wc, WifiSettings &settings) {
   const std::string path = std::string(CARD) + "/wifi.txt";
   FILE *f = std::fopen(path.c_str(), "r");
-  if (!f) return false;
-  char line[160];
-  bool any = false;
-  while (std::fgets(line, sizeof line, f)) {
-    line[std::strcspn(line, "\r\n")] = '\0';
-    char *eq = std::strchr(line, '=');
-    if (!eq) continue;
-    *eq = '\0';
-    const char *key = line, *value = eq + 1;
-    if (!std::strcmp(key, "ssid")) {
-      std::memset(wc.sta.ssid, 0, sizeof wc.sta.ssid);
-      std::strncpy(reinterpret_cast<char *>(wc.sta.ssid), value, sizeof wc.sta.ssid - 1);
-      any = true;
-    } else if (!std::strcmp(key, "password")) {
-      std::memset(wc.sta.password, 0, sizeof wc.sta.password);
-      std::strncpy(reinterpret_cast<char *>(wc.sta.password), value, sizeof wc.sta.password - 1);
-    } else if (!std::strcmp(key, "name") && value[0]) {
-      nvs_handle_t h;
-      if (nvs_open("hub", NVS_READWRITE, &h) == ESP_OK) { nvs_set_str(h, "name", value); nvs_commit(h); nvs_close(h); }
-    }
-  }
+  if (!f) return errno == ENOENT ? 0 : -1;
+  const bool valid = read_wifi_settings(f, settings);
   std::fclose(f);
-  std::remove(path.c_str());
-  return any;
+  if (!valid) return -1; // leave invalid/unreadable input on the card
+  std::memcpy(wc.sta.ssid, settings.ssid, sizeof wc.sta.ssid);
+  std::memcpy(wc.sta.password, settings.password, sizeof wc.sta.password);
+  return 1;
 }
 
 static void load_name() {
@@ -176,22 +160,53 @@ static bool start_wifi() {
   ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
   wifi_config_t wc = {};
   esp_wifi_get_config(WIFI_IF_STA, &wc); // what an earlier wifi.txt left in flash
-  const bool from_card = read_wifi_file(wc);
+  WifiSettings settings;
+  const int from_card = read_wifi_file(wc, settings);
+  if (from_card < 0) {
+    ESP_LOGE(TAG, "wifi.txt is invalid or unreadable; left on the card");
+    screen_say("Check wifi.txt.", "Settings not saved.", "Fix, then restart.");
+    return false;
+  }
   if (!wc.sta.ssid[0] && CONFIG_HUB_WIFI_SSID[0]) {
     std::strncpy(reinterpret_cast<char *>(wc.sta.ssid), CONFIG_HUB_WIFI_SSID, sizeof wc.sta.ssid - 1);
     std::strncpy(reinterpret_cast<char *>(wc.sta.password), CONFIG_HUB_WIFI_PASSWORD, sizeof wc.sta.password - 1);
   }
-  if (!wc.sta.ssid[0]) return false;
-  ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wc));
+  if (!wc.sta.ssid[0]) { screen_say("No Wi-Fi settings.", "Put wifi.txt on the", "card, then restart."); return false; }
+  // Codex (B06): only remove the input after both settings stores accept it.
+  if (esp_wifi_set_config(WIFI_IF_STA, &wc) != ESP_OK) {
+    ESP_LOGE(TAG, "Wi-Fi settings were not saved; wifi.txt retained");
+    screen_say("Wi-Fi save failed.", "wifi.txt kept.", "Check serial log.");
+    return false;
+  }
+  if (from_card && settings.name[0]) {
+    nvs_handle_t h;
+    esp_err_t saved = nvs_open("hub", NVS_READWRITE, &h);
+    if (saved == ESP_OK) {
+      saved = nvs_set_str(h, "name", settings.name);
+      if (saved == ESP_OK) saved = nvs_commit(h);
+      nvs_close(h);
+    }
+    if (saved != ESP_OK) {
+      ESP_LOGE(TAG, "hub name was not saved; wifi.txt retained");
+      screen_say("Name save failed.", "wifi.txt kept.", "Check serial log.");
+      return false;
+    }
+  }
+  if (from_card && std::remove("/sdcard/wifi.txt") != 0) ESP_LOGW(TAG, "settings saved, but wifi.txt could not be removed");
   load_name();
   esp_netif_set_hostname(sta, name_text); // what the router lists it as (and, on many, can be reached by)
   ESP_ERROR_CHECK(esp_wifi_start());
+  // The radio's default is to doze between packets, which adds tens of milliseconds to every request and
+  // slows each page by the number of files it fetches. The board is on a cable: keep it awake.
+  esp_wifi_set_ps(WIFI_PS_NONE);
   char ssid[33] = "";
   std::memcpy(ssid, wc.sta.ssid, sizeof wc.sta.ssid);
   screen_say(from_card ? "Wi-Fi from wifi.txt:" : "Joining Wi-Fi:", ssid);
   // Wait for an address, saying so on the screen if it takes long.
-  for (int waited = 0; !(xEventGroupWaitBits(wifi_events, GOT_IP, pdFALSE, pdTRUE, pdMS_TO_TICKS(5000)) & GOT_IP); waited += 5)
-    if (waited == 20) screen_say("Wi-Fi not joined:", ssid, "check wifi.txt");
+  for (int waited = 5; !(xEventGroupWaitBits(wifi_events, GOT_IP, pdFALSE, pdTRUE, pdMS_TO_TICKS(5000)) & GOT_IP); waited += 5) {
+    if (waited == 20) screen_say("Wi-Fi not joined.", "Replace wifi.txt;", "then restart.");
+    if (waited == 60) update_give_up(); // Codex (B07): a trial image must not wait forever
+  }
   ESP_LOGI(TAG, "Wi-Fi up: %s (%s)", ip_text, name_text);
 #ifdef HUB_MDNS
   // name.local: found by phones and computers on the same network without knowing the address.
@@ -212,8 +227,9 @@ static bool start_wifi() {
 // was built, which is at least not 1970.
 static void set_clock() {
   esp_sntp_config_t cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+  cfg.sync_cb = [](struct timeval *) { screen_clock_ready(); };
   esp_netif_sntp_init(&cfg);
-  if (esp_netif_sntp_sync_wait(pdMS_TO_TICKS(10000)) == ESP_OK) return;
+  if (esp_netif_sntp_sync_wait(pdMS_TO_TICKS(10000)) == ESP_OK) { screen_clock_ready(); return; }
   struct tm built = {};
   if (strptime(__DATE__ " " __TIME__, "%b %d %Y %H:%M:%S", &built)) {
     struct timeval tv = {mktime(&built), 0};
@@ -299,8 +315,8 @@ static void watch_task(void *) {
   }
 }
 
-// The BOOT button (T3-S3): wakes the screen and shows what the board knows of
-// itself for a few seconds. Called in an interrupt: it only raises a flag.
+// The BOOT button (T3-S3): wakes the screen and cycles status, details and clock.
+// Called in an interrupt: it only raises a flag.
 static void IRAM_ATTR on_button(void *) { screen_info(); }
 static void start_button() {
   if (BOARD_BUTTON < 0) return;
@@ -314,7 +330,17 @@ static void start_button() {
   if (isr == ESP_OK || isr == ESP_ERR_INVALID_STATE) gpio_isr_handler_add(static_cast<gpio_num_t>(BOARD_BUTTON), on_button, nullptr);
 }
 
+// The board's own LED (lit when its pin is high on both boards): held off, the
+// screen says everything. The charging light beside the USB socket is the
+// charger chip's, not on a pin: nothing here can turn that one off.
+static void led_off() {
+  gpio_reset_pin(static_cast<gpio_num_t>(BOARD_LED));
+  gpio_set_direction(static_cast<gpio_num_t>(BOARD_LED), GPIO_MODE_OUTPUT);
+  gpio_set_level(static_cast<gpio_num_t>(BOARD_LED), 0);
+}
+
 static void start() {
+  led_off();
   esp_err_t nvs = nvs_flash_init();
   if (nvs == ESP_ERR_NVS_NO_FREE_PAGES || nvs == ESP_ERR_NVS_NEW_VERSION_FOUND) { nvs_flash_erase(); nvs_flash_init(); }
   screen_start();
@@ -330,25 +356,29 @@ static void start() {
     screen_say("Flash storage failed.", "Reflash by USB", "(see README).");
     return;
   }
+  int card_waits = 0;
   while (!mount_card()) {
     ESP_LOGE(TAG, "no SD card, or it is not FAT32");
     screen_say("No SD card found.", "Insert a FAT32 card;", "trying again...");
     vTaskDelay(pdMS_TO_TICKS(5000));
+    if (++card_waits == 12) update_give_up();
   }
   ::mkdir("/sdcard/hub", 0755); // a fresh card: the folder the documents go in
   {
     bool dir;
     uint64_t size;
-    while (!fs::info("/sdcard/hub/www/index.html", dir, size)) {
+    int page_waits = 0;
+    while (!fs::info("/sdcard/hub/www/index.html", dir, size) || dir) {
       ESP_LOGE(TAG, "no /hub/www/index.html on the card: copy the page with `make card`");
-      screen_say("No reader page on", "the card: run", "make card (README)");
-      vTaskDelay(pdMS_TO_TICKS(5000)); // taking the card out to fix it restarts the board
+      screen_say("No reader page.", "Power off; make card;", "reinsert and restart.");
+      vTaskDelay(pdMS_TO_TICKS(5000));
+      if (++page_waits == 12) update_give_up();
     }
   }
   screen_say("Card ready.", version);
   if (!start_wifi()) {
-    ESP_LOGE(TAG, "no Wi-Fi settings: put wifi.txt on the card");
-    screen_say("No Wi-Fi settings.", "Put wifi.txt on the", "card, then restart.");
+    ESP_LOGE(TAG, "Wi-Fi setup failed; follow the screen's instructions");
+    update_give_up();
     return;
   }
   screen_say("Setting the clock...");
@@ -366,7 +396,8 @@ static void start() {
   static char port[8];
   std::snprintf(port, sizeof port, "%d", CONFIG_HUB_PORT);
   static char *args[] = {(char *)"hubd", (char *)"/sdcard/hub", (char *)"--www", (char *)"/sdcard/hub/www", (char *)"--state", (char *)"/state",
-                         (char *)"--host", (char *)"0.0.0.0", (char *)"--port", port};
+                         (char *)"--host", (char *)"0.0.0.0", (char *)"--port", port,
+                         (char *)"--title", (char *)"Learner-servr"}; // the card's folder is "hub": not a name to show
   try {
     std::thread([] {
       esp_pthread_cfg_t each = esp_pthread_get_default_config();
@@ -385,11 +416,19 @@ static void start() {
     esp_restart();
   }
   // Until the server says it is listening, the start-up message stays.
+  bool server_ready = false;
   for (int i = 0; i < 600; i++) {
     HubStatus s;
     hub_status(s);
-    if (s.running) break;
+    if (s.running) { server_ready = true; break; }
     vTaskDelay(pdMS_TO_TICKS(500));
+  }
+  if (!server_ready) {
+    update_give_up();
+    screen_say("Server start timed", "out. Restarting...");
+    vTaskDelay(pdMS_TO_TICKS(3000));
+    esp_restart();
+    return;
   }
   screen_say(nullptr);
   ESP_LOGI(TAG, "version %d serving at %s (%s.local); %u bytes free, largest block %u", HUB_VERSION, ip_text, name_text,

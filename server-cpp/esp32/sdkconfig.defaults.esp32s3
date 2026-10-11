@@ -12,3 +12,5 @@ CONFIG_SPIRAM_USE_MALLOC=y
 CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
 # Logs and the serial monitor on the USB-C port, which is the chip's own USB
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# The processor at its full 240 MHz (the default is 160): TLS handshakes and unpacking are what a page waits for.
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y

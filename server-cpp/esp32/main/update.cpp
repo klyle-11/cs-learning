@@ -201,12 +201,20 @@ static void check_once() {
   esp_restart();
 }
 
+static bool update_ready() {
+  return hub_busy() == 0 && esp_get_free_heap_size() >= 90 * 1024 &&
+         heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) >= 24 * 1024;
+}
+
 static void update_task(void *) {
   vTaskDelay(pdMS_TO_TICKS(2 * 60 * 1000)); // let start-up finish, and the first visitors in
   for (;;) {
     // Wait (up to an hour) for a quiet moment with memory to spare.
-    for (int i = 0; i < 60 && (hub_busy() > 0 || esp_get_free_heap_size() < 90 * 1024 || heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < 24 * 1024); i++) vTaskDelay(pdMS_TO_TICKS(60 * 1000));
-    check_once();
+    for (int i = 0; i < 60 && !update_ready(); i++) vTaskDelay(pdMS_TO_TICKS(60 * 1000));
+    // Codex (B02, partial): timing out never grants permission to update.
+    // Admission/draining throughout the download still needs a separate gate.
+    if (update_ready()) check_once();
+    else ESP_LOGI(TAG, "update deferred: still busy or short of memory");
     vTaskDelay(pdMS_TO_TICKS(static_cast<uint32_t>(CONFIG_HUB_UPDATE_HOURS) * 3600 * 1000));
   }
 }

@@ -20,7 +20,11 @@ WORK="$(mktemp -d)"
 PORT=4414
 B=http://127.0.0.1:$PORT
 SRV=
-trap '[ -n "$SRV" ] && kill $SRV 2>/dev/null; wait 2>/dev/null; [ -n "${KEEP:-}" ] && echo "kept: $WORK" || rm -rf "$WORK"' EXIT
+EV=
+trap '[ -n "$EV" ] && kill $EV 2>/dev/null; [ -n "$SRV" ] && kill $SRV 2>/dev/null; wait 2>/dev/null; [ -n "${KEEP:-}" ] && echo "kept: $WORK" || rm -rf "$WORK"' EXIT
+# Codex (B08, partial): failed work must not masquerade as low memory use.
+download() { local output="$1"; shift; curl --fail --silent --show-error --max-time 120 -o "$output" "$@" || { echo "FAIL: request failed: $*"; exit 1; }; }
+request() { download /dev/null "$@"; }
 mkdir -p build
 cc -shared -fPIC -O2 -o build/heapcount.so test/heapcount.c -ldl || { echo "memory: could not build test/heapcount.c"; exit 1; }
 
@@ -61,29 +65,42 @@ for PROFILE in desktop small esp32 esp32-psram; do
   OUT="$WORK/heap-$PROFILE.txt"; rm -f "$OUT"; rm -rf "$WORK/ws/.hub-cache" "$WORK/ws/up"
   HEAPCOUNT_OUT="$OUT" LD_PRELOAD="$PWD/build/heapcount.so" "${HUBD:-./hubd}" "$WORK/ws" --port $PORT --www ../hub --state "$WORK/state-$PROFILE" --profile $PROFILE > "$WORK/log-$PROFILE.txt" 2>&1 &
   SRV=$!
-  for _ in $(seq 1 100); do curl -s -o /dev/null -m 1 $B/ && break; sleep 0.1; done
+  READY=
+  for _ in $(seq 1 100); do curl -fs -o /dev/null -m 1 $B/ && { READY=1; break; }; sleep 0.1; done
+  [ -n "$READY" ] || { echo "FAIL: $PROFILE server did not become ready"; exit 1; }
   step() {   # step <name>: the heap now and the most since the last step, against the ceilings
-    kill -USR1 $SRV; sleep 0.3
+    kill -USR1 $SRV || { echo "FAIL: $PROFILE server exited"; exit 1; }; sleep 0.3
     read -r now most < <(tail -1 "$OUT")
+    [[ "$now" =~ ^[0-9]+$ && "$most" =~ ^[0-9]+$ ]] || { echo "FAIL: invalid heap sample"; exit 1; }
     local now_kb=$((now / 1024)) most_kb=$((most / 1024)) mark=ok
     [ $most_kb -gt ${PEAK[$PROFILE]} ] && { mark=OVER; FAIL=1; }
     printf '  %-12s %-28s in use %6d KB, at most %6d KB  (ceiling %d KB)  %s\n' "$PROFILE" "$1" $now_kb $most_kb ${PEAK[$PROFILE]} $mark
   }
   step "start-up"
-  curl -s -o /dev/null $B/api/docs; step "the list, first"
-  curl -s -o /dev/null $B/api/docs; step "the list, again"
-  curl -s -o /dev/null -X POST --data-binary '# x' "$B/api/upload?path=up/a.md"; step "an upload"
-  curl -s -N $B/api/events > /dev/null & EV=$!
-  sleep 3; step "3 s with a page open"
-  curl -s -o /dev/null $B/api/docs; step "the list after the upload"
-  curl -s -o /dev/null "$B/api/search?q=findme"; step "a search"
-  curl -s -o /dev/null "$B/api/files?path=photos"; step "a folder's files"
+  request $B/api/docs; step "the list, first"
+  request $B/api/docs; step "the list, again"
+  request -X POST --data-binary '# x' "$B/api/upload?path=up/a.md"; step "an upload"
+  curl -fsS -N -D "$WORK/events.headers" $B/api/events > /dev/null & EV=$!
+  sleep 3
+  kill -0 "$EV" 2>/dev/null && grep -q '^HTTP/1.1 200' "$WORK/events.headers" || { echo "FAIL: event stream did not stay open"; exit 1; }
+  step "3 s with a page open"
+  request $B/api/docs; step "the list after the upload"
+  request "$B/api/search?q=findme"; step "a search"
+  request "$B/api/files?path=photos"; step "a folder's files"
   kill $EV 2>/dev/null
+  wait "$EV" 2>/dev/null; EV=
   sleep 0.5; step "at rest"
   read -r rest _ < <(tail -1 "$OUT")
   if [ $((rest / 1024)) -gt ${RESTKB[$PROFILE]} ]; then echo "  $PROFILE: $((rest / 1024)) KB in use at rest, over its ceiling of ${RESTKB[$PROFILE]} KB"; FAIL=1; fi
   # The engine's WebAssembly (2.6 MB), twice: kept in memory only within the profile's bound, and never copied for an answer.
-  curl -s -o /dev/null "$B/vendor/marginalia/wasm/marginalia_wasm_bg.wasm"; curl -s -o /dev/null "$B/vendor/marginalia/wasm/marginalia_wasm_bg.wasm"; step "a large page file, twice"
+  download "$WORK/engine.wasm" "$B/vendor/marginalia/wasm/marginalia_wasm_bg.wasm"
+  python3 - "$WORK/engine.wasm" <<'PYEOF' || exit 1
+import pathlib, sys
+data = pathlib.Path(sys.argv[1]).read_bytes()
+if len(data) <= 1 << 20 or data[:4] != b'\x00asm':
+    raise SystemExit('FAIL: expected a real WebAssembly asset larger than the S3 cache budget')
+PYEOF
+  request "$B/vendor/marginalia/wasm/marginalia_wasm_bg.wasm"; step "a large page file, twice"
   read -r now most < <(tail -1 "$OUT")
   # (64 KB of slack: a connection's own bookkeeping)
   if [ $(((now - rest) / 1024)) -gt $((CACHEKB[$PROFILE] + 64)) ]; then echo "  $PROFILE: the page-file cache grew by $(((now - rest) / 1024)) KB, past its bound of ${CACHEKB[$PROFILE]} KB"; FAIL=1; fi

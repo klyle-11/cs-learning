@@ -14,6 +14,7 @@
 // …") cover the bottom line for a few seconds.
 #pragma once
 
+#include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
@@ -23,13 +24,44 @@
 #include "star_burst.hpp"
 #include "star_tall.hpp"
 #include "star_wide.hpp"
+#include "clock_font.hpp"
 #include "status.hpp"
+
+// The clock's serif characters (clock_font.hpp): a set of them, and text drawn
+// from it. A character the set does not have is left out.
+struct SerifSet { const char *chars; const uint16_t *at; const uint32_t *wide; const uint16_t *narrow; int height, gap; };
+static const SerifSet SERIF_BIG = {CLOCK_BIG_CHARS, CLOCK_BIG_AT, CLOCK_BIG_COLS, nullptr, CLOCK_BIG_H, 2};
+static const SerifSet SERIF_SMALL = {CLOCK_SMALL_CHARS, CLOCK_SMALL_AT, nullptr, CLOCK_SMALL_COLS, CLOCK_SMALL_H, 1};
+inline int serif_width(const SerifSet &f, const char *s) {
+  int w = 0;
+  for (; *s; s++) if (const char *at = std::strchr(f.chars, *s)) w += f.at[at - f.chars + 1] - f.at[at - f.chars] + f.gap;
+  return w ? w - f.gap : 0;
+}
+// Returns where it ended.
+inline int serif(Canvas &c, const SerifSet &f, int x, int y, const char *s) {
+  for (; *s; s++) {
+    const char *at = std::strchr(f.chars, *s);
+    if (!at) continue;
+    for (int i = f.at[at - f.chars]; i < f.at[at - f.chars + 1]; i++, x++) {
+      const uint32_t col = f.wide ? f.wide[i] : f.narrow[i];
+      for (int r = 0; r < f.height; r++) if (col >> r & 1) c.set(x, y + r);
+    }
+    x += f.gap;
+  }
+  return x - f.gap;
+}
 
 struct BoardView {
   char say[3][22] = {"", "", ""};  // lines in place of the device list ("" for none)
   int progress = -1;               // 0 to 100 while an update downloads
   char alert[22] = "";             // stays on the bottom line until cleared (Wi-Fi lost, card removed)
   char name[24] = "";              // the name on the network, "hub.local", if it has one
+  bool clock = false;              // the clock slide; urgent status always takes precedence
+  bool clock_synced = false;       // the network has supplied the time since boot
+  char time[16] = "--:--";          // 12-hour time, without a leading zero
+  char meridiem[3] = "";           // AM or PM
+  char zone[4] = "ET";             // EST or EDT; ET until the time is known
+  char date[22] = "Time not synced";
 };
 
 // The star beside the title: three designs, one file each, to compare and
@@ -75,7 +107,11 @@ inline void draw_screen(Canvas &c, const HubStatus &s, const BoardView &b, unsig
 
   // Where to find it: the address, and every few seconds the name instead.
   char line[64];
-  if (s.running && s.host[0]) {
+  const bool clock = b.clock && s.running && !b.say[0][0] && b.progress < 0 &&
+                     !s.pair_code[0] && !b.alert[0] && !s.notice[0];
+  if (clock) {
+    c.text_fit((128 - Canvas::text_width(b.date)) / 2, 17, b.date, 128);
+  } else if (s.running && s.host[0]) {
     bool show_name = b.name[0] && frame / 40 % 2 == 1;
     const char *host = show_name ? b.name : s.host;
     if (s.port == (s.tls ? 443 : 80)) std::snprintf(line, sizeof line, "%s", host);
@@ -87,7 +123,19 @@ inline void draw_screen(Canvas &c, const HubStatus &s, const BoardView &b, unsig
   for (int x = 0; x < 128; x += 2) c.set(x, 26);
 
   const int top = 29;
-  if (b.say[0][0]) {
+  // Codex (B09): operational instructions own their footer. Put persistent
+  // alerts in the address row then, and defer transient notices until later.
+  const bool operational = b.say[0][0] || b.progress >= 0 || s.pair_code[0];
+  const char *bottom = operational ? "" : b.alert[0] ? b.alert : s.notice;
+  if (clock) {
+    // The time in the title's serif, large; to its right, small, AM or PM over
+    // the zone (the zone alone, at the foot, while the time is not known).
+    const int zone_w = std::max(serif_width(SERIF_SMALL, b.meridiem), serif_width(SERIF_SMALL, b.zone));
+    const int x = (128 - serif_width(SERIF_BIG, b.time) - 4 - zone_w) / 2, y = top + 1 + (34 - CLOCK_BIG_H) / 2;
+    const int side = serif(c, SERIF_BIG, x, y, b.time) + 4;
+    serif(c, SERIF_SMALL, side, y + 2, b.meridiem);
+    serif(c, SERIF_SMALL, side, y + CLOCK_BIG_H - CLOCK_SMALL_H, b.zone);
+  } else if (b.say[0][0]) {
     for (int i = 0; i < 3; i++) c.text_fit(0, top + i * 10, b.say[i], 128);
   } else if (b.progress >= 0) {
     c.text(0, top, "Updating");
@@ -104,13 +152,13 @@ inline void draw_screen(Canvas &c, const HubStatus &s, const BoardView &b, unsig
     if (s.fingerprint[0]) { std::snprintf(line, sizeof line, "CA %.17s", s.fingerprint); c.text(0, 56, line); }
   } else if (s.peer_count == 0) {
     c.text(0, top, s.running ? "No one connected" : "");
-    if (s.running && s.free) {
+    if (s.running && s.free_known) {
       std::snprintf(line, sizeof line, "%.1f GB free on card", static_cast<double>(s.free) / (1024.0 * 1024.0 * 1024.0));
       c.text_fit(0, top + 10, line, 128);
     }
   } else {
     // Four to a page; more turn over every four seconds, with a dot per page on the dotted line.
-    const int per_page = 4, pages = (s.peer_count + per_page - 1) / per_page, page = static_cast<int>(frame / 50) % pages;
+    const int per_page = bottom[0] ? 3 : 4, pages = (s.peer_count + per_page - 1) / per_page, page = static_cast<int>(frame / 50) % pages;
     const size_t cut = shared_start(s);
     for (int i = 0; i < per_page && page * per_page + i < s.peer_count; i++) {
       const HubPeer &p = s.peers[page * per_page + i];
@@ -126,12 +174,15 @@ inline void draw_screen(Canvas &c, const HubStatus &s, const BoardView &b, unsig
   }
 
   // A notice or an alert on the bottom line, shown reversed.
-  const char *bottom = b.alert[0] ? b.alert : s.notice;
   if (bottom[0]) {
     int w = Canvas::text_width(bottom);
     c.fill(0, 55, 128, 9, false);
-    c.text(w < 128 ? (128 - w) / 2 : 0, 56, bottom);
+    c.text_fit(w < 128 ? (128 - w) / 2 : 0, 56, bottom, 128);
     c.invert(0, 55, 128, 9);
+  }
+  if (operational && b.alert[0]) {
+    c.fill(0, 17, 128, 7, false);
+    c.text_fit(0, 17, b.alert, 128);
   }
 }
 

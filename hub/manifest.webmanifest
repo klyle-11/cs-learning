@@ -1,6 +1,6 @@
 {
-  "name": "Reader",
-  "short_name": "Reader",
+  "name": "Art-servr",
+  "short_name": "Art-servr",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

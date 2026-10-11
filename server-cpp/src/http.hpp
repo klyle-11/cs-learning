@@ -490,8 +490,15 @@ inline void handle_connection(std::shared_ptr<Conn> conn, const Handler &handler
   }
   for (int served = 0; served < 1000; served++) {
     conn->within(served == 0 ? 15000 : opt.keepalive_ms);
-    if (!conn->ahead.empty() || conn->tls || served == 0 || conn->peek() >= 0) conn->within(15000); // the headers get 15 s in all
-    else return;
+    // Codex (B03): wait for actual application data under the idle deadline,
+    // including TLS records already buffered by mbedTLS. Only then start the
+    // header deadline. A raw socket peek cannot account for TLS buffering.
+    if (served > 0 && conn->ahead.empty()) {
+      char first;
+      if (conn->read(&first, 1) <= 0) return;
+      conn->ahead.push_back(first);
+    }
+    conn->within(15000); // the headers get 15 s in all
     Request req;
     int bad = read_head(conn, req);
     if (bad < 0) return;

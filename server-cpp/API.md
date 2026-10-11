@@ -224,6 +224,8 @@ The page's own files (the page, its scripts, the manifest and icons) carry an `E
 - `/raw/…`: `sandbox allow-same-origin` and no script source at all, so a saved HTML page or an SVG never runs code, whether shown in the reader's frame or opened in a tab of its own; pictures, styles and fonts from this server only. (PDFs are sent without it: a browser's PDF viewer does not start in a sandbox.)
 - everything else: `default-src 'none'; sandbox`.
 
+**The workspace's name.** `title` in `/api/config` is the front page's heading, else `title` in `hub.json`, else `--title` if the server was started with one (the board passes `Learner-servr`), else the folder's name. `front` is `null` when the workspace has no `FRONTPAGE.md`; the page then makes a front page of its own (the name, and everything in the workspace under it), and saving an edit of it writes the file.
+
 **6. Storage.** Uploads and new notes are refused with 507 `storage is full` when the folder would pass its quota (`--quota-mb`, `HUB_QUOTA_MB`; default by profile: 20 GB on a computer, none on the board) or the disk would be left with under 16 MB. On the board the disk is the card, and its free space comes from FatFS's own count.
 
 The C++ server measures the folder once and then keeps count as it writes (uploads, notes, settings, removed folders). On the board that count stays exact, because nothing else writes to the card. On a computer, where other programs do, the count is refreshed by every look over the folder (the change watcher, the document list) and redone when older than 3 seconds.

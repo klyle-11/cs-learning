@@ -1,5 +1,7 @@
 # Is this the right shape for an ESP32?
 
+**10 October, seventh-round update:** keep the architecture, but prioritize the concrete recovery, OTA admission, TLS timeout and status-snapshot findings in [REVIEW.md](REVIEW.md#seventh-round-current-merge-memory-reliability-and-oled) before restructuring it. The measurements below are host application-heap results with board profiles, not complete firmware RAM measurements. Neither chip's real concurrent capacity, nor whether it needs an event loop, is established yet.
+
 An evaluation asked for on this branch: would the hub be better built a different way for the board, or can the way it is built work? Short answer: **it can work, and it is the right shape to keep**, with three changes ahead, in this order: stop writing every feature twice (retire the Node server: done on `marginalia-engine`, and merged here), split `hub.cpp` into parts, and, only if measurements on the T3 V1.6.1 call for it, an event loop instead of a thread per connection. The T3-S3 does not need the last one.
 
 ## The rule it is held to

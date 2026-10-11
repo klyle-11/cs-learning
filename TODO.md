@@ -294,6 +294,10 @@ Still to do:
 
 ## Hardware for the board (9 October 2026)
 
+- [x] 10 October: OLED clock slide (serif, AM/PM over EST or EDT, US Eastern with daylight time), default dimmed screen after ten idle minutes; host tests pass.
+- [x] 11 October, the reader: a front page made for a workspace that has no `FRONTPAGE.md` (files put straight on a card), listing what is there; "describe…" on a folder's made page gives it a front page of its own; a spinner while a pane, the list or the reader itself is loading; the sidebar button before the notes button; a new app icon (a star) and the installed app named Art-servr; on a board, "reboot the board" where a computer is told `npm start`.
+- [ ] Address the ESP32 seventh-round reliability and memory findings, then validate the clock and resource budgets on both boards: [board plan](server-cpp/esp32/TODO.md#next), [review](server-cpp/esp32/REVIEW.md#seventh-round-current-merge-memory-reliability-and-oled).
+
 The board code (`server-cpp/esp32/`) targets a LilyGO T3 V1.6.1: ESP32-PICO-D4, 4 MB flash, no PSRAM, microSD on SPI. It has not been flashed yet.
 
 - [ ] **ESP32-S3 N16R8** (16 MB flash, 8 MB octal PSRAM): the board to move to. The PSRAM lifts the tightest limits (about 4 TLS connections at once; 1 MB for anything read into memory, such as a book's entry), and 16 MB leaves room for the program and the certificate partition. Needs a build target of its own: flash size 16 MB, PSRAM on (octal), a partition table, and the card's pins. GPIO 35 to 37 are taken by the PSRAM on these modules; most S3 dev boards have no card slot, so a microSD breakout (SPI, 6 wires) goes with it. The S3 can also drive the card in SD mode (SDMMC), faster than SPI. Check a clone's boot log for 16 MB flash and 8 MB PSRAM.

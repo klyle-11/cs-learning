@@ -131,6 +131,21 @@ The merge with `marginalia-engine` (fifth round; REVIEW.md, "The merge"):
 
 ## Next
 
+Seventh review round (10 October; details and evidence in [REVIEW.md](REVIEW.md#seventh-round-current-merge-memory-reliability-and-oled)), before calling the firmware ready:
+
+- [ ] B01: recover only completed saves; retain recoverable bytes after FAT replacement failure; inject failures during first creation and overwrite
+- [ ] B02: defer OTA while busy/low on memory; coordinate admission and draining through installation/reboot
+- [ ] B03: apply the configured idle timeout to HTTPS (measured 15 s instead of 2 s with `esp32`)
+- [ ] B04: bounded, allocation-free OLED status snapshot with correct card free space, independent of thread-local workspace state
+- [ ] B05: reconcile S3 socket capacity with ordinary connections, event streams and network services
+- [ ] B06/B07: persist validated Wi-Fi settings before deleting the input; make missing-page/card and stalled-start recovery explicit
+- [ ] B08: make memory tests require successful responses; add concurrent TLS/notes checks and real internal/PSRAM/stack measurements; write the missing `../MEMORY.md`
+- [ ] B09: reserve the OLED footer so notices do not overwrite a device, fingerprint or update instruction
+- [x] Requested clock slide: 12-hour time in serif, AM/PM over EST or EDT beside it (US Eastern, daylight time followed), default dimmed screensaver after ten idle minutes; BOOT cycles slides on the S3
+- [x] The board's LED held off; the page's header "Learner-servr" instead of the card folder's name (`--title`)
+- [x] Host tests and rendered previews for clock rollover, screen priority, inactivity and button navigation
+- [ ] Build the clock firmware with Arduino 3.x/ESP-IDF 5.x and check SNTP (including a late reply), BOOT and the actual OLED on both boards; local Arduino 2.0.17 is incompatible
+
 - [ ] Books on the T3 V1.6.1: the board unpacks a book's contents whole to list it, so one whose contents unpack to over 32 KB (hundreds of chapters) is not listed there, and a page over 32 KB is not shown without the engine. Parsing the contents as it is unpacked (inflate in pieces) would lift both; the T3-S3 holds 1 MB
 - [ ] Book pages in the title cache: a book is opened again (its list of entries, its contents) each time the list is made
 - [ ] An event loop instead of a thread per connection: the 12 KB stack each is the largest cost per device after TLS. With `select()` on lwIP and mbedTLS's non-blocking mode, many more devices fit
