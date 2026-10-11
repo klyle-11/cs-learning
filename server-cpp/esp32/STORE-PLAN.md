@@ -6,7 +6,7 @@ Nothing here is built yet. Cross out or change anything before it is.
 
 ## Why
 
-The board has a few hundred KB of RAM (2 MB more of PSRAM on the T3-S3) and one 240 MHz core doing TLS. The full server makes it build the document list (reading every file's title, unpacking books), search, merge notes, unpack books' pages, hash files, keep a trash, hold a connection open per page, and pair devices: about 3,300 lines, each part competing with TLS for memory. A browser has gigabytes. So the board serves and stores; the browser thinks.
+The board is the **LilyGO T3-S3 V1.3 only** (ESP32-S3, 4 MB flash, 2 MB PSRAM); the T3 V1.6.1 is dropped. It has a few hundred KB of internal RAM, 2 MB of PSRAM, and two 240 MHz cores doing TLS. The full server makes it build the document list (reading every file's title, unpacking books), search, merge notes, unpack books' pages, hash files, keep a trash, hold a connection open per page, and pair devices: about 3,300 lines, each part competing with TLS for memory. A browser has gigabytes. So the board serves and stores; the browser thinks.
 
 ## The store's API (the whole of it)
 
@@ -27,7 +27,7 @@ Every write the store makes moves the change counter on. Nothing else writes to 
 
 **Access:** one password, set in `wifi.txt` on the card (`password=`), kept in the board's flash with the Wi-Fi settings and deleted from the card. The page asks for it once and keeps it; each request carries it (`Authorization: Bearer`). Requests from other sites are refused as now (Origin check). No pairing codes, no per-device tokens, no device list.
 
-**TLS:** kept (phones need it for offline copies and the page's encryption), one certificate made on the board at first start, its fingerprint on the screen. At most 4 connections (T3 V1.6.1: 2), session reuse on. No connection held open between requests.
+**TLS:** kept (phones need it for offline copies and the page's encryption), one certificate made on the board at first start, its fingerprint on the screen. At most 4 connections, session reuse on, TLS buffers in PSRAM. No connection held open between requests.
 
 ## What the page does in store mode
 
@@ -53,7 +53,7 @@ The page's code for this goes in modules of its own (`hub/js/store.js`: the list
 ## What leaves the firmware
 
 - The full server (`src/hub.cpp`) is not built for the board; the store is a file of its own (`esp32/main/store.cpp`, about 600 lines), using `fs.hpp` and `http.hpp` as they are.
-- Signed updates from GitHub (`update.cpp`, the second program slot, the HTTPS client): replaced by "put `firmware.bin` on the card and restart" (the board checks it, writes it, deletes it). The partition table goes back to one large program slot.
+- Signed updates from GitHub (`update.cpp`, the HTTPS client, the signature check): replaced by "put `firmware.bin` on the card and restart" (the board checks it, writes it, deletes it). The partition table keeps its two slots: the card's `firmware.bin` is written into the other one, so a bad update still rolls back.
 - Pairing, the certificate authority with its own root (one self-signed certificate instead; the trust page shows its fingerprint), devices, sessions.
 - The screen keeps: the title, the star, the address, the free space, the number of devices seen lately, and messages. Not the pairing code (there is none).
 - Kept: Wi-Fi from `wifi.txt`, mDNS (`hub.local`), the card checks, power-cut recovery of `.tmp` files, the stall timeouts, the memory guard on new connections.
@@ -74,4 +74,4 @@ Unchanged: the full server, all its features, `make test`, `make memory`. The co
 
 - The access password in `wifi.txt`: fine, or would you rather set it from the page the first time?
 - Firmware updates from the card instead of GitHub: fine?
-- The T3 V1.6.1 too, or the T3-S3 only from now on?
+- ~~The T3 V1.6.1 too?~~ T3-S3 only (decided 11 October): its pins, profile, PlatformIO environment and notes go.

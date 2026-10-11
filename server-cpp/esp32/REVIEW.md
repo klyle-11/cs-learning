@@ -4,6 +4,10 @@
 
 Read in full: `../src/hub.cpp`, `http.hpp`, `fs.hpp`, `status.hpp`, `main/*.cpp`, `main/*.hpp`, the build files. Server behaviour was tested on a computer with the board's limits (`--profile esp32`): the comparison test (107 requests against the Node server then; since the merge with `marginalia-engine`, 260 against recorded answers), the same under AddressSanitizer and UBSan, a 20,000-file tree, a 3 GB file read past 2 GB, a damaged notes file, the status the screen reads. The board-only code (screen, Wi-Fi, card, updates) compiles with ESP-IDF 5.4.1 with and without mDNS, and the release signing was checked end to end (OpenSSL signs, the board's mbedTLS code verifies, tampering is refused). **None of it has run on a board.**
 
+## Next: the board as a store (branch `claude/esp32-store-tier`)
+
+After the board showed spinners in place of the reader, the owner decided (11 October 2026) that the board should stop being a full server: **two tiers, one client**. The full server stays for computers and the Raspberry Pi; the board, now the **T3-S3 only**, becomes a store that keeps files and says when they change, and the page does the rest. The reasoning is in [STORE-PLAN.md](STORE-PLAN.md). The work is split for several agents, with the store's API as the contract between them, in [STORE-HANDOFF.md](STORE-HANDOFF.md). The conversation behind both is in [CONVERSATION.md](CONVERSATION.md). The rest of this review is of the board as a full server, as it stands on PR #1.
+
 ## Verdict
 
 Memory no longer depends on how much is on the card: what grows with the number of files is now on the card (the list, the titles) or bounded (32 KB of names to sort, 10 folders deep), and the measured peak on 20,000 files is 180 KB where it was 26 to 35 MB. The board's own failure modes (power cuts, a card pulled out, no network, low memory) now end in a message on the screen and a retry, not a silent board or lost notes. The updates add the most risk, and are built to contain it: signed, forward only, undone if the new firmware fails.
