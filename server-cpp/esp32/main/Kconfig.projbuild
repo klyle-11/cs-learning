@@ -11,12 +11,6 @@ menu "Hub"
     config HUB_NAME
         string "Name on the network: the board is NAME.local (wifi.txt can change it)"
         default "hub"
-    config HUB_UPDATE_REPO
-        string "GitHub repository with firmware releases (owner/name); empty: no updates"
-        default ""
-    config HUB_UPDATE_HOURS
-        int "Hours between looks for a new release"
-        default 24
     config HUB_OLED_SH1106
         bool "The OLED is an SH1106 (some clones) rather than an SSD1306"
         default n

@@ -36,6 +36,7 @@
 static const char *TAG = "screen";
 static const int SDA = OLED_SDA, SCL = OLED_SCL;
 static volatile bool info_wanted = false;
+extern "C" const char *board_ip();
 
 static std::mutex view_lock;
 static BoardView view;            // what the board has asked to show
@@ -149,7 +150,13 @@ static void screen_task(void *) {
   int64_t info_until = 0;
   for (unsigned frame = 0;; frame++) {
     const int64_t t = esp_timer_get_time();
-    if (t - asked > 500000) { hub_status(status); asked = t; }
+    if (t - asked > 500000) {
+      hub_status(status);
+      // The store listens on 0.0.0.0, which is not an address a person can
+      // type. Show the address DHCP actually gave this board.
+      if (const char *ip = board_ip()) std::snprintf(status.host, sizeof status.host, "%s", ip);
+      asked = t;
+    }
     BoardView v;
     { std::lock_guard<std::mutex> g(view_lock); v = view; }
     if (info_wanted) { info_wanted = false; info_until = t + 8000000; changed_at = t; }

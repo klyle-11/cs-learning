@@ -1,6 +1,11 @@
 // The reader. Loaded as a module so that the page needs no inline script: the
 // server's content policy only lets scripts from this server run.
 import { store, idb, local } from './local.js';
+import { StoreMode } from './js/store.js';
+
+// ESP32 store adapter. It stays dormant unless /api/device opts in, leaving
+// the full server path below unchanged.
+const storeMode = new StoreMode(store, idb);
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
@@ -48,7 +53,7 @@ async function call(url, opts = {}) {
   // the server (`probe`) goes out, and everything resumes when that succeeds.
   if (!net.online && !opts.probe) throw unreachable(opts);
   // Another hub answers only to the token it gave this device when they paired.
-  if (hub.url && !hubToken(hub.url)) {
+  if (!storeMode.active && hub.url && !hubToken(hub.url)) {
     if (!opts.quiet) askToPair();
     return new Response('{"error":"pairing required"}', { status: 401, headers: { 'Content-Type': 'application/json' } });
   }
@@ -59,7 +64,9 @@ async function call(url, opts = {}) {
     // Each request names the workspace this page shows: the hub refuses one from a page left showing a workspace that is
     // no longer open (412), so nothing here is read from, or written into, the one that is (see workspaceMoved).
     const headers = { ...opts.headers, ...(config.workspace ? { 'X-Hub-Workspace': config.workspace } : {}), ...(hub.url ? { Authorization: 'Bearer ' + hubToken(hub.url) } : {}) };
-    const r = await fetch(hub.url + url, { ...opts, headers, signal: ctl.signal });
+    const r = storeMode.active
+      ? await storeMode.request(url, { ...opts, headers, signal: ctl.signal }, fetch)
+      : await fetch(hub.url + url, { ...opts, headers, signal: ctl.signal });
     clearTimeout(timer);
     setOnline(true);
     if (r.status === 412 && r.headers.get('X-Hub-Workspace')) workspaceMoved();
@@ -743,6 +750,7 @@ function offerUpload(files) {
   add.onclick = () => { const to = as.name(); pickedAs(folder, to); runUpload(underName(ok, folder, to), null, to, front(), lock.checked); };
   const fresh = el('button', '', 'Open as its own workspace, in place of this one');
   fresh.title = 'Nothing is deleted: the current workspace stays on disk and in the workspace menu';
+  fresh.hidden = storeMode.active;   // the board store has one workspace
   fresh.onclick = () => runUpload(ok, as.name(), as.name(), front());
   // A folder added to this workspace can be locked: its password is chosen the first time it is opened.
   const lockWrap = el('label', 'check'), lock = el('input');
@@ -1103,6 +1111,8 @@ function askToPair() {
   if (pairing) return;
   pairing = true;
   events?.close();
+  // A store has one password instead of the full server's device pairing.
+  if (storeMode.active) return storeMode.askPassword({ showGate, field, onEnter, closeGate });
   showGate('Pair this device', (card) => {
     const at = new URL(hub.url || location.href);
     const plain = at.protocol !== 'https:' && !/^(localhost|127\.|\[::1\])/.test(at.host);
@@ -1366,7 +1376,7 @@ function renderPrivacy() {
   // Who the server takes this device for.
   if (session) {
     const d = line('Device', session.device.name + ' ');
-    d.append(link('devices…', showDevices, 'See, add and remove paired devices'));
+    if (!storeMode.active) d.append(link('devices…', showDevices, 'See, add and remove paired devices'));
     rows.push(d);
   }
   // What is stored here, and whether it is readable.
@@ -2380,7 +2390,15 @@ findClear.onclick = () => { clearFind(); findBox.focus(); };   // the × over th
 async function findInside(q) {
   try {
     const r = await call('/api/search?q=' + encodeURIComponent(q), { quiet: true });
-    if (r.ok) return await r.json();
+    if (r.ok) {
+      const found = await r.json();
+      if (storeMode.active) {
+        kept = new Set(((await idb.keys('docs')) || []).filter((k) => k.startsWith(config.root + '|')).map((k) => k.slice(config.root.length + 1)));
+        renderTree();
+        renderNet();
+      }
+      return found;
+    }
   } catch { /* out of reach: fall through to what is kept here */ }
   const hits = [];
   for (const d of docs) {
@@ -6994,6 +7012,13 @@ let events = null;
 let asking = 0;
 function listen() {
   events?.close();
+  if (storeMode.active) {
+    storeMode.listen(({ all, paths }) => {
+      for (const file of all ? ['hub.json', 'notes/notes.json'] : paths) changedFiles.add(file);
+      if (!changeTimer && !uploading) changeTimer = setTimeout(applyChanges, Math.max(250, changesApplied + 3000 - Date.now()));
+    }, probe);
+    return;
+  }
   if (hub.url) {
     clearInterval(asking);
     asking = setInterval(() => { if (net.online && !document.hidden && !gateOpen()) { loadDocs(); loadNotes(); } }, 60000);
@@ -7058,6 +7083,9 @@ $('moved').onclick = () => { location.href = '/'; };
   hubs = store.get('hub:list') || [];
   hub = hubs.find((h) => h.url === store.get('hub:at')) || HOME;
   renderHubs();
+  // Detect before asking for a session: a store substitutes its password for
+  // the full server's pairing/session endpoints.
+  await storeMode.detect(hub.url, fetch);
   loadHubs();
   // Then find out whether the server knows this device.
   try {
