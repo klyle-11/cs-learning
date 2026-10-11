@@ -51,7 +51,7 @@ Ticked: handled on this branch. Each says what happened before and what happens 
 
 ### Stacks
 
-Chosen by estimate, to be measured (the board logs the unused part of each after five minutes): connection threads 12 KB (TLS handshake, then the request, the list 10 levels deep at most), the server's start-up thread 16 KB (certificates: EC P-256, fast), the screen 6 KB, the update task 8 KB (a TLS handshake with certificate checks), the watch 6 KB.
+Chosen by estimate, to be measured (the board logs the unused part of each after five minutes): connection threads 12 KB (TLS handshake, then the request, the list 10 levels deep at most), the server's start-up thread 16 KB (certificates: EC P-256, fast), the screen 6 KB, the update task 8 KB (a TLS handshake with certificate checks), the watch 8 KB (since it also pings open pages over TLS).
 
 ## The T3-S3 V1.3 (third round)
 
@@ -112,6 +112,15 @@ What the merge had to change in that branch's code for the board:
 - [ ] **What the T3 V1.6.1 unpacks itself is 32 KB at most.** The reader's engine reads books by range requests, so pages of any size are read and highlighted. But to list a book the board unpacks its contents (the package file and the table of contents), and a book whose contents unpack to more than 32 KB (hundreds of chapters), or whose zip lists thousands of files, is left out of the list there; a page over 32 KB is also not shown when the engine is not there. Unpacking a piece at a time would lift both; the T3-S3 holds 1 MB.
 - [ ] **Not tried on a board, nor run on Windows** (only compiled there).
 - [x] **The T3-S3 would have tried to keep the engine's 2.6 MB WebAssembly in memory** (found after the merge, sixth round). Its profile keeps page files in memory, which was sized for the page and its scripts; since the merge they include the document engine and PDF.js. *Now:* a page file is kept only within `most_held` (1 MB in all on the T3-S3), the rest sent from the card; and kept files are shared by the answers that send them, never copied for each.
+
+## Pages that load forever (seventh round)
+
+Reported from a board: it showed a pairing code, but the reader never asked for it: spinners. Not reproduced on a computer (the board's profile over HTTPS, behind a proxy at 100 KB/s adding 0.8 s to each new connection: the prompt in 9 s), so these are the causes that only a board has, each now dealt with, and the board now says on its serial console what goes wrong:
+- [x] **Pages that went were never let go on the board.** Each open page keeps a connection for live reload, a TLS session of a few KB even with ESP-IDF's buffers freed when idle. On a computer the watcher pings them every 20 s, which finds those whose page has gone; the board has no watcher, so a reloaded page, a closed tab or a phone that slept left its connection, and its memory, behind. *Now:* the board's watch task drops closed ones every 3 s and pings the rest every 20 s (`hub_tick`), and those sockets have TCP keepalive (30 s), so a phone that left the network without closing is noticed in about a minute, on every platform.
+- [x] **The page's first question got 3 s.** Whether this device is paired was asked with a 3-second limit, after which the page took the server for unreachable; a board doing its first HTTPS handshake on a busy network can take longer. *Now:* 10 s.
+- [x] **The service worker fetched 5 MB at once on a first visit** (the document engine's 17 files, its 2.6 MB WebAssembly, PDF.js), filling the board's four connections and its Wi-Fi for minutes while the page's own requests waited. *Now:* those are kept as each is first used; from a computer the rest are fetched one at a time once the page has settled, from a board not at all.
+- [x] **The board said nothing.** *Now:* a failed TLS handshake is printed with its mbedTLS code and the memory free (`-0x7f00` is out of memory), and a connection kept waiting more than 2 s is printed with why (all places taken, or short of memory).
+- [ ] Not yet seen on the board. If it still loads forever: the serial console during a load, and whether the card's `hub/www` was written by `make card` from the same commit as the firmware (since the merge the page is a module that imports more files; one missing stops it before it can ask anything).
 
 ## Other things checked
 

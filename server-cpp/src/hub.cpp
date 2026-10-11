@@ -2438,6 +2438,7 @@ static http::Response answer(http::Request &req) {
     req.conn->within(5000);
     if (!req.conn->write_all(string("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nConnection: keep-alive\r\n") + COMMON_HEADERS + "\r\n\n")) { r.status = 500; r.close = true; return r; }
     req.conn->who = device;
+    sys::keepalive(req.conn->fd, 30);   // a page that went without closing is noticed, and its place freed
     clients.push_back(req.conn);
     r.hold = true;
     return r;
@@ -3164,6 +3165,14 @@ void hub_status(HubStatus &out) {
   }
 }
 int hub_busy() { return http::active().load(); }
+void hub_tick() {
+  static http::Clock::time_point pinged = http::Clock::now();
+  {
+    std::lock_guard<std::mutex> g(clients_lock);
+    clients.erase(std::remove_if(clients.begin(), clients.end(), [](const std::shared_ptr<http::Conn> &c) { return c->gone(); }), clients.end());
+  }
+  if (http::Clock::now() - pinged > std::chrono::seconds(20)) { tell_clients(": ping\n\n"); pinged = http::Clock::now(); }
+}
 
 // Every answer leaves with the headers that say what a browser may do with it.
 static http::Response route(http::Request &req) {

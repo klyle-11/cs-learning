@@ -28,3 +28,6 @@ struct HubStatus {
 void hub_status(HubStatus &out);
 // Connections being served right now: something to wait for before an update.
 int hub_busy();
+// Called every few seconds by the board, which has no watcher thread: pages that have gone are dropped, and every 20
+// seconds those still open are pinged, which finds the ones that went without closing.
+void hub_tick();

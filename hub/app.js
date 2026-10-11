@@ -678,6 +678,11 @@ async function loadUploadLimit() {
     const r = await call('/api/device', { quiet: true });
     const d = r.ok ? await r.json() : null;
     if (d?.maxUpload > 0) uploadLimit = d.maxUpload;
+    // The service worker keeps the files PDFs and the document engine need (5 MB in all) as each is first used. From
+    // a computer it may also fetch the rest now, one at a time, once this page has settled; from a board, whose Wi-Fi
+    // and four connections they would fill for minutes, it does not.
+    if (d && !String(d.profile || '').startsWith('esp32') && 'serviceWorker' in navigator)
+      setTimeout(() => navigator.serviceWorker.ready.then((reg) => reg.active?.postMessage({ type: 'keep-the-rest' })).catch(() => {}), 20000);
   } catch { /* the old limit stands */ }
 }
 
@@ -7056,7 +7061,8 @@ $('moved').onclick = () => { location.href = '/'; };
   loadHubs();
   // Then find out whether the server knows this device.
   try {
-    const r = await call('/api/session', { quiet: true, wait: 3000 });
+    // Ten seconds: a board answering its first HTTPS request, on a busy network, can take several.
+    const r = await call('/api/session', { quiet: true, wait: 10000 });
     if (r.status === 401) return askToPair();
     if (r.ok) session = await r.json();
   } catch { /* not reachable: carry on with what is on this device */ }

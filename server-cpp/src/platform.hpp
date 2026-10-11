@@ -91,6 +91,33 @@ inline void set_option(int fd, int level, int name) {
   ::setsockopt(fd, level, name, &yes, sizeof yes);
 #endif
 }
+// Have the system check now and then that the other end of a quiet connection is still there (a page listening for
+// changes): a phone that left the network without closing it is then noticed in about a minute, and its place freed.
+inline void keepalive(int fd, int idle_s) {
+  set_option(fd, SOL_SOCKET, SO_KEEPALIVE);
+  const int idle = idle_s, every = 10, tries = 3;
+#ifdef _WIN32
+#  ifdef TCP_KEEPIDLE
+  ::setsockopt(static_cast<SOCKET>(fd), IPPROTO_TCP, TCP_KEEPIDLE, reinterpret_cast<const char *>(&idle), sizeof idle);
+  ::setsockopt(static_cast<SOCKET>(fd), IPPROTO_TCP, TCP_KEEPINTVL, reinterpret_cast<const char *>(&every), sizeof every);
+  ::setsockopt(static_cast<SOCKET>(fd), IPPROTO_TCP, TCP_KEEPCNT, reinterpret_cast<const char *>(&tries), sizeof tries);
+#  else
+  (void)idle; (void)every; (void)tries;   // older headers: the system's own timing
+#  endif
+#else
+#  if defined(TCP_KEEPIDLE)
+  ::setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof idle);
+#  elif defined(TCP_KEEPALIVE)
+  ::setsockopt(fd, IPPROTO_TCP, TCP_KEEPALIVE, &idle, sizeof idle);   // macOS's name for it
+#  endif
+#  ifdef TCP_KEEPINTVL
+  ::setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &every, sizeof every);
+#  endif
+#  ifdef TCP_KEEPCNT
+  ::setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &tries, sizeof tries);
+#  endif
+#endif
+}
 // Why the last receive or send did not move any bytes.
 enum class Why { again, interrupted, failed };
 inline Why why() {

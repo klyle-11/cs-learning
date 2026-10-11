@@ -197,3 +197,8 @@ Everything the reader does with them happens in the browser: the document engine
 | The server stopped / Restarting in 30 s | The serial monitor says why (certificates, the folder). |
 | This version failed / Going back | A new firmware could not start: back to the previous one. |
 | Flash storage failed | The state partition would not mount: reflash by USB. |
+
+When the board shows its address and a pairing code but a browser only shows spinners (no "Pair this device"):
+1. The page on the card must come from the same commit as the firmware: run `make card CARD=…` again after updating either. Since the merge the reader is a module that imports other files, and one missing (or an old one) stops it before it asks anything. In the browser, the developer tools' Network panel shows any file that answered 404.
+2. Watch the serial console (`idf.py monitor`) while the page loads. `tls: a handshake … failed (-0x7f00)` means the board ran out of memory for a new connection; `connections: the next one waits` says whether all places are taken or memory is short. Close other tabs and devices with the reader open, wait a minute (pages that went are let go within about a minute), and try again.
+3. First visits are slow on the board: the page (about 600 KB) comes over its Wi-Fi and HTTPS; allow ten seconds or more before it asks.

@@ -296,6 +296,7 @@ static void watch_task(void *) {
     HubStatus s;
     hub_status(s);
     if (s.running && served_for < 60 && (served_for += 3) >= 60) update_keep();
+    if (s.running) hub_tick();   // pages that have gone are let go (there is no watcher on the board to ping them)
   }
 }
 
@@ -394,7 +395,7 @@ static void start() {
   screen_say(nullptr);
   ESP_LOGI(TAG, "version %d serving at %s (%s.local); %u bytes free, largest block %u", HUB_VERSION, ip_text, name_text,
            static_cast<unsigned>(esp_get_free_heap_size()), static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
-  if (xTaskCreate(watch_task, "watch", 6144, nullptr, 2, nullptr) != pdPASS) ESP_LOGE(TAG, "no memory for the watch task: a card taken out will not be noticed");
+  if (xTaskCreate(watch_task, "watch", 8192, nullptr, 2, nullptr) != pdPASS) ESP_LOGE(TAG, "no memory for the watch task: a card taken out will not be noticed");
   update_start();
 }
 

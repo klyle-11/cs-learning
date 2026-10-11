@@ -19,7 +19,17 @@ const ENGINE = ['index', 'client', 'worker', 'wasm/marginalia_wasm', 'selection'
 const LATER = ['/vendor/pdf.mjs', '/vendor/pdf.worker.mjs', ...ENGINE, '/js/engine-worker.js'];
 const WAIT = 8000;   // how long the check behind a served file may take
 
-self.addEventListener('install', (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL).then(() => Promise.all(LATER.map((u) => c.add(u).catch(() => {}))))).then(() => self.skipWaiting())));
+// Installing keeps the page itself. The rest is kept as each file is first used (see fetch, below), and, when the page
+// asks (from a computer: see loadUploadLimit in app.js), fetched now, one file at a time: all at once they filled a
+// board's four connections and its Wi-Fi for minutes, and the page's own first requests waited behind them.
+self.addEventListener('install', (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())));
+self.addEventListener('message', (e) => {
+  if (e.data?.type !== 'keep-the-rest') return;
+  e.waitUntil((async () => {
+    const c = await caches.open(CACHE);
+    for (const u of LATER) if (!(await c.match(u))) await c.add(u).catch(() => {});
+  })());
+});
 self.addEventListener('activate', (e) => e.waitUntil((async () => {
   for (const k of await caches.keys()) if (k !== CACHE) await caches.delete(k);
   await self.clients.claim();

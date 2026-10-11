@@ -36,6 +36,9 @@
 
 #include "fs.hpp"
 #include "secure.hpp"
+#ifdef ESP_PLATFORM
+#include "esp_heap_caps.h"
+#endif
 
 namespace http {
 
@@ -121,7 +124,15 @@ class Conn {
     for (;;) {
       int rc = mbedtls_ssl_handshake(&ssl);
       if (rc == 0) return true;
-      if (rc != MBEDTLS_ERR_SSL_WANT_READ && rc != MBEDTLS_ERR_SSL_WANT_WRITE) return false;
+      if (rc != MBEDTLS_ERR_SSL_WANT_READ && rc != MBEDTLS_ERR_SSL_WANT_WRITE) {
+#ifdef ESP_PLATFORM
+        // On the board, said on its serial console with the memory it had: a handshake that fails for want of memory
+        // (MBEDTLS_ERR_SSL_ALLOC_FAILED, -0x7f00) looks to a browser like a server that is not there.
+        std::printf("tls: a handshake from %s failed (-0x%04x); %u bytes free, largest block %u\n", peer.c_str(), static_cast<unsigned>(-rc),
+                    static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_8BIT)), static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
+#endif
+        return false;
+      }
     }
   }
 
@@ -538,7 +549,11 @@ inline int serve(const Options &opt, Handler handler) {
     // Full, or short of memory: leave the next one waiting on the listening
     // socket until a place frees up. A browser waits; a refused one shows an error.
     // One connection is always let in: with none open, memory is as free as it gets.
-    while (active().load() >= opt.max_conns || (active().load() > 0 && opt.admit && !opt.admit())) std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    // A wait of more than two seconds is said once (on the board, on its serial console), with what holds the places.
+    for (int waited = 0; active().load() >= opt.max_conns || (active().load() > 0 && opt.admit && !opt.admit()); waited += 20) {
+      if (waited == 2000) std::printf("connections: the next one waits: %d open (at most %d)%s\n", active().load(), opt.max_conns, active().load() < opt.max_conns ? ", short of memory" : "");
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
     sockaddr_in peer{};
     int fd = sys::accept_from(srv, peer);
     if (fd < 0) continue;
