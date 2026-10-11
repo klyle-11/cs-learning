@@ -1,3 +1,5 @@
+# For the LilyGO T3-S3 V1.3 (ESP32-S3) only.
+CONFIG_IDF_TARGET="esp32s3"
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
@@ -39,3 +41,17 @@ CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y
 # The server listens on IPv4 only (http.hpp); leaving IPv6 out of the network stack
 # keeps the program small enough to leave room in its update slot.
 CONFIG_LWIP_IPV6=n
+
+# The LilyGO T3-S3 V1.3: its ESP32-S3FH4R2 carries 2 MB of quad-SPI PSRAM.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_QUAD=y
+CONFIG_SPIRAM_SPEED_80M=y
+# Ordinary allocations may land in PSRAM (above 16 KB by default; smaller ones,
+# and anything for DMA, stay in internal memory)
+CONFIG_SPIRAM_USE_MALLOC=y
+# TLS keeps its buffers (16 KB in and 4 KB out per connection) and its
+# certificates in PSRAM: internal memory is then mostly thread stacks, which is
+# what lets the "esp32-psram" profile serve 8 connections and 12 open pages.
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+# Logs and the serial monitor on the USB-C port, which is the chip's own USB
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y

@@ -1,26 +1,26 @@
 # Learner-servr on LilyGO T3 boards
 
-The hub's server running on an ESP32 board, with the documents on a microSD card of up to 32 GB and a status screen. Two boards: the **T3 LoRa32 V1.6.1** (ESP32) and the **T3-S3 V1.3** (ESP32-S3 with 2 MB PSRAM). Same server code as on a computer (`../src`); this folder adds what only the board needs. Branch: `claude/esp32-32gb-memory-efficiency-n3dz1c`. Its plan, with every request made on the branch, is [TODO.md](TODO.md); its review [REVIEW.md](REVIEW.md); whether it is built the right way, [ARCHITECTURE.md](ARCHITECTURE.md).
+The hub's server running on an ESP32 board, with the documents on a microSD card of up to 32 GB and a status screen. The board is the **LilyGO T3-S3 V1.3** (ESP32-S3 with 2 MB PSRAM). On branch `claude/esp32-store-tier` it is being made a store rather than a full server: see [STORE-PLAN.md](STORE-PLAN.md) and [STORE-HANDOFF.md](STORE-HANDOFF.md). Same server code as on a computer (`../src`); this folder adds what only the board needs. Branch: `claude/esp32-32gb-memory-efficiency-n3dz1c`. Its plan, with every request made on the branch, is [TODO.md](TODO.md); its review [REVIEW.md](REVIEW.md); whether it is built the right way, [ARCHITECTURE.md](ARCHITECTURE.md).
 
 **Not yet run on a board.** Everything here builds (ESP-IDF 5.4.1) and the server parts are tested on a computer with the board's settings (`--profile esp32`); the board-only parts (screen, Wi-Fi, card, updates) are checked by compiling and reading, not by running. The first flash is where they meet the hardware.
 
-## The boards
+## The board
 
-| | T3 LoRa32 V1.6.1 | T3-S3 V1.3 (and V1.2) |
-|---|---|---|
-| Chip | ESP32-PICO-D4, 2 cores, 240 MHz | ESP32-S3FH4R2, 2 cores, 240 MHz |
-| Memory | 520 KB, roughly 150 to 200 KB free once Wi-Fi and TLS are up; no PSRAM | 512 KB, and 2 MB PSRAM |
-| Flash | 4 MB | 4 MB |
-| microSD (SPI) | MOSI 15, MISO 2, SCK 14, CS 13 | MOSI 11, MISO 2, SCK 14, CS 13 |
-| OLED, 0.96" SSD1306 (I2C, 0x3C/0x3D, no reset pin) | SDA 21, SCL 22 | SDA 18, SCL 17 |
-| Buttons | RESET | RESET, BOOT (GPIO 0): shows the board's details on the screen |
-| LED, battery | 25, ADC 35 (not used yet) | 37, ADC 1 (not used yet) |
-| USB | through a USB-serial chip | the chip's own USB, on USB-C |
-| Profile (limits) | `esp32`: 4 connections at once, 6 open pages | `esp32-psram`: 8 connections, 12 open pages, page and scripts kept in memory |
+The **LilyGO T3-S3 V1.3** (V1.2 is the same but for the charging circuit). The T3 V1.6.1 this branch began with was dropped on 11 October 2026.
 
-Pins from LilyGO's own board definitions; `main/board_pins.h` picks them by chip, so there is nothing to choose but the build target. The LoRa radio on both (SX1276 on the V1.6.1, SX1262 at 915 MHz on yours) is left alone.
+| | T3-S3 V1.3 |
+|---|---|
+| Chip | ESP32-S3FH4R2, 2 cores, 240 MHz |
+| Memory | 512 KB, and 2 MB PSRAM |
+| Flash | 4 MB |
+| microSD (SPI) | MOSI 11, MISO 2, SCK 14, CS 13 |
+| OLED, 0.96" SSD1306 (I2C, 0x3C/0x3D, no reset pin) | SDA 18, SCL 17 |
+| Buttons | RESET, BOOT (GPIO 0): shows the board's details on the screen |
+| LED, battery | 37, ADC 1 (not used yet) |
+| USB | the chip's own USB, on USB-C |
+| Profile (limits) | `esp32-psram`: 8 connections, 12 open pages, page and scripts kept in memory |
 
-On the V1.6.1, GPIO 2 is also a boot-mode pin: if flashing fails with a card in, take the card out while flashing. GPIO 16, which other boards use to reset the OLED, belongs to the PICO-D4's own flash and is never touched. On the T3-S3, if flashing over USB-C does not start, hold BOOT while plugging it in.
+Pins from LilyGO's own board definitions (`main/board_pins.h`). The LoRa radio (SX1262, 915 MHz) is left alone. If flashing over USB-C does not start, hold BOOT while plugging it in.
 
 ## The screen
 
@@ -87,19 +87,18 @@ ESP-IDF 5.4 (the build this branch is checked with):
 ```
 . $IDF_PATH/export.sh
 cd server-cpp/esp32
-idf.py set-target esp32    # the T3 V1.6.1;  esp32s3 for the T3-S3
 idf.py menuconfig          # Hub: name, update repository (Wi-Fi only if you will not use wifi.txt)
-idf.py -p /dev/cu.usbserial-XXXX flash monitor     # T3-S3: the port is /dev/cu.usbmodem…
+idf.py -p /dev/cu.usbmodem… flash monitor
 ```
 
-`set-target` starts the configuration afresh; for the T3-S3 it also applies `sdkconfig.defaults.esp32s3` (PSRAM on, TLS buffers in PSRAM, logs on the USB-C port). Each board needs its own build of the firmware, and its own releases if you use updates (see "Updates": publish one per board, or one repository each).
+`sdkconfig.defaults` names the target (esp32s3) and turns on PSRAM, TLS buffers in PSRAM and logs on the USB-C port, so no `set-target` is needed.
 
 The first build fetches the mDNS component (`main/idf_component.yml`); without the internet it builds without it, and the board is then reachable by IP only.
 
 PlatformIO (needs Arduino-ESP32 3.x; see the top of `platformio.ini`):
 
 ```
-pio run -d server-cpp/esp32 -e t3 -t upload && pio device monitor -d server-cpp/esp32      # -e t3s3 for the T3-S3
+pio run -d server-cpp/esp32 -t upload && pio device monitor -d server-cpp/esp32
 ```
 
 **This branch changes the partition table**: two program slots of 1.75 MB for updates (the program is about 1.4 MB, with the server side of books, files of links and anchors, and mDNS), and a smaller state partition (448 KB) for the certificates and the paired devices. The table only changes over USB: flash once by cable (`idf.py flash` writes it), after which updates can come over the network. Paired devices and the certificate authority start afresh with the new table (the old one's firmware never built for the board, so no board should have any).
@@ -128,6 +127,8 @@ What limits it is memory. Each HTTPS connection being served needs about 30 KB a
 The way past this is to stop giving every connection a thread of its own (TODO.md, "an event loop").
 
 ## Updates from GitHub
+
+*Being replaced on this branch:* updates will come from the card (`firmware.bin` at its top) instead of GitHub (STORE-PLAN.md). What follows is how it works until then; ignore what it says about the T3 V1.6.1.
 
 The board can install new firmware by itself from your repository's releases: two minutes after starting, then once a day (menuconfig: Hub). It is off until you set it up, and set up it only accepts firmware **you signed**.
 
@@ -182,7 +183,7 @@ FAT itself is slow at very large single folders: adding a file means searching t
 
 ## Books, PDFs and files of links
 
-Everything the reader does with them happens in the browser: the document engine runs there, and reads a book from the board a piece at a time (64 KB range requests), so a book or a PDF of any size can be read and highlighted. What the board unpacks itself is small, and limited by its memory: a book's list of files and its contents (to list its pages), and a page only when the engine is not there (an older page, another hub). On the T3 V1.6.1 each may be at most 32 KB: a book with a very long contents (hundreds of chapters) or thousands of files inside is left out of the list there, and a page over 32 KB cannot be shown without the engine. On the T3-S3, with PSRAM, 1 MB. Search looks at the first 32 KB of each document on the T3 V1.6.1 (1 MB on the T3-S3).
+Everything the reader does with them happens in the browser: the document engine runs there, and reads a book from the board a piece at a time (64 KB range requests), so a book or a PDF of any size can be read and highlighted. What the board unpacks itself is small, and limited by its memory: a book's list of files and its contents (to list its pages), and a page only when the engine is not there (an older page, another hub). Each may be at most 1 MB (in PSRAM). Search looks at the first 1 MB of each document.
 
 ## When something is wrong
 

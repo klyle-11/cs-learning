@@ -1,7 +1,6 @@
 // The board's 0.96" OLED: an SSD1306, 128 x 64, on I2C at 0x3C or 0x3D (pins in
-// board_pins.h: SDA 21 / SCL 22 on the T3 V1.6.1, 18 / 17 on the T3-S3). Neither
-// board wires a reset pin to it (GPIO16, used for that on other boards, belongs
-// to the T3 V1.6.1's own flash). Some clones carry an SH1106 instead: set
+// board_pins.h: SDA 18 / SCL 17 on the T3-S3). The board wires no reset pin to
+// it. Some clones carry an SH1106 instead: set
 // "OLED is an SH1106" in menuconfig (Hub).
 //
 // A task of its own, below the server in priority, draws the screen every

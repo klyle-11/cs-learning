@@ -25,7 +25,7 @@ All over HTTPS, all but the first needing the access password.
 
 Every write the store makes moves the change counter on. Nothing else writes to the card, so that is exact.
 
-**Access:** one password, set in `wifi.txt` on the card (`password=`), kept in the board's flash with the Wi-Fi settings and deleted from the card. The page asks for it once and keeps it; each request carries it (`Authorization: Bearer`). Requests from other sites are refused as now (Origin check). No pairing codes, no per-device tokens, no device list.
+**Access:** one password, chosen in the page on the first visit: a board with none shows a six-digit setup code on its screen, which the page asks for with the new password, so no one else on the Wi-Fi can claim it first. Holding BOOT at start-up clears it. The page keeps it; each request carries it (`Authorization: Bearer`). Requests from other sites are refused as now (Origin check). No pairing codes, no per-device tokens, no device list.
 
 **TLS:** kept (phones need it for offline copies and the page's encryption), one certificate made on the board at first start, its fingerprint on the screen. At most 4 connections, session reuse on, TLS buffers in PSRAM. No connection held open between requests.
 
@@ -70,8 +70,8 @@ Unchanged: the full server, all its features, `make test`, `make memory`. The co
 4. The firmware: the store in place of the full server, card updates in place of GitHub ones, the screen trimmed, one program slot.
 5. On the T3-S3: flash, `make card`, and the checks in TODO.md.
 
-## Open questions for you
+## Decided (11 October 2026)
 
-- The access password in `wifi.txt`: fine, or would you rather set it from the page the first time?
-- Firmware updates from the card instead of GitHub: fine?
-- ~~The T3 V1.6.1 too?~~ T3-S3 only (decided 11 October): its pins, profile, PlatformIO environment and notes go.
+- The password is chosen in the page, with the board's setup code.
+- Firmware updates come from the card.
+- The T3-S3 only; the T3 V1.6.1 is dropped.

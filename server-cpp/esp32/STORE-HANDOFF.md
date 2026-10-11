@@ -17,27 +17,29 @@ Branch: `claude/esp32-store-tier` (from `claude/esp32-32gb-memory-efficiency-n3d
 - **Two tiers, one client.** The full server (`server-cpp/src/hub.cpp`) stays exactly as it is, for computers and the Raspberry Pi. The board runs a small **store** server instead. The page asks `GET /api/device`; `"store": true` puts it in store mode.
 - **The board is the LilyGO T3-S3 V1.3 only** (ESP32-S3, 4 MB flash, 2 MB PSRAM, SX1262, BOOT button). The T3 V1.6.1 is dropped: its pins, profile (`esp32`), PlatformIO environment (`t3`) and notes go. The `esp32-psram` profile of the full server stays (it is also what a computer uses to try the board's limits).
 - **HTTPS stays** (phones need it for the service worker and `crypto.subtle`), with one self-signed certificate made on the board; no certificate authority of its own, no pairing.
-- **Access is one password**, sent as `Authorization: Bearer <password>` on every request but the page's own files.
+- **Access is one password**, chosen in the page on the first visit (with the board's setup code), sent as `Authorization: Bearer <password>` on every request but the page's own files.
 - **No connection is held open between requests** on the board: live reload is polling (`/api/changes`).
 - **Memory:** the store holds nothing that grows with the number of files. Folder listings and files are streamed; at most 4 connections; TLS buffers in PSRAM.
 
-## Open decisions (defaults to use until the owner says otherwise)
+## Decided on 11 October 2026
 
-| Question | Default |
+| Question | Decision |
 |---|---|
-| Where the password is set | `password=` in `wifi.txt` on the card, copied to the board's flash (NVS) and the file deleted, as Wi-Fi settings are now |
-| Firmware updates | from the card: `firmware.bin` at the top of the card, checked (ESP-IDF image header and SHA-256) and written at start-up, then deleted. GitHub updates removed |
-| Partition table | kept as now: two program slots of 1.75 MB (a running program cannot overwrite itself, so a card update is written into the other slot with `esp_ota_*`, and the rollback to the previous one stays) and the `state` partition for the certificate and the password. The store is far smaller than the full server, so the slots have room to spare |
+| Where the password is set | **In the page**, on the first visit. A board with no password shows a six-digit **setup code** on its screen and serial console; the page asks for that code with the new password, so nobody else on the Wi-Fi can claim the board first. Holding **BOOT** while the board starts clears the password (and the board shows a new setup code). Kept in the board's flash (NVS), as a salted hash |
+| Firmware updates | **From the card**: `firmware.bin` at the top of the card, checked (ESP-IDF image header and its SHA-256) and written into the other program slot at start-up, then deleted; the board restarts into it and rolls back if it fails. GitHub updates removed |
+| Partition table | kept as now: two program slots of 1.75 MB (a running program cannot overwrite itself, so a card update goes into the other slot, and rollback stays) and the `state` partition for the certificate and the password hash |
+| Boards | **T3-S3 only.** The T3 V1.6.1 is dropped from the firmware (done on 11 October, see the status table): pins, PlatformIO environment, build settings |
 
 ## The contract: the store's API
 
 This is the boundary between the work packages. Change it only by editing this section in the same commit, and say so in the status table below.
 
-All requests over HTTPS. `401 {"error":"password required"}` without the right `Authorization` (except: `/`, the page's files under `/` that the full server also serves without a session, `/trust`, `/api/device`). `403` for a request whose `Origin` is another site (same rule as the full server's `cross_site`). Errors are `{"error": "…"}` with the status. Paths are relative to the folder served, `/`-separated, no `..`, no empty parts, no part starting with `.` except `.removed` and `.hub-cache` where stated; otherwise 400.
+All requests over HTTPS. `401 {"error":"password required"}` without the right `Authorization` (except: `/`, the page's files under `/` that the full server also serves without a session, `/trust`, `/api/device`, and `POST /api/password` while no password is set). `403` for a request whose `Origin` is another site (same rule as the full server's `cross_site`). Errors are `{"error": "…"}` with the status. Paths are relative to the folder served, `/`-separated, no `..`, no empty parts, no part starting with `.` except `.removed` and `.hub-cache` where stated; otherwise 400.
 
 | Request | Answer |
 |---|---|
-| `GET /api/device` | `{"store": true, "profile": "store-t3s3", "version": <firmware>, "maxUpload": 4294967295, "free": <bytes>, "total": <bytes>, "changes": <counter>, "heapFree", "psramFree"}`. No password needed |
+| `GET /api/device` | `{"store": true, "profile": "store-t3s3", "version": <firmware>, "passwordSet": true|false, "maxUpload": 4294967295, "free": <bytes>, "total": <bytes>, "changes": <counter>, "heapFree", "psramFree"}`. No password needed |
+| `POST /api/password` `{"code", "password"}` | while no password is set: sets it if `code` is the setup code on the board's screen (`403` otherwise; five wrong codes and a new one is shown). `{"old", "password"}` with the current password: changes it. Passwords of 8 to 128 characters; stored as a salted SHA-256 (PBKDF2, 10,000 rounds) in NVS. `204` |
 | `GET /api/list?path=<folder>` | `200`, a JSON array streamed: `[{"name","dir":true|false,"size","mtime"}…]`, in the card's order, hidden names left out unless `hidden=1`. `404` if not a folder. Nothing is read from inside files |
 | `GET /raw/<path>` | the file; `Range: bytes=a-b` gives `206` with `Content-Range`; `ETag: "<size>-<mtime>"`; `If-None-Match` matching gives `304`. `Content-Type` from the extension as the full server's `mime_of`; HTML sent with the full server's sandboxed policy (`CSP_RAW`) |
 | `PUT /raw/<path>` | body written in pieces to a temporary file in `.hub-cache/`, renamed into place when complete; folders made as needed after the body has arrived. `If-Match: <etag>`: `412` if the file's ETag differs; `If-None-Match: *`: `412` if it exists. `201` new, `200` replaced: `{"etag": "…", "size"}`. `413` past `maxUpload`; `507` if the card would keep under 16 MB free; `408` if 30 s pass without data |
@@ -104,7 +106,7 @@ Update your row when you start, when you push, and when you finish; add notes fo
 |---|---|---|---|---|
 | WP1 store server | | not started | | |
 | WP2 page in store mode | | not started | | |
-| WP3 firmware (T3-S3) | | not started | | |
+| WP3 firmware (T3-S3) | | started: the T3 V1.6.1 dropped (pins, PlatformIO, build settings; plain `idf.py build` targets the S3, 1.40 MB, 24% of the slot spare) | (this commit) | the card update, the password and setup code, the store in place of `hub.cpp`, the screen still to do |
 | WP4 tests, memory, documents | | not started | | the memory ledger was started on 10 October and stopped by a usage limit; nothing of it was kept |
 
 ## Where things stand (11 October 2026)

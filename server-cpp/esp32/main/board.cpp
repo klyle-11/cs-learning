@@ -1,7 +1,6 @@
-// The board-specific part of the hub, for two LilyGO boards (board_pins.h; the
-// build target picks): the T3 LoRa32 V1.6.1 (ESP32, no PSRAM) and the T3-S3
-// V1.3 (ESP32-S3, 2 MB PSRAM, a BOOT button). Both have a microSD slot on SPI
-// and a 0.96" SSD1306 OLED on I2C. It brings up what the server needs and then
+// The board-specific part of the hub, for the LilyGO T3-S3 V1.3 (board_pins.h:
+// ESP32-S3, 2 MB PSRAM, a BOOT button), with a microSD slot on SPI and a 0.96"
+// SSD1306 OLED on I2C. It brings up what the server needs and then
 // runs the same server as on a computer:
 //
 //   /sdcard/hub   the documents (what `hubd <folder>` is given on a computer).

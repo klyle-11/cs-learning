@@ -1,4 +1,4 @@
-# The hub on an ESP32 (LilyGO T3 V1.6.1). Same server sources as the desktop
+# The hub on an ESP32-S3 (LilyGO T3-S3 V1.3). Same server sources as the desktop
 # build in ../src; only main/board.cpp is specific to the board.
 #   . $IDF_PATH/export.sh && idf.py set-target esp32 && idf.py menuconfig   (Hub: Wi-Fi name and password)
 #   idf.py -p /dev/cu.usbserial-XXXX flash monitor
