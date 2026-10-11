@@ -173,7 +173,7 @@ FAT32 holds files up to 4 GB, and the board serves them whole or in pieces (seek
 
 ```
 tools/shrink-video.sh lecture.mov              # -> lecture.small.mp4: H.264/AAC, 720 lines, index at the front
-tools/shrink-video.sh lecture.mov out.mp4 480  # smaller still
+tools/shrink-video.sh 480 a.mov b.mkv c.mp4    # several at once, 480 lines: a.small.mp4, b.small.mp4, c.small.mp4
 ```
 
 "Index at the front" (`+faststart`) matters most here: the browser can start and seek with a few small requests instead of first reading the end of the file over the board's Wi-Fi. A lecture or screen recording typically comes out at a quarter to a tenth of its size.

@@ -461,6 +461,14 @@
   .track { display: flex; gap: 10px; align-items: baseline; padding: 6px 6px; border-top: 1px solid var(--rule); cursor: pointer; }
   .track.cur { color: var(--accent); font-weight: 700; background: var(--shade); }
   .track.gone { color: var(--muted); cursor: default; }
+  /* A folder in a list of sound files: a line that opens out, its contents indented under it. */
+  .mtree { border-top: 1px solid var(--rule); }
+  .mtree > summary { display: flex; gap: 8px; align-items: baseline; padding: 6px 6px; cursor: pointer; font-weight: 600; list-style: none; }
+  .mtree > summary::-webkit-details-marker { display: none; }
+  .mtree > summary::before { content: '\25B8'; flex: none; width: 10px; color: var(--muted); font-size: 11px; }
+  .mtree[open] > summary::before { content: '\25BE'; }
+  .mtree > summary small { margin-left: auto; color: var(--muted); font-weight: 400; }
+  .mtree > .kids { margin-left: 14px; padding-left: 8px; border-left: 2px solid var(--rule); }
   /* The file's name comes first: it takes the room it needs, and the folder beside it gets what is left and is cut short first. */
   .track span { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .track small { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }

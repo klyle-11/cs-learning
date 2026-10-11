@@ -174,6 +174,32 @@ Run on Windows against these changes (`hubd-own.exe`, built after them): the con
 
 A T3-S3 was flashed by its owner the same evening, the first time any of this has run on a board; what it showed is not recorded here yet. The board's LED (GPIO 37; 25 on the V1.6.1) is now held off from start-up; that build has not been flashed. The same build passes `--title Learner-servr` to the server (the page's header said "hub", the card folder's name) and has the Eastern-time serif clock; host tests pass (the two changes of the clock in 2026 among them), 1.38 MB, 21% spare.
 
+### Speed: what was measured, and how (11 October)
+
+Asked because the reader felt slow on the board: the first load, opening documents, switching pages. Measured on a computer only (Windows, `hubd-own.exe`, headless Chrome through `playwright-core`); the board's own numbers are still to be taken.
+
+How it was measured, to repeat it:
+- **What a page load asks for.** A scratch workspace under `../build/`, the server on a port of its own with `--profile esp32-psram`, and a page whose `requestfinished` events are added up (path, bytes). Three loads: cold, reload, another document.
+- **How long each answer takes.** `curl -s -o /dev/null -w "%{time_total}s %{size_download}B"` on each address the page asks for at start, against a workspace of 3,000 documents (40 folders of 75), on each profile, three times running.
+- **Where the page's own time goes.** Chrome's profiler over the same load (`Profiler.start` / `stop` through a CDP session, 0.5 ms samples, self time added up by function).
+
+What it showed:
+- **A cold load is 749 KB in 18 requests**: `app.js` 415 KB, `highlight.js` 126, the page 104, `marked.js` 46, `purify.js` 28. None of it was compressed. A reload is 6 KB (the browser keeps the files and asks "still this one?"); the service worker makes later starts immediate.
+- **The list of documents is the cost that stays.** `/api/docs` for 3,000 documents is 340 KB, sent whole, `Cache-Control: no-store`, on every load and again after every change. On the board profiles the server keeps the list (2.0 to 2.3 s the first time, 9 to 65 ms after); on the desktop profile it is made again each time (1.3 s).
+- **In the page, half of a 2.4 s load is waiting** (for that list); of the rest, drawing the file list is the largest part (`renderTree`, `fileRow`: about 0.4 s for 3,000 files), and it is redrawn in full for every document opened (review 39).
+- **The start asked for the settings, the notes and the list one after another.**
+
+Done:
+- [x] `make card` writes a gzip copy beside each page file, and the server sends that copy as it is to a browser that takes gzip (`asset_response`): `app.js` 429 KB becomes 134 KB, with no work for the board. A copy older than its file is not used.
+- [x] The start asks for the list and the notes together with the settings.
+- [x] The T3-S3 at 240 MHz (it was 160), and the radio kept awake (`WIFI_PS_NONE`): its default dozing adds a wait to every request.
+
+Still to do, in the order they should help:
+- [ ] `/api/docs` should carry an ETag made from the list's generation and answer 304: the page then fetches 340 KB only when something changed, not on every load.
+- [ ] The file list drawn only as far as it is open, and not again for each document opened.
+- [ ] The TCP window (5,760 bytes) and the card's bus speed: both were left as they are, since they are memory and hardware limits to change only after measuring on the board.
+- [ ] The same measurements on the board itself, over its Wi-Fi.
+
 ### Memory and effectiveness assessment
 
 Keep the shared-server architecture. Direct FatFS reads, streaming transfers/list output, bounded name sorting, capped asset caching and browser-side document rendering address the largest avoidable costs. The OLED's two fixed framebuffers and changed-column I2C writes are also sensible. An event-loop rewrite is not the immediate next step: first fix recovery/update scheduling, eliminate status allocation churn, make the TLS timeout effective, and measure concurrent workloads. The existing whole-notes-file parse and books exceeding the T3's 32 KB metadata limit remain open; this pass did not solve them. A cap that silently leaves books out of the list protects memory but is a poor user outcome: the reader should explain the limitation.

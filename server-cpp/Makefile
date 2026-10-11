@@ -76,6 +76,9 @@ card:
 	if ls ../hub/js/*.js >/dev/null 2>&1; then mkdir -p "$(CARD)/hub/www/js" && cp ../hub/js/*.js "$(CARD)/hub/www/js/"; fi
 	mkdir -p "$(CARD)/hub/www/vendor/pdfjs" && cp -R ../hub/node_modules/pdfjs-dist/cmaps ../hub/node_modules/pdfjs-dist/standard_fonts "$(CARD)/hub/www/vendor/pdfjs/"
 	mkdir -p "$(CARD)/hub/www/vendor/fonts" && cp ../hub/node_modules/@fontsource/atkinson-hyperlegible/files/*-latin-*.woff2 ../hub/node_modules/@fontsource/opendyslexic/files/*-latin-*.woff2 "$(CARD)/hub/www/vendor/fonts/"
+	# Compressed copies beside the page files: the server sends them as they are to a browser that takes gzip, a fifth the
+	# size over the board's radio. The originals stay, for a client that does not (and so the card can be read as it was).
+	find "$(CARD)/hub/www" -type f \( -name '*.js' -o -name '*.mjs' -o -name '*.html' -o -name '*.css' -o -name '*.wasm' \) -exec gzip -9 -k -f {} \;
 
 clean:
 	rm -rf build hubd hubd.exe

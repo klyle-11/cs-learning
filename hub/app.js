@@ -2325,8 +2325,8 @@ async function showRemoved() {
   try { list = await api('/api/removed'); } catch (e) { why = e.offline ? 'The hub is not reachable: removed folders can be seen and put back only while it is.' : e.message; }
   if (!gate.hidden && gate.querySelector('h2')?.textContent === 'Removed folders') redraw();
 }
-async function loadDocs() {
-  try { serverDocs = await api('/api/docs'); store.set('docs:' + config.root, serverDocs); }
+async function loadDocs(asked = null) {   // `asked`: the list, already on its way (the start asks for it with the settings)
+  try { serverDocs = (asked && await asked) || await api('/api/docs'); store.set('docs:' + config.root, serverDocs); }
   catch { serverDocs = store.get('docs:' + config.root) || serverDocs; }
   // Files added on this device and not yet sent appear in the list too.
   const waiting = pendingFiles.filter((f) => !serverDocs.some((d) => d.path === f.path))
@@ -3913,6 +3913,39 @@ function paintQueueBtn(b) {
   b.classList.toggle('on', inQ);
 }
 const paintQueueBtns = () => document.querySelectorAll('button[data-q]').forEach(paintQueueBtn);
+// A list of sound files as a tree: the files right at `base` first, then each folder under it as a line that opens
+// out (closed to start with, and built only when first opened, so a large library costs nothing until it is looked
+// into), its contents indented under it. What is in a folder is never listed as if it were loose beside it. A
+// folder that holds one folder and nothing else is one line, "outer / inner".
+const musicOpen = new Set();   // the folders open, for as long as the page stays
+function musicTree(host, list, base, makeRow) {
+  const at = base ? base.length + 1 : 0, own = [], kids = new Map();
+  for (const d of list) {
+    const rest = d.path.slice(at), cut = rest.indexOf('/');
+    if (cut < 0) own.push(d);
+    else { const k = rest.slice(0, cut); (kids.get(k) || kids.set(k, []).get(k)).push(d); }
+  }
+  for (const d of own) host.append(makeRow(d));
+  for (const [name, items] of kids) {
+    let folder = (base ? base + '/' : '') + name, label = name;
+    for (;;) {
+      const rest = items.map((d) => d.path.slice(folder.length + 1));
+      if (rest.some((r) => !r.includes('/'))) break;
+      const first = rest[0].split('/')[0];
+      if (!rest.every((r) => r.startsWith(first + '/'))) break;
+      folder += '/' + first;
+      label += ' / ' + first;
+    }
+    const det = el('details', 'mtree'), sum = el('summary', '', label), body = el('div', 'kids');
+    sum.append(el('small', '', String(items.length)));
+    det.append(sum, body);
+    const fill = () => { if (!body.firstChild) musicTree(body, items, folder, makeRow); };
+    det.open = musicOpen.has(folder);
+    if (det.open) fill();
+    det.addEventListener('toggle', () => { if (det.open) { musicOpen.add(folder); fill(); } else musicOpen.delete(folder); });
+    host.append(det);
+  }
+}
 function queueBtn(path) {
   const b = el('button', 'ic q');
   b.dataset.q = path;
@@ -4104,30 +4137,30 @@ function renderPlayers() {
       box.append(clear, keep);
     }
     box.append(el('h5', '', 'All tracks'));
-    // One list of everything, unless "group by folder" is chosen.
-    const grouped = !!state.grouped;
-    const mode = el('button', 'qlink', grouped ? 'show all together' : 'group by folder');
-    mode.onclick = () => { state.grouped = !grouped; save(); renderPlayers(); };
+    // Folders, each a line that opens out with its contents indented under it, unless "show as a flat list" is chosen.
+    const flat = !!state.musicFlat;
+    const mode = el('button', 'qlink', flat ? 'group by folder' : 'show as a flat list');
+    mode.onclick = () => { state.musicFlat = !flat; save(); renderPlayers(); };
     box.append(mode);
-    let group = null;
-    for (const t of tracks().filter(inView)) {
-      const folder = t.path.split('/').slice(0, -1).join(' / ') || 'top level';
-      if (grouped && folder !== group) { group = folder; box.append(el('h5', '', folder)); }
+    const trackRow = (t, where) => {
       const here = kept.has(t.path), ok = playable(t.path);
       const row = el('div', 'track' + (t.path === music.path ? ' cur' : '') + (ok ? '' : ' gone'));
       row.dataset.path = t.path;
       row.tabIndex = 0;
       row.setAttribute('role', 'button');
-      const st = el('button', 'st' + (here ? ' kept' : ''), here ? '●' : '○');
+      const st = el('button', 'st' + (here ? ' kept' : ''), here ? '\u25CF' : '\u25CB');
       st.title = here ? 'On this device. Press to remove the copy.' : 'On the server only. Press to keep a copy on this device.';
       st.setAttribute('aria-label', st.title);
       st.onclick = (e) => { e.stopPropagation(); if (here) dropCopy(t.path); else keepCopy(t.path); };
       row.append(st, el('span', '', t.path.split('/').pop()));
-      if (!grouped) row.append(pathLabel(folder));
+      if (where) row.append(pathLabel(t.path.split('/').slice(0, -1).join(' / ') || 'top level'));
       row.append(el('small', '', here ? 'on this device' : ok ? 'server only' : 'not available offline'), queueBtn(t.path));
       row.onclick = () => ok && askPlay(t.path);
-      box.append(row);
-    }
+      return row;
+    };
+    const all = tracks().filter(inView);
+    if (flat) for (const t of all) box.append(trackRow(t, true));
+    else musicTree(box, all, '', (t) => trackRow(t, false));
     if (!tracks().filter(inView).length) box.append(el('p', 'empty', view.onlyKept && tracks().length ? 'No sound files are kept on this device. “Show everything” in the file list brings the rest back.' : 'No sound files in this folder yet.'));
   }
   // The small controls in the sidebar: for the video that is carrying on in
@@ -5501,7 +5534,16 @@ function showGallery(pane, path) {
   // The folder's own page is whatever the folder is (see folderBody); its music page lists every sound file in it.
   if (kind === 'inbox') inboxBody(article, pane, folder);
   else if (path.endsWith('/')) folderBody(article, pane, folder, ['one', 'set', 'folder'].includes(kind) ? null : kind);
-  else { appendBrowse(article, pane, folder, kind, 'browse:' + path); addCover(article, folder); }
+  else {
+    // A music page shows the folders under it as cards too, above its list (which has them as lines that open out).
+    if (kind === 'music') {
+      const under = folder ? folder + '/' : '', subs = new Set();
+      for (const d of docs) if (isAudio(d.path) && d.path.startsWith(under) && inView(d)) { const cut = d.path.indexOf('/', under.length); if (cut > 0) subs.add(d.path.slice(0, cut)); }
+      if (subs.size) article.append(folderCards(pane, [...subs].map((p) => ({ path: p, unit: unitOf(p) }))));
+    }
+    appendBrowse(article, pane, folder, kind, 'browse:' + path);
+    addCover(article, folder);
+  }
   addCrumbs(article, pane, folder, path);
   // A folder with no front page has these under the page made for it, as a front page has them (not the inbox, which is the reader's own).
   if (folder && kind !== 'inbox') {
@@ -5585,9 +5627,11 @@ function appendBrowse(article, pane, folder, first = null, key = 'browse:' + fol
     // Everything is listed together unless "group by folder" is chosen: offered only where what is listed is in more folders than one.
     const spread = new Set(files.map((d) => folderOf(d.path))).size > 1, grouped = spread && !!state.grouped;
     if (spread) {
-      const mode = el('button', '', grouped ? 'show all together' : 'group by folder');
+      // Music is listed by folder unless the flat list is chosen; the rest by the older switch (everything together by default).
+      const music = open === 'music', flat = music ? !!state.musicFlat : grouped;
+      const mode = el('button', '', music ? (flat ? 'group by folder' : 'show as a flat list') : grouped ? 'show all together' : 'group by folder');
       mode.style.cssText = 'border: 0; padding: 0; color: var(--accent); text-decoration: underline;';
-      mode.onclick = () => { state.grouped = !grouped; save(); draw(); renderPlayers(); };
+      mode.onclick = () => { if (music) state.musicFlat = !flat; else state.grouped = !grouped; save(); draw(); renderPlayers(); };
       listing.append(mode);
     }
     if (open === 'all' || open === 'media') {
@@ -5595,22 +5639,30 @@ function appendBrowse(article, pane, folder, first = null, key = 'browse:' + fol
     }
     const whereOf = (d) => (folderOf(d.path).slice(folder ? folder.length + 1 : 0) || 'here').replace(/\//g, ' / ');
     const section = (title, items, build) => { if (items.length) { if (title) listing.append(el('h5', '', title)); build(items); } };
+    const itemRow = (d, where) => {
+      const row = el('div', 'item');
+      row.dataset.path = d.path;
+      row.tabIndex = 0;
+      row.setAttribute('role', 'button');
+      row.append(el('span', '', isBinary(d.path) ? showName(d.path) : titleOf(d)));
+      if (where && where !== 'here') row.append(pathLabel(where));
+      if (kept.has(d.path)) row.append(el('small', '', 'on this device'));
+      if (isAudio(d.path) || isVideo(d.path)) row.append(keepBtn(d.path), queueBtn(d.path));   // keep a copy on this device; line it up
+      row.onclick = (e) => (isAudio(d.path) && playable(d.path) && !(e.metaKey || e.ctrlKey || e.altKey) ? askPlay(d.path) : openDoc(d.path, { pane, side: e.metaKey || e.ctrlKey || e.altKey }));
+      return row;
+    };
     const rows = (items) => {
       let group = null;
       for (const d of items) {
         const where = whereOf(d);
         if (grouped && where !== group) { group = where; listing.append(el('h5', '', where)); }
-        const row = el('div', 'item');
-        row.dataset.path = d.path;
-        row.tabIndex = 0;
-        row.setAttribute('role', 'button');
-        row.append(el('span', '', isBinary(d.path) ? showName(d.path) : titleOf(d)));
-        if (!grouped && where !== 'here') row.append(pathLabel(where));
-        if (kept.has(d.path)) row.append(el('small', '', 'on this device'));
-        if (isAudio(d.path) || isVideo(d.path)) row.append(keepBtn(d.path), queueBtn(d.path));   // keep a copy on this device; line it up
-        row.onclick = (e) => (isAudio(d.path) && playable(d.path) && !(e.metaKey || e.ctrlKey || e.altKey) ? askPlay(d.path) : openDoc(d.path, { pane, side: e.metaKey || e.ctrlKey || e.altKey }));
-        listing.append(row);
+        listing.append(itemRow(d, !grouped && where));
       }
+    };
+    // Sound files by folder, each folder a line that opens out (see musicTree); one list only when asked for.
+    const songs = (items) => {
+      if (state.musicFlat) { for (const d of items) listing.append(itemRow(d, whereOf(d))); return; }
+      musicTree(listing, items, folder, (d) => itemRow(d, ''));
     };
     // A file of saved links is one card. Pointing at it lists the addresses;
     // pressing it opens the card out into the media itself, scrolling inside the card.
@@ -5705,7 +5757,7 @@ function appendBrowse(article, pane, folder, first = null, key = 'browse:' + fol
     const papers = (d) => !isMedia(d.path) && !d.links && !isBook(d);
     if (open === 'all') {
       section('Pictures and video', files.filter((d) => isImage(d.path) || isVideo(d.path)), thumbs);
-      section('Music', files.filter((d) => isAudio(d.path)), rows);
+      section('Music', files.filter((d) => isAudio(d.path)), songs);
       section('Saved links', files.filter((d) => d.links), linkCards);
       section('Books', files.filter(isBook), shelf);
       section('Documents', files.filter(papers), rows);
@@ -5714,7 +5766,8 @@ function appendBrowse(article, pane, folder, first = null, key = 'browse:' + fol
       const rest = files.filter((d) => !isBook(d));
       section(rest.length ? 'Books' : '', files.filter(isBook), shelf);
       section('Documents', rest, rows);
-    } else rows(files);
+    } else if (open === 'music') songs(files);
+    else rows(files);
     if (!files.length) listing.append(el('p', 'empty', 'Nothing of this kind here yet.'));
   };
   for (const [id, label, test] of KINDS) {
@@ -7081,6 +7134,9 @@ $('moved').onclick = () => { location.href = '/'; };
     if (r.status === 401) return askToPair();
     if (r.ok) session = await r.json();
   } catch { /* not reachable: carry on with what is on this device */ }
+  // What the start needs besides the settings: the list of files and the notes. Asked for together with them, not one
+  // after another: on a board each answer is a round trip of its own, and the page waits on all three.
+  const early = { docs: api('/api/docs').catch(() => null), notes: api('/api/notes').catch(() => null) };
   try { await loadConfig(); }
   catch (e) {
     if (pairing) return;
@@ -7103,9 +7159,9 @@ $('moved').onclick = () => { location.href = '/'; };
   if (kept.size || matchMedia('(display-mode: standalone)').matches) askDurable();
   setTimeout(catchUpParts, 8000);
   setTimeout(() => learnBookFronts().catch(() => {}).then(learnBookStarts), 5000);
-  try { notes = outbox.some((op) => op.kind !== 'file') ? store.get('notes:' + config.root) || [] : await api('/api/notes'); seeStamps(notes); saveLocal(); }
+  try { notes = outbox.some((op) => op.kind !== 'file') ? store.get('notes:' + config.root) || [] : (await early.notes) || await api('/api/notes'); seeStamps(notes); saveLocal(); }
   catch { notes = store.get('notes:' + config.root) || []; }
-  await loadDocs();
+  await loadDocs(early.docs);
 
   const saved = store.get('layout:' + config.root);
   if (saved?.panes?.length) state = { ...state, ...saved, opened: (saved.opened || []).filter((k) => k.startsWith(':cat:')), groupsOpen: [] };   // every folder, subfolder and group starts closed, whatever was open last time

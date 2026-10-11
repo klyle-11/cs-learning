@@ -1641,7 +1641,27 @@ static http::Response file_response(const string &abs, const char *type) {
   r.length = size;
   return r;
 }
+// Whether what is being answered may go out compressed: the client's Accept-Encoding says it takes gzip. Set at the
+// start of answer(), which runs on the connection's own thread.
+static thread_local bool client_takes_gzip = false;
+static http::Response asset_plain(const string &abs, const char *type);
+// A page file. If a compressed copy stands beside it (`make card` makes them, to spare the board's radio: the page and
+// its scripts are about 750 KB, a fifth of that compressed) and is not older than the file, a client that takes gzip
+// is sent that copy as it is, with no work for the board.
 static http::Response asset_response(const string &abs, const char *type) {
+  if (client_takes_gzip) {
+    const string gz = abs + ".gz";
+    const long long packed = stamp_of(gz), plain = stamp_of(abs);
+    if (packed >= 0 && (plain < 0 || packed / 1000003LL >= plain / 1000003LL)) {
+      http::Response r = asset_plain(gz, type);
+      r.etag = "\"" + std::to_string(packed) + "g\"";
+      r.extra += "Content-Encoding: gzip\r\nVary: Accept-Encoding\r\n";
+      return r;
+    }
+  }
+  return asset_plain(abs, type);
+}
+static http::Response asset_plain(const string &abs, const char *type) {
   long long stamp = stamp_of(abs);
   if (stamp < 0) return http::error(404, "no such file");
   if (!profile.cache_assets) { http::Response r = file_response(abs, type); r.etag = "\"" + std::to_string(stamp) + "\""; return r; }
@@ -2144,6 +2164,7 @@ static bool fit_path(const string &base, Strings &parts) {
 }
 
 static http::Response answer(http::Request &req) {
+  client_takes_gzip = req.header("accept-encoding").find("gzip") != string::npos;
   const string &p = req.path, &m = req.method;
 
   if (!known_host(req.header("host"))) return http::error(403, "unknown host name");
