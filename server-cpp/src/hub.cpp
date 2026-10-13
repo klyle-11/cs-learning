@@ -17,7 +17,6 @@
 #ifdef ESP_PLATFORM
 #include "esp_heap_caps.h"
 #include "esp_system.h"
-#include "esp_wifi.h"
 #endif
 
 #include <algorithm>
@@ -2507,8 +2506,6 @@ static http::Response answer(http::Request &req) {
     cJSON_AddNumberToObject(d.p, "heapFree", esp_get_free_heap_size());
     cJSON_AddNumberToObject(d.p, "heapLeast", esp_get_minimum_free_heap_size());
     cJSON_AddNumberToObject(d.p, "heapLargest", static_cast<double>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
-    wifi_ap_record_t ap;
-    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) cJSON_AddNumberToObject(d.p, "wifiRssi", ap.rssi);   // dBm: above -60 good, below -75 poor
     cJSON_AddNumberToObject(d.p, "psramFree", static_cast<double>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)));
 #endif
     return json_response(d.p);

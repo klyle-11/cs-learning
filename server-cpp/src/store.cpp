@@ -4,6 +4,7 @@
 #ifdef ESP_PLATFORM
 #include "esp_heap_caps.h"
 #include "esp_system.h"
+#include "esp_wifi.h"
 #include "version.h"
 #endif
 
@@ -501,8 +502,11 @@ static http::Response device_route() {
 #ifdef ESP_PLATFORM
   const unsigned heap_free = static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
   const unsigned psram_free = static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+  wifi_ap_record_t ap;
+  const int rssi = esp_wifi_sta_get_ap_info(&ap) == ESP_OK ? ap.rssi : 0; // dBm: above -60 good, below -75 poor
 #else
   const unsigned heap_free = 0, psram_free = 0;
+  const int rssi = 0;
 #endif
 #ifdef HUB_VERSION
   const string version = std::to_string(HUB_VERSION);
@@ -513,7 +517,8 @@ static http::Response device_route() {
   response.body = "{\"store\":true,\"profile\":\"store-t3s3\",\"version\":" + json_quote(version) +
                   ",\"passwordSet\":" + (password_is_set() ? "true" : "false") + ",\"maxUpload\":" + std::to_string(MAX_UPLOAD) +
                   ",\"free\":" + std::to_string(free) + ",\"total\":" + std::to_string(total) + ",\"changes\":" + std::to_string(changes) +
-                  ",\"heapFree\":" + std::to_string(heap_free) + ",\"psramFree\":" + std::to_string(psram_free) + "}";
+                  ",\"heapFree\":" + std::to_string(heap_free) + ",\"psramFree\":" + std::to_string(psram_free) +
+                  (rssi ? ",\"wifiRssi\":" + std::to_string(rssi) : string()) + "}";
   return response;
 }
 

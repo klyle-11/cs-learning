@@ -38,7 +38,7 @@ All requests over HTTPS. `401 {"error":"password required"}` without the right `
 
 | Request | Answer |
 |---|---|
-| `GET /api/device` | `{"store": true, "profile": "store-t3s3", "version": <firmware>, "passwordSet": true|false, "maxUpload": 4294967295, "free": <bytes>, "total": <bytes>, "changes": <counter>, "heapFree", "psramFree"}`. No password needed |
+| `GET /api/device` | `{"store": true, "profile": "store-t3s3", "version": <firmware>, "passwordSet": true|false, "maxUpload": 4294967295, "free": <bytes>, "total": <bytes>, "changes": <counter>, "heapFree", "psramFree", "wifiRssi"}` (`wifiRssi`: the Wi-Fi signal in dBm, above -60 good, below -75 poor; absent when not joined). No password needed |
 | `POST /api/password` `{"code", "password"}` | while no password is set: sets it if `code` is the setup code on the board's screen (`403` otherwise; five wrong codes and a new one is shown). `{"old", "password"}` with the current password: changes it. Passwords of 8 to 128 characters; stored as a salted SHA-256 (PBKDF2, 10,000 rounds) in NVS. `204` |
 | `GET /api/list?path=<folder>` | `200`, a JSON array streamed: `[{"name","dir":true|false,"size","mtime"}…]`, in the card's order, hidden names left out unless `hidden=1`. `404` if not a folder. Nothing is read from inside files |
 | `GET /raw/<path>` | the file; `Range: bytes=a-b` gives `206` with `Content-Range`; `ETag: "<size>-<mtime>"`; `If-None-Match` matching gives `304`. `Content-Type` from the extension as the full server's `mime_of`; HTML sent with the full server's sandboxed policy (`CSP_RAW`) |
