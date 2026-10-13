@@ -104,6 +104,9 @@ extern "C" bool board_fat_path(const char *path, char *out, size_t size) {
 static void on_event(void *, esp_event_base_t base, int32_t id, void *data) {
   if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) esp_wifi_connect();
   if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+    // Why, on the serial console: 201 the network was not found, 2 and 15 the password or the handshake, 8 the router
+    // let it go, 200 beacons stopped arriving (out of range); a weak signal shows as many of the last.
+    ESP_LOGW(TAG, "Wi-Fi lost (reason %d)", static_cast<int>(static_cast<wifi_event_sta_disconnected_t *>(data)->reason));
     xEventGroupClearBits(wifi_events, GOT_IP);
     if (had_ip) screen_alert("Wi-Fi lost: rejoining");
     vTaskDelay(pdMS_TO_TICKS(1000)); // not in a tight loop while the router is away
@@ -112,6 +115,9 @@ static void on_event(void *, esp_event_base_t base, int32_t id, void *data) {
   if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
     auto *got = static_cast<ip_event_got_ip_t *>(data);
     std::snprintf(ip_text, sizeof ip_text, IPSTR, IP2STR(&got->ip_info.ip));
+    // How well it hears the router: above -60 dBm is good, -70 workable, below -75 slow and unreliable.
+    wifi_ap_record_t ap;
+    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) ESP_LOGI(TAG, "Wi-Fi: %s, signal %d dBm, channel %d", ip_text, ap.rssi, ap.primary);
     had_ip = true;
     screen_alert(nullptr);
     xEventGroupSetBits(wifi_events, GOT_IP);
@@ -185,6 +191,10 @@ static bool start_wifi() {
   load_name();
   esp_netif_set_hostname(sta, name_text); // what the router lists it as (and, on many, can be reached by)
   ESP_ERROR_CHECK(esp_wifi_start());
+  // Keep the radio awake. By default it sleeps between the router's beacons and wakes for them, which saves power and
+  // adds a few hundred milliseconds to every request the board receives, and drops its throughput: wrong for a
+  // board that is there to answer.
+  esp_wifi_set_ps(WIFI_PS_NONE);
   char ssid[33] = "";
   std::memcpy(ssid, wc.sta.ssid, sizeof wc.sta.ssid);
   screen_say(from_card ? "Wi-Fi from wifi.txt:" : "Joining Wi-Fi:", ssid);
@@ -281,6 +291,8 @@ static void watch_task(void *) {
       // end of its stack (sizes chosen by estimate; this is the measurement).
       for (const char *name : {"screen", "update", "watch"})
         if (TaskHandle_t t = xTaskGetHandle(name)) ESP_LOGI(TAG, "stack never used by %s: %u bytes", name, static_cast<unsigned>(uxTaskGetStackHighWaterMark(t)));
+      wifi_ap_record_t ap;
+      if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) ESP_LOGI(TAG, "Wi-Fi signal %d dBm", ap.rssi);
       ESP_LOGI(TAG, "memory: %u bytes free, the least so far %u, largest block %u", static_cast<unsigned>(esp_get_free_heap_size()),
                static_cast<unsigned>(esp_get_minimum_free_heap_size()), static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
     }

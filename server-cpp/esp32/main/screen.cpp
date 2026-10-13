@@ -18,6 +18,7 @@
 #include "esp_idf_version.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
@@ -156,7 +157,12 @@ static void screen_task(void *) {
     if (t < info_until && !v.say[0][0] && v.progress < 0) { // the button: what the board knows of itself
       const int64_t up = t / 1000000;
       std::snprintf(v.say[0], sizeof v.say[0], "%s  v%d", BOARD_NAME, HUB_VERSION);
-      std::snprintf(v.say[1], sizeof v.say[1], "up %lldh %02lldm", static_cast<long long>(up / 3600), static_cast<long long>(up / 60 % 60));
+      wifi_ap_record_t ap;
+      const int rssi = esp_wifi_sta_get_ap_info(&ap) == ESP_OK ? ap.rssi : 0;   // the Wi-Fi signal, in dBm
+      char line1[64];
+      if (rssi) std::snprintf(line1, sizeof line1, "up %lldh %02lldm %d dBm", static_cast<long long>(up / 3600), static_cast<long long>(up / 60 % 60), rssi);
+      else std::snprintf(line1, sizeof line1, "up %lldh %02lldm", static_cast<long long>(up / 3600), static_cast<long long>(up / 60 % 60));
+      std::snprintf(v.say[1], sizeof v.say[1], "%.21s", line1);
       const unsigned ram = static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024), ext = static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024);
       char mem[48];
       if (ext) std::snprintf(mem, sizeof mem, "RAM %uK PSRAM %uK", ram, ext);
