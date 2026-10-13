@@ -2,7 +2,7 @@
 // layout or the star before flashing it.
 //
 //   c++ -std=c++17 -I main -I ../src tools/screen-preview.cpp -o /tmp/screen-preview
-//   /tmp/screen-preview out-dir      -> out-dir/devices.png, pairing.png, ...,
+//   /tmp/screen-preview out-dir      -> out-dir/devices.png, setup.png, ...,
 //                                       star-tall-00.png ... star-tall-63.png, the same for wide and burst
 //
 // Pixels are drawn 4 times larger, in the yellow-over-blue of the two-colour
@@ -101,16 +101,15 @@ int main(int argc, char **argv) {
   save_png(dir + "/devices-mixed.png", c);
   std::snprintf(s.peers[1].ip, sizeof s.peers[1].ip, "192.168.1.40");
 
-  std::snprintf(s.notice, sizeof s.notice, "Paired: Kai's iPhone");
+  std::snprintf(s.notice, sizeof s.notice, "Password changed");
   s.peer_count = 2;
   draw_screen(c, s, b, 10);
   save_png(dir + "/notice.png", c);
   s.notice[0] = 0;
 
-  std::snprintf(s.pair_code, sizeof s.pair_code, "K7QM-2XRF");
-  s.pair_seconds = 581;
+  std::snprintf(s.pair_code, sizeof s.pair_code, "482017");
   draw_screen(c, s, b, 10);
-  save_png(dir + "/pairing.png", c);
+  save_png(dir + "/setup.png", c);
   s.pair_code[0] = 0;
 
   b.progress = 45;

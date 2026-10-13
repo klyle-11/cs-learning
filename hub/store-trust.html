@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trust this store</title>
+<style>
+  body { margin: 0; background: #fdfcf7; color: #1d1b16; font: 17px/1.55 "Helvetica Neue", Helvetica, Arial, sans-serif; }
+  main { max-width: 34em; margin: 0 auto; padding: 24px 18px 60px; }
+  h1 { font-size: 24px; margin: 0 0 6px; }
+  h2 { font-size: 17px; margin: 26px 0 6px; }
+  p { margin: 0 0 12px; }
+  ol { padding-left: 1.3em; margin: 0 0 12px; }
+  li { margin-bottom: 6px; }
+  .state { padding: 10px 12px; border: 1px solid #ddd8ca; border-left: 4px solid #8c2f1b; background: #f4f1e8; }
+  .state.ok { border-left-color: #3f8f4f; }
+  .btn { display: inline-block; padding: 10px 18px; background: #1d1b16; color: #fdfcf7; text-decoration: none; }
+  code { font: 13px/1.5 Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+  small { color: #6f6a5f; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Trust this store</h1>
+  <p id="state" class="state">Checking how this page reached you…</p>
+
+  <p>The board made one self-signed certificate for this store. Your browser has never seen it, so the first connection shows a warning. Accept the warning for this address, or install the certificate below if you want this device to remember it permanently.</p>
+
+  <h2>1. Check it is your board</h2>
+  <p>Compare this SHA-256 fingerprint with the fingerprint printed on the board's serial console when it first made the certificate:</p>
+  <p><code id="print">…</code></p>
+  <p><small>The browser did not trust this connection yet, so the value on this page is not proof by itself. The value printed by the board is the one to trust. Stop if they differ.</small></p>
+
+  <h2>2. Remember the certificate (optional)</h2>
+  <p><a class="btn" href="/hub-store.crt" download="hub-store.crt">Download hub-store.crt</a></p>
+  <ol>
+    <li>Open the downloaded certificate and add it to this device's trusted certificates.</li>
+    <li>On macOS, set this certificate to “Always Trust” in Keychain Access. On iPhone or iPad, also enable it under Certificate Trust Settings.</li>
+    <li>Close and reopen the browser, then return to the board's <code>.local</code> address.</li>
+  </ol>
+  <p><small>This is the board's server certificate, not a certificate authority. It can identify only this board, under the names recorded when the certificate was made.</small></p>
+
+  <h2>3. Open the reader</h2>
+  <p><a class="btn" id="open" href="/">Open the reader</a></p>
+  <p>The first visit asks for the six-digit setup code on the OLED and a new password. Later visits use that password; there is no device-pairing step.</p>
+</main>
+<script src="/trust.js"></script>
+</body>
+</html>

@@ -1,7 +1,7 @@
 // The board-specific part of the hub, for the LilyGO T3-S3 V1.3 (board_pins.h:
 // ESP32-S3, 2 MB PSRAM, a BOOT button), with a microSD slot on SPI and a 0.96"
 // SSD1306 OLED on I2C. It brings up what the server needs and then
-// runs the same server as on a computer:
+// runs the small store server (the browser does the application work):
 //
 //   /sdcard/hub   the documents (what `hubd <folder>` is given on a computer).
 //                 A FAT32 card of up to 32 GB; the server lets the folder fill
@@ -11,8 +11,8 @@
 //                 leaves this folder out of the document list.
 //   /sdcard/wifi.txt  Wi-Fi settings, read once at start-up, kept in the
 //                 board's flash and then deleted from the card (read_wifi_file)
-//   /state        certificates and paired devices, in the board's own flash:
-//                 taking the card must not hand over the keys
+//   /state        the certificate, in the board's own flash. The salted
+//   NVS           password hash. Taking the card hands over neither secret.
 //
 // Whatever goes wrong at start-up is said on the screen and tried again, rather
 // than the board sitting silent: no card, no Wi-Fi, a server that cannot start.
@@ -23,6 +23,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <mutex>
 #include <string>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -36,6 +37,7 @@
 #include "esp_netif.h"
 #include "esp_netif_sntp.h"
 #include "esp_pthread.h"
+#include "esp_random.h"
 #include "esp_system.h"
 #include "esp_vfs_fat.h"
 #include "diskio_sdmmc.h" // after esp_vfs_fat.h, which brings the FatFS types it uses
@@ -45,6 +47,7 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "sdmmc_cmd.h"
+#include "mbedtls/pkcs5.h"
 #if __has_include("mdns.h")
 #include "mdns.h" // the espressif/mdns component (main/idf_component.yml; Arduino-ESP32 has it built in)
 #define HUB_MDNS 1
@@ -58,11 +61,12 @@
 #include "board_pins.h"
 #include "fs.hpp"
 #include "screen.h"
+#include "secure.hpp"
 #include "status.hpp"
 #include "update.h"
 #include "version.h"
 
-int hub_main(int argc, char **argv);
+int store_main(int argc, char **argv);
 
 // Build-time settings: from `idf.py menuconfig` (Hub), or for PlatformIO from
 // the HUB_* environment variables (../platformio.ini). Wi-Fi given here is only
@@ -85,6 +89,108 @@ static const EventBits_t GOT_IP = 1;
 static char ip_text[16] = "";
 static char name_text[32] = CONFIG_HUB_NAME;
 static bool had_ip = false;
+
+// The store owns the password protocol; the board owns its durable secret.
+// Only the salt and derived value enter NVS. The one-time set-up code exists
+// in RAM and changes after five wrong attempts, so it also changes at restart.
+static std::mutex password_lock;
+static char setup_code[7] = "";
+static unsigned setup_misses = 0;
+static bool has_password = false;
+static constexpr size_t PASSWORD_SALT_BYTES = 16;
+static constexpr size_t PASSWORD_HASH_BYTES = 32;
+static constexpr unsigned PASSWORD_ROUNDS = 10000;
+
+static bool nvs_blob(const char *key, unsigned char *out, size_t expected) {
+  nvs_handle_t h;
+  size_t size = expected;
+  if (nvs_open("hub", NVS_READONLY, &h) != ESP_OK) return false;
+  const esp_err_t err = nvs_get_blob(h, key, out, &size);
+  nvs_close(h);
+  return err == ESP_OK && size == expected;
+}
+
+static bool password_hash(const char *password, const unsigned char salt[PASSWORD_SALT_BYTES], unsigned char out[PASSWORD_HASH_BYTES]) {
+  if (!password) return false;
+  const size_t size = std::strlen(password);
+  if (size < 8 || size > 128) return false;
+  return mbedtls_pkcs5_pbkdf2_hmac_ext(MBEDTLS_MD_SHA256, reinterpret_cast<const unsigned char *>(password), size,
+                                       salt, PASSWORD_SALT_BYTES, PASSWORD_ROUNDS, PASSWORD_HASH_BYTES, out) == 0;
+}
+
+static void new_setup_code() {
+  // Six decimal digits are deliberately easy to type from the small screen.
+  std::snprintf(setup_code, sizeof setup_code, "%06u", static_cast<unsigned>(esp_random() % 1000000));
+  setup_misses = 0;
+  ESP_LOGW(TAG, "password not set; setup code: %s", setup_code);
+}
+
+static void password_start(bool clear) {
+  std::lock_guard<std::mutex> g(password_lock);
+  if (clear) {
+    nvs_handle_t h;
+    if (nvs_open("hub", NVS_READWRITE, &h) == ESP_OK) {
+      nvs_erase_key(h, "pass_salt");
+      nvs_erase_key(h, "pass_hash");
+      nvs_commit(h);
+      nvs_close(h);
+      ESP_LOGW(TAG, "BOOT held: access password cleared");
+    }
+  }
+  unsigned char salt[PASSWORD_SALT_BYTES], hash[PASSWORD_HASH_BYTES];
+  if (nvs_blob("pass_salt", salt, sizeof salt) && nvs_blob("pass_hash", hash, sizeof hash)) {
+    has_password = true;
+    setup_code[0] = '\0';
+  } else {
+    has_password = false;
+    new_setup_code();
+  }
+}
+
+extern "C" bool board_store_password_is_set() {
+  std::lock_guard<std::mutex> g(password_lock);
+  return has_password;
+}
+
+extern "C" bool board_store_check_password(const char *password) {
+  std::lock_guard<std::mutex> g(password_lock);
+  unsigned char salt[PASSWORD_SALT_BYTES], expected[PASSWORD_HASH_BYTES], got[PASSWORD_HASH_BYTES];
+  if (!nvs_blob("pass_salt", salt, sizeof salt) || !nvs_blob("pass_hash", expected, sizeof expected) || !password_hash(password, salt, got)) return false;
+  unsigned different = 0;
+  for (size_t i = 0; i < sizeof got; i++) different |= static_cast<unsigned>(got[i] ^ expected[i]);
+  return different == 0;
+}
+
+extern "C" bool board_store_set_password(const char *password) {
+  std::lock_guard<std::mutex> g(password_lock);
+  unsigned char salt[PASSWORD_SALT_BYTES], hash[PASSWORD_HASH_BYTES];
+  esp_fill_random(salt, sizeof salt);
+  if (!password_hash(password, salt, hash)) return false;
+  nvs_handle_t h;
+  if (nvs_open("hub", NVS_READWRITE, &h) != ESP_OK) return false;
+  esp_err_t err = nvs_set_blob(h, "pass_salt", salt, sizeof salt);
+  if (err == ESP_OK) err = nvs_set_blob(h, "pass_hash", hash, sizeof hash);
+  if (err == ESP_OK) err = nvs_commit(h);
+  nvs_close(h);
+  if (err != ESP_OK) return false;
+  has_password = true;
+  setup_code[0] = '\0';
+  setup_misses = 0;
+  ESP_LOGI(TAG, "access password stored as PBKDF2-SHA256 (%u rounds)", PASSWORD_ROUNDS);
+  return true;
+}
+
+extern "C" const char *board_store_setup_code() {
+  static thread_local char shown[sizeof setup_code];
+  std::lock_guard<std::mutex> g(password_lock);
+  std::memcpy(shown, setup_code, sizeof shown);
+  return shown;
+}
+
+extern "C" void board_store_bad_setup_code() {
+  std::lock_guard<std::mutex> g(password_lock);
+  if (++setup_misses >= 5) new_setup_code();
+}
 
 extern "C" const char *board_ip() { return ip_text[0] ? ip_text : nullptr; }
 extern "C" const char *board_name() { return name_text[0] ? name_text : nullptr; }
@@ -231,6 +337,37 @@ static void set_clock() {
   }
 }
 
+// The store needs one leaf certificate, not the full server's private
+// certificate authority. Keep the first matching pair for the life of the
+// board; a power cut between the two durable writes is detected and repaired.
+static bool ensure_store_certificate() {
+  const std::string cert_path = "/state/cert.pem", key_path = "/state/key.pem";
+  std::string cert_pem, key_pem;
+  secure::Key key;
+  mbedtls_x509_crt cert;
+  mbedtls_x509_crt_init(&cert);
+  bool have = secure::slurp(cert_path, cert_pem) && secure::slurp(key_path, key_pem) && key.load(key_pem) &&
+              secure::parse_certs(&cert, cert_pem) == 0 &&
+              mbedtls_pk_check_pair(&cert.pk, &key.pk, secure::rng_cb, nullptr) == 0;
+  mbedtls_x509_crt_free(&cert);
+  if (have) return true;
+
+  secure::Key fresh;
+  if (!fresh.generate()) return false;
+  std::vector<std::string> names;
+  if (name_text[0]) names.push_back(std::string(name_text) + ".local");
+  if (ip_text[0]) names.push_back(ip_text);
+  std::string err;
+  cert_pem = secure::write_cert(fresh, fresh, "CN=Hub store,O=Hub", "CN=Hub store,O=Hub", -1, 3650, names, {}, err);
+  key_pem = fresh.pem();
+  if (cert_pem.empty() || key_pem.empty() || !secure::spit(key_path, key_pem, 0600) || !secure::spit(cert_path, cert_pem, 0644)) {
+    ESP_LOGE(TAG, "cannot make the store certificate: %s", err.c_str());
+    return false;
+  }
+  ESP_LOGI(TAG, "made the store certificate; SHA-256 %s", secure::fingerprint(cert_pem).c_str());
+  return true;
+}
+
 static bool mount_state() {
   // Each file that may be open at once costs a slot made at mount time, and
   // with ESP-IDF's per-file cache each slot holds a sector buffer of its own
@@ -289,7 +426,7 @@ static void watch_task(void *) {
     if (++ticks == 100) {
       // After five minutes: how close each task of the board's own came to the
       // end of its stack (sizes chosen by estimate; this is the measurement).
-      for (const char *name : {"screen", "update", "watch"})
+      for (const char *name : {"screen", "watch"})
         if (TaskHandle_t t = xTaskGetHandle(name)) ESP_LOGI(TAG, "stack never used by %s: %u bytes", name, static_cast<unsigned>(uxTaskGetStackHighWaterMark(t)));
       wifi_ap_record_t ap;
       if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) ESP_LOGI(TAG, "Wi-Fi signal %d dBm", ap.rssi);
@@ -314,14 +451,20 @@ static void watch_task(void *) {
 // The BOOT button (T3-S3): wakes the screen and shows what the board knows of
 // itself for a few seconds. Called in an interrupt: it only raises a flag.
 static void IRAM_ATTR on_button(void *) { screen_info(); }
-static void start_button() {
-  if (BOARD_BUTTON < 0) return;
+static bool configure_button() {
+  if (BOARD_BUTTON < 0) return false;
   gpio_config_t io = {};
   io.pin_bit_mask = 1ULL << (BOARD_BUTTON < 0 ? 0 : BOARD_BUTTON); // (the < 0 case returned above; this keeps the compiler quiet on boards without one)
   io.mode = GPIO_MODE_INPUT;
   io.pull_up_en = GPIO_PULLUP_ENABLE;
-  io.intr_type = GPIO_INTR_NEGEDGE;
-  if (gpio_config(&io) != ESP_OK) return;
+  io.intr_type = GPIO_INTR_DISABLE;
+  if (gpio_config(&io) != ESP_OK) return false;
+  vTaskDelay(pdMS_TO_TICKS(20));
+  return gpio_get_level(static_cast<gpio_num_t>(BOARD_BUTTON)) == 0;
+}
+static void start_button() {
+  if (BOARD_BUTTON < 0) return;
+  gpio_set_intr_type(static_cast<gpio_num_t>(BOARD_BUTTON), GPIO_INTR_NEGEDGE);
   esp_err_t isr = gpio_install_isr_service(0);
   if (isr == ESP_OK || isr == ESP_ERR_INVALID_STATE) gpio_isr_handler_add(static_cast<gpio_num_t>(BOARD_BUTTON), on_button, nullptr);
 }
@@ -329,7 +472,9 @@ static void start_button() {
 static void start() {
   esp_err_t nvs = nvs_flash_init();
   if (nvs == ESP_ERR_NVS_NO_FREE_PAGES || nvs == ESP_ERR_NVS_NEW_VERSION_FOUND) { nvs_flash_erase(); nvs_flash_init(); }
+  const bool clear_password = configure_button();
   screen_start();
+  password_start(clear_password);
   start_button();
   ESP_LOGI(TAG, "LilyGO %s, version %d", BOARD_NAME, HUB_VERSION);
   char version[22];
@@ -347,6 +492,9 @@ static void start() {
     screen_say("No SD card found.", "Insert a FAT32 card;", "trying again...");
     vTaskDelay(pdMS_TO_TICKS(5000));
   }
+  // A card update is handled before Wi-Fi or the server starts. Success never
+  // returns; a bad image is left on the card for inspection and serving starts.
+  update_start();
   ::mkdir("/sdcard/hub", 0755); // a fresh card: the folder the documents go in
   {
     bool dir;
@@ -365,7 +513,13 @@ static void start() {
   }
   screen_say("Setting the clock...");
   set_clock();
-  screen_say("Starting the server.", "(first start: making", "certificates)");
+  screen_say("Starting the store.", "(first start: making", "its certificate)");
+  if (!ensure_store_certificate()) {
+    ESP_LOGE(TAG, "cannot make or load the store certificate");
+    update_give_up();
+    screen_say("Certificate failed.", "Reflash by USB", "(see serial log).");
+    return;
+  }
 
   // Each connection runs on its own thread; a TLS handshake needs more stack
   // than the default. The setting is taken from the thread that creates them,
@@ -377,14 +531,15 @@ static void start() {
 
   static char port[8];
   std::snprintf(port, sizeof port, "%d", CONFIG_HUB_PORT);
-  static char *args[] = {(char *)"hubd", (char *)"/sdcard/hub", (char *)"--www", (char *)"/sdcard/hub/www", (char *)"--state", (char *)"/state",
-                         (char *)"--host", (char *)"0.0.0.0", (char *)"--port", port};
+  static char *args[] = {(char *)"store", (char *)"/sdcard/hub", (char *)"--www", (char *)"/sdcard/hub/www",
+                         (char *)"--host", (char *)"0.0.0.0", (char *)"--port", port, (char *)"--tls",
+                         (char *)"--cert", (char *)"/state/cert.pem", (char *)"--key", (char *)"/state/key.pem"};
   try {
     std::thread([] {
       esp_pthread_cfg_t each = esp_pthread_get_default_config();
       each.stack_size = 12 * 1024;
       esp_pthread_set_cfg(&each);
-      hub_main(sizeof args / sizeof args[0], args); // only returns if it could not start
+      store_main(sizeof args / sizeof args[0], args); // only returns if it could not start
       ESP_LOGE(TAG, "the server stopped");
       update_give_up(); // a new firmware that cannot serve goes back to the old one
       screen_say("The server stopped.", "Restarting in 30 s", "(serial log: why)");
@@ -407,7 +562,6 @@ static void start() {
   ESP_LOGI(TAG, "version %d serving at %s (%s.local); %u bytes free, largest block %u", HUB_VERSION, ip_text, name_text,
            static_cast<unsigned>(esp_get_free_heap_size()), static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
   if (xTaskCreate(watch_task, "watch", 8192, nullptr, 2, nullptr) != pdPASS) ESP_LOGE(TAG, "no memory for the watch task: a card taken out will not be noticed");
-  update_start();
 }
 
 #ifdef ARDUINO

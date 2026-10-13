@@ -25,6 +25,7 @@ EXTRA    := build/hubd-res.o
 build/hubd-res.o: windows/hubd.rc windows/hubd.manifest | build
 	windres windows/hubd.rc -O coff -o $@
 hubd: hubd.exe
+store: store.exe
 endif
 
 # build/hubd-own is a second copy of the server, for building and testing a
@@ -33,8 +34,14 @@ endif
 hubd$(EXE) build/hubd-own$(EXE): build/hub.o build/cJSON.o $(EXTRA)
 	$(CXX) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
+store$(EXE): build/store.o build/cJSON.o
+	$(CXX) $(LDFLAGS) -o $@ $^ $(LDLIBS)
+
 build/hub.o: src/hub.cpp src/http.hpp src/fs.hpp src/status.hpp src/secure.hpp src/platform.hpp src/anchor.hpp src/zip.hpp src/epub.hpp src/links.hpp vendor/cJSON.h | build
 	$(CXX) $(CXXFLAGS) -c -o $@ src/hub.cpp
+
+build/store.o: src/store.cpp src/http.hpp src/fs.hpp src/status.hpp src/secure.hpp src/platform.hpp vendor/cJSON.h | build
+	$(CXX) $(CXXFLAGS) -c -o $@ src/store.cpp
 
 build/cJSON.o: vendor/cJSON.c vendor/cJSON.h | build
 	$(CC) $(CFLAGS) -c -o $@ vendor/cJSON.c
@@ -48,10 +55,17 @@ check: CFLAGS += -g -O1 -fsanitize=address,undefined
 check: LDFLAGS += -fsanitize=address,undefined
 check: clean hubd
 
+check-store: CXXFLAGS += -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer
+check-store: CFLAGS += -g -O1 -fsanitize=address,undefined
+check-store: LDFLAGS += -fsanitize=address,undefined
+check-store: clean store
+
 # Send the recorded requests and compare the answers with test/expected.txt.
 test: hubd
 	./test/contract.sh
 	./test/links.sh
+test-store: store
+	./test/store.sh
 # The server's memory on 20,000 files, on every profile, against a ceiling for each (Linux only).
 memory: hubd
 	./test/memory.sh
@@ -64,7 +78,7 @@ test-own: build/hubd-own$(EXE)
 card:
 	@test -d "$(CARD)" || { echo "usage: make card CARD=/Volumes/<the card>"; exit 1; }
 	mkdir -p "$(CARD)/hub/www/vendor"
-	cp ../hub/index.html ../hub/app.js ../hub/local.js ../hub/vault.js ../hub/trust.html ../hub/trust.js ../hub/sw.js ../hub/manifest.webmanifest ../hub/icon-192.png ../hub/icon-512.png ../hub/apple-touch-icon.png "$(CARD)/hub/www/"
+	cp ../hub/index.html ../hub/app.js ../hub/local.js ../hub/vault.js ../hub/trust.html ../hub/trust.js ../hub/store-trust.html ../hub/store-trust.js ../hub/sw.js ../hub/manifest.webmanifest ../hub/icon-192.png ../hub/icon-512.png ../hub/apple-touch-icon.png "$(CARD)/hub/www/"
 	cp ../hub/node_modules/marked/lib/marked.umd.js "$(CARD)/hub/www/vendor/marked.js"
 	cp ../hub/node_modules/@highlightjs/cdn-assets/highlight.min.js "$(CARD)/hub/www/vendor/highlight.js"
 	cp ../hub/node_modules/dompurify/dist/purify.min.js "$(CARD)/hub/www/vendor/purify.js"
@@ -78,6 +92,6 @@ card:
 	mkdir -p "$(CARD)/hub/www/vendor/fonts" && cp ../hub/node_modules/@fontsource/atkinson-hyperlegible/files/*-latin-*.woff2 ../hub/node_modules/@fontsource/opendyslexic/files/*-latin-*.woff2 "$(CARD)/hub/www/vendor/fonts/"
 
 clean:
-	rm -rf build hubd hubd.exe
+	rm -rf build hubd hubd.exe store store.exe
 
-.PHONY: check test test-own memory clean card
+.PHONY: check check-store test test-store test-own memory clean card

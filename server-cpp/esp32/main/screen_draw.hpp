@@ -5,13 +5,13 @@
 //   Learner-servr           ✦     the title in serif, the star beside it (star_*.hpp)
 //   192.168.1.42:443              where to point a browser (alternating with hub.local)
 //   ·························
-//   ● Kai's iPhone   192.168.1.23 devices with a page open (●) or heard from lately (○)
-//   ○ laptop         192.168.1.40
+//   28.4 GB free                  card space
+//   ● 1.23                       devices serving now (●) or seen lately (○)
+//   ○ 1.40
 //
-// While a pairing code is on offer it takes the lower part, large, with the
-// start of the certificate fingerprint to compare. Messages from the board
-// (starting up, no card, an update) take it otherwise; short notices ("Paired:
-// …") cover the bottom line for a few seconds.
+// Until a password is chosen, its six-digit setup code takes the lower part.
+// Messages from the board (starting up, no card, an update) take it otherwise;
+// short notices cover the bottom line for a few seconds.
 #pragma once
 
 #include <cctype>
@@ -27,7 +27,7 @@
 
 struct BoardView {
   char say[3][22] = {"", "", ""};  // lines in place of the device list ("" for none)
-  int progress = -1;               // 0 to 100 while an update downloads
+  int progress = -1;               // 0 to 100 while a card update is installed
   char alert[22] = "";             // stays on the bottom line until cleared (Wi-Fi lost, card removed)
   char name[24] = "";              // the name on the network, "hub.local", if it has one
 };
@@ -97,24 +97,21 @@ inline void draw_screen(Canvas &c, const HubStatus &s, const BoardView &b, unsig
     c.fill(2, top + 14, 124 * b.progress / 100, 5);
     c.text(0, top + 25, "Do not unplug");
   } else if (s.pair_code[0]) {
-    c.text(0, top, "Pairing code");
-    std::snprintf(line, sizeof line, "%d:%02d", s.pair_seconds / 60, s.pair_seconds % 60);
-    c.text(128 - Canvas::text_width(line), top, line);
+    c.text(0, top, "Setup code");
     c.text((128 - Canvas::text_width(s.pair_code, 2)) / 2, top + 11, s.pair_code, 2);
-    if (s.fingerprint[0]) { std::snprintf(line, sizeof line, "CA %.17s", s.fingerprint); c.text(0, 56, line); }
-  } else if (s.peer_count == 0) {
-    c.text(0, top, s.running ? "No one connected" : "");
-    if (s.running && s.free) {
-      std::snprintf(line, sizeof line, "%.1f GB free on card", static_cast<double>(s.free) / (1024.0 * 1024.0 * 1024.0));
-      c.text_fit(0, top + 10, line, 128);
-    }
   } else {
-    // Four to a page; more turn over every four seconds, with a dot per page on the dotted line.
-    const int per_page = 4, pages = (s.peer_count + per_page - 1) / per_page, page = static_cast<int>(frame / 50) % pages;
+    if (s.running) {
+      std::snprintf(line, sizeof line, "%.1f GB free", static_cast<double>(s.free) / (1024.0 * 1024.0 * 1024.0));
+      c.text_fit(0, top, line, 128);
+    }
+    if (s.peer_count == 0) c.text(0, top + 10, s.running ? "No devices yet" : "");
+    // Three to a page below the free-space line; more turn over every four
+    // seconds, with a dot per page on the dotted line.
+    const int per_page = 3, pages = (s.peer_count + per_page - 1) / per_page, page = pages ? static_cast<int>(frame / 50) % pages : 0;
     const size_t cut = shared_start(s);
     for (int i = 0; i < per_page && page * per_page + i < s.peer_count; i++) {
       const HubPeer &p = s.peers[page * per_page + i];
-      int y = top + i * 9;
+      int y = top + 10 + i * 8;
       if (p.live) c.fill(0, y + 2, 3, 3);
       else { c.set(0, y + 2); c.set(2, y + 2); c.set(0, y + 4); c.set(2, y + 4); }
       const char *ip = p.ip + cut;

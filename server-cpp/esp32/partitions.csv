@@ -1,9 +1,8 @@
 # 4 MB of flash. Two slots for the program, so an update is written into the
 # one not running and the board can go back if the new one fails (update.cpp);
-# "state" holds the certificates and the list of paired devices, which must not
+# "state" holds the certificate and salted password hash, which must not
 # live on the removable card (a few KB; 448 KB leaves the wear levelling room).
-# The slots are 1.75 MB each: the program is about 1.4 MB with the document
-# engine's server side (books, links, anchors) and mDNS. This table has to be
+# The slots are 1.75 MB each. This table has to be
 # flashed by USB once; an update cannot change it.
 # Name,   Type, SubType, Offset,   Size
 nvs,      data, nvs,     0x9000,   0x4000
