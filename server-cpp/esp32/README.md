@@ -2,7 +2,7 @@
 
 The hub's server running on an ESP32 board, with the documents on a microSD card of up to 32 GB and a status screen. The board is the **LilyGO T3-S3 V1.3** (ESP32-S3 with 2 MB PSRAM). On branch `claude/esp32-store-tier` it is being made a store rather than a full server: see [STORE-PLAN.md](STORE-PLAN.md) and [STORE-HANDOFF.md](STORE-HANDOFF.md). Same server code as on a computer (`../src`); this folder adds what only the board needs. Branch: `claude/esp32-32gb-memory-efficiency-n3dz1c`. Its plan, with every request made on the branch, is [TODO.md](TODO.md); its review [REVIEW.md](REVIEW.md); whether it is built the right way, [ARCHITECTURE.md](ARCHITECTURE.md).
 
-**Not yet run on a board.** Everything here builds (ESP-IDF 5.4.1) and the server parts are tested on a computer with the board's settings (`--profile esp32`); the board-only parts (screen, Wi-Fi, card, updates) are checked by compiling and reading, not by running. The first flash is where they meet the hardware.
+**Runs on the owner's T3-S3** since 11 October 2026 (the store; flashed with PlatformIO on 14 October: Wi-Fi, the card, the screen, the password and the page work there). Card updates (`firmware.bin`) have not yet been tried on it. What was found on the board is in [REVIEW.md](REVIEW.md), "The store on the board".
 
 ## The board
 
@@ -15,7 +15,7 @@ The **LilyGO T3-S3 V1.3** (V1.2 is the same but for the charging circuit). The T
 | Flash | 4 MB |
 | microSD (SPI) | MOSI 11, MISO 2, SCK 14, CS 13 |
 | OLED, 0.96" SSD1306 (I2C, 0x3C/0x3D, no reset pin) | SDA 18, SCL 17 |
-| Buttons | RESET, BOOT (GPIO 0): shows the board's details on the screen |
+| Buttons | RESET, BOOT (GPIO 0): turns the screen to the board's details, then a clock; held five seconds, clears the password |
 | LED, battery | 37, ADC 1 (not used yet) |
 | USB | the chip's own USB, on USB-C |
 | Profile (limits) | `esp32-psram`: 8 connections, 12 open pages, page and scripts kept in memory |
@@ -29,7 +29,8 @@ Pins from LilyGO's own board definitions (`main/board_pins.h`). The LoRa radio (
 ![the star](docs/screen.gif)
 
 - Top: **Learner-servr** in serif (DejaVu Serif, drawn to pixels by `tools/make-title.py`) and the star, in thin lines, tall and narrow: a hollow four-pointed star whose short diagonal rays grow and fall back, a tall dotted diamond opening as they peak, a spark at its side. About five seconds a cycle. Two other designs are kept to compare (below, "Choosing the star").
-- On the T3-S3, the BOOT button wakes the screen and shows, for eight seconds, the board, the firmware version, how long it has been up, and free memory (internal and PSRAM).
+- **BOOT** turns the screen from this status page to the board's details (the board, the firmware version, how long it has been up with the Wi-Fi signal, free memory internal and PSRAM; for eight seconds), then to a clock (US Eastern time, in the title's serif; `main/screen_clock.hpp`, characters drawn by `tools/make-clock.py`), then back. After ten minutes with nothing new the clock comes up by itself, dimmed. Anything that needs reading (a setup code, a message, an update, Wi-Fi lost) takes the screen back from it.
+- **Holding BOOT for five seconds** while the board runs clears the access password: the bottom line says "Hold: new password" after one second and "Password cleared" at five, and the screen then shows a new setup code for the page. (Not held while the board starts: BOOT is GPIO 0, and held at reset it puts the chip in its USB download mode instead.)
 - Under it, the address to type: the board's IP (and port if not 443), every few seconds `hub.local` instead.
 - The rest: devices with a page open (●) or heard from in the last two minutes (○), name and IP, four at a time (when every address shares its start with the board's, as 192.168… does at home, only what follows is shown: "1.23" for 192.168.1.23, and the board's own address above shows the rest); while a **pairing code** is on offer, the code large, the time left, and the start of the certificate authority's fingerprint to compare with the trust page; during an update, a progress bar; at start-up and when something is wrong, what is happening and what to do.
 - Bottom line, reversed, for a few seconds: what just happened ("Paired: Kai's iPhone", "Removed: …", "Storage is full"), or until it is over, "Wi-Fi lost: rejoining".

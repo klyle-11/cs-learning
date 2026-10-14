@@ -8,6 +8,19 @@ Read in full: `../src/hub.cpp`, `http.hpp`, `fs.hpp`, `status.hpp`, `main/*.cpp`
 
 After the board showed spinners in place of the reader, the owner decided (11 October 2026) that the board should stop being a full server: **two tiers, one client**. The full server stays for computers and the Raspberry Pi; the board, now the **T3-S3 only**, becomes a store that keeps files and says when they change, and the page does the rest. The reasoning is in [STORE-PLAN.md](STORE-PLAN.md). The work is split for several agents, with the store's API as the contract between them, in [STORE-HANDOFF.md](STORE-HANDOFF.md). The conversation behind both is in [CONVERSATION.md](CONVERSATION.md). The rest of this review is of the board as a full server, as it stands on PR #1.
 
+### The store on the board, 14 October 2026
+
+Flashed with PlatformIO (Arduino-ESP32 3.3.12, ESP-IDF 5.5.5) over a build made elsewhere with ESP-IDF 5.4.4 from an uncommitted tree. Found on the board and fixed:
+
+- [x] **The page offered the full server's pairing to a store.** If its first `GET /api/device` went unanswered (a board busy with its first TLS handshakes), the page took the board for a full server, and `/api/session`'s 401 then showed "Pair this device", which a store never answers. *Now:* `StoreMode.detect` gives each try ten seconds, and before offering pairing the page asks `/api/device` again, up to three times.
+- [x] **The store sent its workers the policy for data** (`default-src 'none'; sandbox`), so the service worker could neither fetch nor keep anything, and every reload through it failed (the first, right after the password, among them). *What is served changes:* the store now sends `sw.js`, the engine's workers and PDF.js's worker the same policies as the full server (`hub.cpp`). `sw.js` keeps its pages under a new name (`hub-shell-v3`), so a browser holding the old worker replaces it.
+- [x] **Clearing the password by holding BOOT at start-up could not work**: BOOT is GPIO 0, and held at reset it puts the chip in download mode. *Who may connect, how it changes:* holding BOOT for five seconds while the board runs clears it; the setup code then on the screen is needed to set a new one. Both still need someone at the board.
+- [x] **The PlatformIO build crashed at start-up**: `update_start` held two 4 KB buffers on the stack of Arduino's `loopTask` (8 KB, which runs `start()`, itself 2.9 KB). *Now:* one 4 KB buffer from the heap, only when there is a `firmware.bin`; `update_start` is 288 bytes of stack. The stack report after five minutes includes `loopTask`.
+- [x] **Listing a card was slow**: each request to the board is a TLS handshake (0.35 to 0.45 s measured), and the page walked the reader's own `www/` and read new files' titles one at a time. *Now:* `www/` at the top is left out (as the full server does), and titles are read three at a time.
+- [x] **The BOOT slides and the clock** (`main`, `98400ae`) were missing from this branch: ported (`screen_mode.hpp`, `screen_clock.hpp`, `clock_font.hpp`, `tools/screen-test.cpp`).
+- [ ] **Memory under Arduino:** idle, the PlatformIO build leaves 135 KB of internal memory free where the ESP-IDF build left 208 KB (`/api/device` `heapFree`). The store's admission check (40 KB free, a 16 KB block) still holds; measure with four devices, or build with ESP-IDF.
+- [ ] **TLS session resumption** would save most of each request's handshake.
+
 ## Verdict
 
 Memory no longer depends on how much is on the card: what grows with the number of files is now on the card (the list, the titles) or bounded (32 KB of names to sort, 10 folders deep), and the measured peak on 20,000 files is 180 KB where it was 26 to 35 MB. The board's own failure modes (power cuts, a card pulled out, no network, low memory) now end in a message on the screen and a retry, not a silent board or lost notes. The updates add the most risk, and are built to contain it: signed, forward only, undone if the new firmware fails.

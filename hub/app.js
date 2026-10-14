@@ -1107,11 +1107,13 @@ function keyKept() {
 }
 // The server does not know this device. Ask for the code it is offering.
 let pairing = false;
-function askToPair() {
+async function askToPair() {
   if (pairing) return;
   pairing = true;
   events?.close();
-  // A store has one password instead of the full server's device pairing.
+  // A store has one password instead of the full server's device pairing. Not known for one yet (its first answer may
+  // have been lost): ask it again before offering pairing, which a store can never answer.
+  if (!storeMode.active) await storeMode.detect(hub.url, fetch, 3);
   if (storeMode.active) return storeMode.askPassword({ showGate, field, onEnter, closeGate });
   showGate('Pair this device', (card) => {
     const at = new URL(hub.url || location.href);

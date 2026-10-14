@@ -25,6 +25,8 @@
 
 #include "board_pins.h"
 #include "screen_draw.hpp"
+#include "screen_clock.hpp"
+#include "screen_mode.hpp"
 #include "version.h"
 
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 2, 0)
@@ -145,10 +147,9 @@ static void screen_task(void *) {
   static Canvas now, shown;
   static HubStatus status;
   bool all = true;
-  int64_t asked = 0, changed_at = esp_timer_get_time();
+  int64_t asked = 0;
   bool dim = false;
-  uint32_t still_sum = 0;
-  int64_t info_until = 0;
+  ScreenMode mode;
   for (unsigned frame = 0;; frame++) {
     const int64_t t = esp_timer_get_time();
     if (t - asked > 500000) {
@@ -160,8 +161,17 @@ static void screen_task(void *) {
     }
     BoardView v;
     { std::lock_guard<std::mutex> g(view_lock); v = view; }
-    if (info_wanted) { info_wanted = false; info_until = t + 8000000; changed_at = t; }
-    if (t < info_until && !v.say[0][0] && v.progress < 0) { // the button: what the board knows of itself
+    const bool pressed = info_wanted;
+    info_wanted = false;
+    const bool urgent = !status.running || v.say[0][0] || v.progress >= 0 ||
+                        status.pair_code[0] || v.alert[0] || status.notice[0];
+    // After ten minutes with nothing new, the clock, turned down: an OLED wears
+    // where it stays lit. Judged by screen_sum of the status page, which leaves
+    // out what moves by itself (the star, the address and the name taking
+    // turns, the time advancing), so they cannot keep it awake.
+    const uint32_t sum = screen_sum(now, status, v);
+    mode.update(t, sum, pressed, urgent);
+    if (mode.page == ScreenMode::Details) { // the button: what the board knows of itself
       const int64_t up = t / 1000000;
       std::snprintf(v.say[0], sizeof v.say[0], "%s  v%d", BOARD_NAME, HUB_VERSION);
       wifi_ap_record_t ap;
@@ -176,14 +186,10 @@ static void screen_task(void *) {
       else std::snprintf(mem, sizeof mem, "RAM %uK free", ram);
       std::snprintf(v.say[2], sizeof v.say[2], "%.21s", mem);
     }
-    // After ten minutes with nothing new, turn it down: an OLED wears where it
-    // stays lit. Judged by screen_sum, which leaves out what moves by itself:
-    // compared frame to frame, the star and the address taking turns with the
-    // name kept it from ever dimming.
-    const uint32_t sum = screen_sum(now, status, v);
-    if (sum != still_sum) { still_sum = sum; changed_at = t; }
+    v.clock = mode.page == ScreenMode::Clock;
+    if (v.clock) clock_text(v, std::time(nullptr));
     draw_screen(now, status, v, frame);
-    const bool want_dim = t - changed_at > 600 * 1000000LL;
+    const bool want_dim = mode.dim;
     if (want_dim != dim) { command({0x81, static_cast<uint8_t>(want_dim ? 0x08 : 0xCF)}); dim = want_dim; }
     if (!flush(now, shown, all)) { all = true; vTaskDelay(pdMS_TO_TICKS(1000)); continue; } // a glitch on the bus: send it all again
     all = false;
@@ -212,3 +218,4 @@ void IRAM_ATTR screen_info() { info_wanted = true; }
 void screen_progress(int percent) { std::lock_guard<std::mutex> g(view_lock); view.progress = percent; }
 void screen_alert(const char *text) { std::lock_guard<std::mutex> g(view_lock); copy_line(view.alert, text); }
 void screen_name(const char *name) { std::lock_guard<std::mutex> g(view_lock); std::snprintf(view.name, sizeof view.name, "%s", name ? name : ""); }
+void screen_clock_ready() { std::lock_guard<std::mutex> g(view_lock); view.clock_synced = true; }

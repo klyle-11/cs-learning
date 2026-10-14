@@ -134,7 +134,7 @@ static void password_start(bool clear) {
       nvs_erase_key(h, "pass_hash");
       nvs_commit(h);
       nvs_close(h);
-      ESP_LOGW(TAG, "BOOT held: access password cleared");
+      ESP_LOGW(TAG, "BOOT held for five seconds: access password cleared");
     }
   }
   unsigned char salt[PASSWORD_SALT_BYTES], hash[PASSWORD_HASH_BYTES];
@@ -327,8 +327,9 @@ static bool start_wifi() {
 // was built, which is at least not 1970.
 static void set_clock() {
   esp_sntp_config_t cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+  cfg.sync_cb = [](struct timeval *) { screen_clock_ready(); }; // an answer after the wait below still starts the clock
   esp_netif_sntp_init(&cfg);
-  if (esp_netif_sntp_sync_wait(pdMS_TO_TICKS(10000)) == ESP_OK) return;
+  if (esp_netif_sntp_sync_wait(pdMS_TO_TICKS(10000)) == ESP_OK) { screen_clock_ready(); return; }
   struct tm built = {};
   if (strptime(__DATE__ " " __TIME__, "%b %d %Y %H:%M:%S", &built)) {
     struct timeval tv = {mktime(&built), 0};
@@ -426,7 +427,7 @@ static void watch_task(void *) {
     if (++ticks == 100) {
       // After five minutes: how close each task of the board's own came to the
       // end of its stack (sizes chosen by estimate; this is the measurement).
-      for (const char *name : {"screen", "watch"})
+      for (const char *name : {"screen", "watch", "button", "loopTask"}) // loopTask: Arduino's, which runs start(); ESP-IDF's ends
         if (TaskHandle_t t = xTaskGetHandle(name)) ESP_LOGI(TAG, "stack never used by %s: %u bytes", name, static_cast<unsigned>(uxTaskGetStackHighWaterMark(t)));
       wifi_ap_record_t ap;
       if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) ESP_LOGI(TAG, "Wi-Fi signal %d dBm", ap.rssi);
@@ -448,33 +449,54 @@ static void watch_task(void *) {
   }
 }
 
-// The BOOT button (T3-S3): wakes the screen and shows what the board knows of
-// itself for a few seconds. Called in an interrupt: it only raises a flag.
+// The BOOT button (T3-S3). A press wakes the screen and shows what the board
+// knows of itself for a few seconds (called in an interrupt: it only raises a
+// flag). Held for five seconds while the board runs, it clears the password,
+// and the screen then shows a new setup code. It cannot be held while the board
+// starts instead: BOOT is the chip's GPIO 0, and held low at reset it keeps the
+// chip in its USB download mode, so the program never runs to see it.
 static void IRAM_ATTR on_button(void *) { screen_info(); }
-static bool configure_button() {
-  if (BOARD_BUTTON < 0) return false;
+// The bottom line is shared with "Wi-Fi lost": give it back as it should be.
+static void button_alert_done() {
+  screen_alert(had_ip && !(xEventGroupGetBits(wifi_events) & GOT_IP) ? "Wi-Fi lost: rejoining" : nullptr);
+}
+static void button_task(void *) {
+  int held = 0; // tenths of a second
+  for (;;) {
+    vTaskDelay(pdMS_TO_TICKS(100));
+    if (gpio_get_level(static_cast<gpio_num_t>(BOARD_BUTTON)) != 0) {
+      if (held >= 10 && held < 50) button_alert_done(); // let go too soon: nothing changes
+      held = 0;
+      continue;
+    }
+    if (++held == 10) screen_alert("Hold: new password");
+    if (held == 50) {
+      password_start(true);
+      screen_alert("Password cleared");
+      vTaskDelay(pdMS_TO_TICKS(4000));
+      button_alert_done();
+    }
+  }
+}
+static void start_button() {
+  if (BOARD_BUTTON < 0) return;
   gpio_config_t io = {};
   io.pin_bit_mask = 1ULL << (BOARD_BUTTON < 0 ? 0 : BOARD_BUTTON); // (the < 0 case returned above; this keeps the compiler quiet on boards without one)
   io.mode = GPIO_MODE_INPUT;
   io.pull_up_en = GPIO_PULLUP_ENABLE;
-  io.intr_type = GPIO_INTR_DISABLE;
-  if (gpio_config(&io) != ESP_OK) return false;
-  vTaskDelay(pdMS_TO_TICKS(20));
-  return gpio_get_level(static_cast<gpio_num_t>(BOARD_BUTTON)) == 0;
-}
-static void start_button() {
-  if (BOARD_BUTTON < 0) return;
-  gpio_set_intr_type(static_cast<gpio_num_t>(BOARD_BUTTON), GPIO_INTR_NEGEDGE);
+  io.intr_type = GPIO_INTR_NEGEDGE;
+  if (gpio_config(&io) != ESP_OK) return;
   esp_err_t isr = gpio_install_isr_service(0);
   if (isr == ESP_OK || isr == ESP_ERR_INVALID_STATE) gpio_isr_handler_add(static_cast<gpio_num_t>(BOARD_BUTTON), on_button, nullptr);
+  // 3 KB: a loop, and on the long press NVS and a log line.
+  if (xTaskCreate(button_task, "button", 3072, nullptr, 1, nullptr) != pdPASS) ESP_LOGE(TAG, "no memory for the button task: BOOT will not clear the password");
 }
 
 static void start() {
   esp_err_t nvs = nvs_flash_init();
   if (nvs == ESP_ERR_NVS_NO_FREE_PAGES || nvs == ESP_ERR_NVS_NEW_VERSION_FOUND) { nvs_flash_erase(); nvs_flash_init(); }
-  const bool clear_password = configure_button();
   screen_start();
-  password_start(clear_password);
+  password_start(false);
   start_button();
   ESP_LOGI(TAG, "LilyGO %s, version %d", BOARD_NAME, HUB_VERSION);
   char version[22];

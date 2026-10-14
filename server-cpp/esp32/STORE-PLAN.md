@@ -25,7 +25,7 @@ All over HTTPS, all but the first needing the access password.
 
 Every write the store makes moves the change counter on. Nothing else writes to the card, so that is exact.
 
-**Access:** one password, chosen in the page on the first visit: a board with none shows a six-digit setup code on its screen, which the page asks for with the new password, so no one else on the Wi-Fi can claim it first. Holding BOOT at start-up clears it. The page keeps it; each request carries it (`Authorization: Bearer`). Requests from other sites are refused as now (Origin check). No pairing codes, no per-device tokens, no device list.
+**Access:** one password, chosen in the page on the first visit: a board with none shows a six-digit setup code on its screen, which the page asks for with the new password, so no one else on the Wi-Fi can claim it first. Holding BOOT for five seconds while the board runs clears it. The page keeps it; each request carries it (`Authorization: Bearer`). Requests from other sites are refused as now (Origin check). No pairing codes, no per-device tokens, no device list.
 
 **TLS:** kept (phones need it for offline copies and the page's encryption), one certificate made on the board at first start, its fingerprint on the screen. At most 4 connections, session reuse on, TLS buffers in PSRAM. No connection held open between requests.
 

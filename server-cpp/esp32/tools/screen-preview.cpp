@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "screen_draw.hpp"
+#include "screen_clock.hpp"
 
 // A PNG with no compression: just enough of the format to be opened anywhere.
 static uint32_t crc(const unsigned char *p, size_t n, uint32_t c = 0xffffffffu) {
@@ -116,6 +117,16 @@ int main(int argc, char **argv) {
   draw_screen(c, s, b, 10);
   save_png(dir + "/update.png", c);
   b.progress = -1;
+
+  b.clock = b.clock_synced = true;
+  clock_text(b, 1782921600); // noon in July: 12:00 PM EDT, the widest time there is
+  draw_screen(c, s, b, 10);
+  save_png(dir + "/clock.png", c);
+  b.clock_synced = false;
+  clock_text(b, 1767243540);
+  draw_screen(c, s, b, 10);
+  save_png(dir + "/clock-unsynced.png", c);
+  b = BoardView();
 
   HubStatus booting;
   std::snprintf(b.say[0], sizeof b.say[0], "No SD card found.");

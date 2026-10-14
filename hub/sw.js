@@ -8,7 +8,9 @@
 // next load and the open page is told, so it can offer "reload". So every
 // start is instant, with the server near, far or absent, and a change to the
 // page shows one load later than it used to.
-const CACHE = 'hub-shell-v2';
+// v3: a board sent v2 under a policy that left it unable to fetch or keep anything, and a browser keeps a worker
+// until its file changes; the new name also drops whatever v2 kept.
+const CACHE = 'hub-shell-v3';
 const SHELL = ['/', '/app.js', '/local.js', '/vault.js', '/js/store.js', '/vendor/marked.js', '/vendor/highlight.js', '/vendor/purify.js',
   '/manifest.webmanifest', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png'];
 // What a PDF is drawn with: kept as well, so a PDF kept on the device opens without the server. The reader installs

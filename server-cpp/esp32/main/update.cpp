@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <memory>
+#include <new>
 
 #include "esp_app_format.h"
 #include "esp_err.h"
@@ -22,6 +24,10 @@
 
 static const char *TAG = "update";
 static const char IMAGE[] = "/sdcard/firmware.bin";
+// The image is read in pieces of this size, into one buffer taken from the heap
+// only when there is an image: it runs at start-up on the thread that starts
+// the board, whose stack (8 KB under Arduino) also holds start()'s own frame.
+static const size_t PIECE = 4096;
 
 void update_keep() {
   const esp_partition_t *running = esp_ota_get_running_partition();
@@ -47,7 +53,7 @@ void update_give_up() {
 // it. Verify that while the file is still only data on the removable card. OTA
 // end repeats ESP-IDF's complete header, segment, checksum and digest checks on
 // the copy in flash.
-static bool image_checks(FILE *f, size_t size, esp_image_header_t &header, unsigned char digest[32]) {
+static bool image_checks(FILE *f, size_t size, esp_image_header_t &header, unsigned char digest[32], unsigned char *piece) {
   if (size <= sizeof header + 32 || std::fread(&header, 1, sizeof header, f) != sizeof header) return false;
   if (header.magic != ESP_IMAGE_HEADER_MAGIC || header.chip_id != ESP_CHIP_ID_ESP32S3 || !header.hash_appended) return false;
   std::rewind(f);
@@ -55,10 +61,9 @@ static bool image_checks(FILE *f, size_t size, esp_image_header_t &header, unsig
   mbedtls_sha256_context sha;
   mbedtls_sha256_init(&sha);
   bool ok = mbedtls_sha256_starts(&sha, 0) == 0;
-  unsigned char piece[4096];
   size_t left = size - 32;
   while (ok && left) {
-    const size_t want = std::min(left, sizeof piece);
+    const size_t want = std::min(left, PIECE);
     const size_t got = std::fread(piece, 1, want, f);
     if (got != want || mbedtls_sha256_update(&sha, piece, got) != 0) { ok = false; break; }
     left -= got;
@@ -99,9 +104,11 @@ void update_start() {
     return;
   }
 
+  std::unique_ptr<unsigned char[]> piece(new (std::nothrow) unsigned char[PIECE]);
+  if (!piece) { std::fclose(f); ESP_LOGE(TAG, "no memory to read firmware.bin"); return; }
   esp_image_header_t header = {};
   unsigned char digest[32];
-  if (!image_checks(f, size, header, digest)) {
+  if (!image_checks(f, size, header, digest, piece.get())) {
     std::fclose(f);
     ESP_LOGE(TAG, "firmware.bin is not an intact ESP32-S3 image with an appended SHA-256");
     screen_say("Bad firmware.bin.", "Image was not used.", "Check serial log.");
@@ -116,12 +123,11 @@ void update_start() {
   bool ok = err == ESP_OK;
   screen_say(nullptr);
   screen_progress(0);
-  unsigned char piece[4096];
   while (ok && done < size) {
-    const size_t want = std::min(size - done, sizeof piece);
-    const size_t got = std::fread(piece, 1, want, f);
+    const size_t want = std::min(size - done, PIECE);
+    const size_t got = std::fread(piece.get(), 1, want, f);
     if (got != want) { ok = false; err = ESP_ERR_INVALID_SIZE; break; }
-    err = esp_ota_write(ota, piece, got);
+    err = esp_ota_write(ota, piece.get(), got);
     ok = err == ESP_OK;
     done += got;
     screen_progress(static_cast<int>(done * 100 / size));

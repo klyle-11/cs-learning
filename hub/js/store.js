@@ -110,21 +110,30 @@ export class StoreMode {
 
   get key() { return 'store:password:' + this.origin; }
 
-  async detect(origin, fetcher = fetch) {
+  // A board busy with its first HTTPS connections can drop one, and one lost
+  // answer here used to leave the page offering the full server's pairing,
+  // which a store never answers. So a request that fails or gets no answer in
+  // ten seconds is tried again, up to `tries` times; an answer that is not a
+  // store's is believed at once.
+  async detect(origin, fetcher = fetch, tries = 1) {
     this.active = false;
     this.origin = origin || location.origin;
-    try {
-      const response = await fetcher((origin || '') + '/api/device', { cache: 'no-store' });
-      if (!response.ok) return false;
-      const device = await response.json();
-      if (device?.store !== true) return false;
-      this.active = true;
-      this.device = device;
-      this.change = Number(device.changes) || 0;
-      this.password = this.settings.get(this.key) || '';
-      this.tellWorker();
-      return true;
-    } catch { return false; }
+    for (let i = 0; i < tries; i++) {
+      if (i) await new Promise((wake) => setTimeout(wake, 1000));
+      try {
+        const response = await fetcher((origin || '') + '/api/device', { cache: 'no-store', signal: AbortSignal.timeout(10000) });
+        if (!response.ok) return false;
+        const device = await response.json();
+        if (device?.store !== true) return false;
+        this.active = true;
+        this.device = device;
+        this.change = Number(device.changes) || 0;
+        this.password = this.settings.get(this.key) || '';
+        this.tellWorker();
+        return true;
+      } catch { /* no answer: try again */ }
+    }
+    return false;
   }
 
   tellWorker() {
@@ -239,7 +248,8 @@ export class StoreMode {
       const folder = queue.shift(), entries = await this.list(folder, fetcher);
       for (const entry of entries) {
         const path = folder ? folder + '/' + entry.name : entry.name;
-        if (entry.dir) { if (entry.name !== 'notes' && entry.name !== 'node_modules' && !entry.name.startsWith('.')) queue.push(path); }
+        // www at the top is the reader itself (a few hundred files), not documents: the full server leaves it out too.
+        if (entry.dir) { if (entry.name !== 'notes' && entry.name !== 'node_modules' && !entry.name.startsWith('.') && path !== 'www') queue.push(path); }
         else files.push({ ...entry, path });
       }
     }
@@ -276,13 +286,13 @@ export class StoreMode {
 
   async docs(fetcher) {
     const config = cleanConfig((await this.jsonFile('hub.json', {}, fetcher)).value, this.origin);
-    const ignored = new Set(config.ignore || []), out = [];
-    for (const file of await this.walk(fetcher)) {
-      if (ignored.has(file.path) || ignored.has(file.name) || [...ignored].some((x) => x.endsWith('/') && file.path.startsWith(x))) continue;
+    const ignored = new Set(config.ignore || []);
+    const files = (await this.walk(fetcher)).filter((file) => !(ignored.has(file.path) || ignored.has(file.name) || [...ignored].some((x) => x.endsWith('/') && file.path.startsWith(x))));
+    const found = new Array(files.length);   // by place in the walk, so the order does not depend on which answer came first
+    const one = async (file) => {
       const ending = ext(file.path), ordinary = READABLE.has(ending) || MEDIA.has(ending) || file.name === 'Makefile';
       const side = (config.side || []).some((x) => file.path === x || (x.endsWith('/') && file.path.startsWith(x)));
-      if (ending === '.epub') { out.push(...await this.bookDocs(file, side)); continue; }
-      if (!ordinary && !LINKS.has(ending)) continue;
+      if (!ordinary && !LINKS.has(ending)) return [];
       const cacheKey = this.origin + '|' + file.path, cached = await titles.get(cacheKey);
       let title = cached?.size === file.size && cached?.mtime === file.mtime ? cached.title : '', links = cached?.size === file.size && cached?.mtime === file.mtime ? !!cached.links : false;
       if (!title || (LINKS.has(ending) && cached == null)) {
@@ -291,10 +301,23 @@ export class StoreMode {
         links = (LINKS.has(ending) || /\.x?html?$/.test(file.path)) && /https?:\/\/[^\s"'<>]+/i.test(start);
         await titles.put({ key: cacheKey, path: file.path, size: file.size, mtime: file.mtime, title, links });
       }
-      if (!ordinary && !links) continue;
-      out.push({ path: file.path, group: folderOf(file.path), title, side, front: file.path === 'FRONTPAGE.md', changed: file.mtime, ...(links ? { links: true } : {}) });
+      if (!ordinary && !links) return [];
+      return [{ path: file.path, group: folderOf(file.path), title, side, front: file.path === 'FRONTPAGE.md', changed: file.mtime, ...(links ? { links: true } : {}) }];
+    };
+    // New and changed files are read for their titles three at a time: on a board each request is a TLS handshake of a few
+    // tenths of a second, so one at a time took minutes on a full card, and four would take every place it has. Books
+    // are opened one at a time after them: each starts the document engine.
+    const books = [], plain = [];
+    files.forEach((file, i) => (ext(file.path) === '.epub' ? books : plain).push(i));
+    let next = 0;
+    await Promise.all(Array.from({ length: Math.min(3, plain.length) }, async () => {
+      while (next < plain.length) { const i = plain[next++]; found[i] = await one(files[i]); }
+    }));
+    for (const i of books) {
+      const side = (config.side || []).some((x) => files[i].path === x || (x.endsWith('/') && files[i].path.startsWith(x)));
+      found[i] = await this.bookDocs(files[i], side);
     }
-    return out;
+    return found.flat();
   }
 
   async config(fetcher) {

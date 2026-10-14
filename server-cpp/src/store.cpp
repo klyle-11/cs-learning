@@ -325,7 +325,20 @@ static http::Response page_file(const http::Request &request) {
   string path = WWW;
   for (const string &part : parts) { path += "/" + part; if (sys::is_link(path)) return http::error(404, "no such file"); }
   const char *type = request.path == "/manifest.webmanifest" ? "application/manifest+json" : mime_of(parts.back());
-  return file_response(path, type, request.path == "/" || ends_with(rel, ".html"));
+  http::Response response = file_response(path, type, request.path == "/" || ends_with(rel, ".html"));
+  // A worker runs under the policy its own file is sent with, and the one for
+  // data (route) would leave it unable to fetch, or to use the page's cache:
+  // with it, the service worker broke every reload. The same policies as the
+  // full server's (hub.cpp): each worker may do what it needs and nothing more.
+  if (response.status == 200) {
+    const string &p = request.path;
+    if (p == "/sw.js") response.extra += "Content-Security-Policy: default-src 'none'; connect-src 'self'\r\n";
+    else if (p == "/js/engine-worker.js" || p == "/vendor/marginalia/worker.js")
+      response.extra += "Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'\r\n";
+    else if (p == "/vendor/pdf.worker.mjs" || p == "/vendor/marginalia/recolor-worker.js")
+      response.extra += "Content-Security-Policy: default-src 'none'; script-src 'self'\r\n";
+  }
+  return response;
 }
 
 struct TempFile {
