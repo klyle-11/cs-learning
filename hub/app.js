@@ -6139,8 +6139,16 @@ function renderContext() {
   if (!d) return c.append('Open a document to take notes on it.');
   const to = replyTo && notes.find((n) => n.id === replyTo);
   if (replyTo && !to) replyTo = null;
-  const hl = hlNote();
-  if (to) {
+  const hl = hlNote(), mine = editingNote && notes.find((n) => n.id === editingNote);
+  if (editingNote && !mine) editingNote = null;
+  if (mine) {
+    const x = el('button', '', '×');
+    x.type = 'button';
+    x.title = 'Stop editing';
+    x.onclick = () => { editingNote = null; input.value = ''; renderContext(); renderNotes(false); };
+    const said = (mine.quote || mine.text || '').replace(/\s+/g, ' ').trim();
+    c.append('Editing ', x, el('b', '', '“' + (said.length > 80 ? said.slice(0, 80) + '…' : said) + '”'));
+  } else if (to) {
     const x = el('button', '', '×');
     x.type = 'button';
     x.title = 'Stop replying';
@@ -6170,7 +6178,24 @@ function renderContext() {
 // ---- notes ---------------------------------------------------------------------
 // A note being replied to (its id): the note box then writes a reply, shown under it in the notes, in its thread.
 let replyTo = null;
+// A note being edited (its id): the note box holds its text, and saving replaces it. A bare highlight gets its text this way too.
+let editingNote = null;
+function editNote(id) {
+  const n = notes.find((x) => x.id === id);
+  if (!n) return;
+  editingNote = id;
+  replyTo = null;
+  activeHl = null;
+  pendingQuote = '';
+  dropPendingMg();
+  hideFlyout();
+  input.value = n.text || '';
+  renderContext();
+  renderNotes(false);
+  input.focus();
+}
 function replyToNote(id) {
+  editingNote = null;
   replyTo = id;
   activeHl = null;
   pendingQuote = '';
@@ -6196,9 +6221,11 @@ $('composer').onsubmit = async (e) => {
   if (!text || !doc) return;
   endRefs();
   input.value = '';
-  const hl = hlNote(), to = replyTo && notes.find((n) => n.id === replyTo);
+  const hl = hlNote(), to = replyTo && notes.find((n) => n.id === replyTo), mine = editingNote && notes.find((n) => n.id === editingNote);
   replyTo = null;
-  if (to) await noteOp({ kind: 'add', note: makeNote({ doc: to.doc, text, replyTo: to.id, heading: to.heading, headingText: to.headingText }) });
+  editingNote = null;
+  if (mine) await noteOp({ kind: 'set', id: mine.id, fields: { text } });
+  else if (to) await noteOp({ kind: 'add', note: makeNote({ doc: to.doc, text, replyTo: to.id, heading: to.heading, headingText: to.headingText }) });
   else if (hl && !hl.text) await noteOp({ kind: 'set', id: hl.id, fields: { text } });
   else if (hl) await noteOp({ kind: 'add', note: makeNote({ doc: hl.doc, text, quote: hl.quote, type: hl.type, heading: hl.heading, headingText: hl.headingText, ...(hl.anchor ? { anchor: hl.anchor } : {}) }) });
   else await createNote(text);
@@ -6212,7 +6239,7 @@ $('composer').onsubmit = async (e) => {
 };
 input.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('composer').requestSubmit(); }
-  if (e.key === 'Escape') { endRefs(); if (replyTo) { replyTo = null; renderContext(); } }
+  if (e.key === 'Escape') { endRefs(); if (editingNote) { editingNote = null; input.value = ''; renderContext(); renderNotes(false); } else if (replyTo) { replyTo = null; renderContext(); } }
 });
 
 // ---- references inside a note ----------------------------------------------------
@@ -6223,7 +6250,24 @@ input.addEventListener('keydown', (e) => {
 // takes the buttons away again.
 // A reference is written [label](path), [label](path#heading-slug) or
 // [label](path#note:id), with the path counted from the top of the workspace.
-const ref = { on: false, at: 0, len: 0, n: 0 };
+// "//" first opens a small flyout over the note box: link to an annotation or highlight (the notes open, and
+// only they carry link buttons), or to a document or media (the sidebar opens, the search is focused, and
+// everything else carries them). `kind` is '' until one is chosen.
+const ref = { on: false, at: 0, len: 0, n: 0, kind: '' };
+const REF_NOTE_TARGETS = '#found .hit[data-id], #notes .note[data-id], .latest .tick[data-id]';
+const refMenu = el('div');
+refMenu.id = 'refMenu';
+refMenu.hidden = true;
+refMenu.setAttribute('role', 'menu');
+for (const [kind, text] of [['note', 'annotation / highlight'], ['doc', 'document / media']]) {
+  const b = el('button', '', 'Link to ' + text);
+  b.type = 'button';
+  b.setAttribute('role', 'menuitem');
+  b.onmousedown = (e) => e.preventDefault();   // the note box keeps the cursor until a choice is made
+  b.onclick = () => chooseRef(kind);
+  refMenu.append(b);
+}
+$('composer').append(refMenu);
 const REF_TARGETS = '#found .hit[data-path], #found .hit[data-id], #tree summary[data-folder], #tree .file[data-path], .listing .item[data-path], .thumb[data-path], .track[data-path], #toc a, #notes .note[data-id], .latest .tick[data-id]';
 const REF_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>';
 const refWatch = new MutationObserver(() => paintRefs());   // lists are redrawn while the buttons are showing
@@ -6254,7 +6298,9 @@ function paintRefs() {
   if (!ref.on && !pick.on) return;
   for (const node of document.querySelectorAll(REF_TARGETS)) {
     const host = node.querySelector('.meta') || node;
-    if (ref.on && !node.querySelector('.refBtn')) {
+    const isNote = node.matches(REF_NOTE_TARGETS);
+    if (ref.on && ref.kind && isNote !== (ref.kind === 'note') && node.querySelector('.refBtn')) node.querySelector('.refBtn').remove();
+    if (ref.on && ref.kind && isNote === (ref.kind === 'note') && !node.querySelector('.refBtn')) {
       const b = el('button', 'refBtn');
       b.type = 'button';
       b.innerHTML = REF_ICON;
@@ -6278,14 +6324,26 @@ function paintRefs() {
 }
 const watchItems = () => { if (ref.on || pick.on) refWatch.observe(document.body, { childList: true, subtree: true }); else refWatch.disconnect(); };
 function startRefs(at) {
-  Object.assign(ref, { on: true, at, len: 2, n: 0 });
-  document.body.classList.add('reffing');
-  paintRefs();
+  Object.assign(ref, { on: true, at, len: 2, n: 0, kind: '' });
+  refMenu.hidden = false;
   watchItems();
+}
+// Annotation / highlight: the notes panel opens. Document / media: the sidebar opens and its search is focused.
+// Whatever is then pressed with a link button is written into the note.
+function chooseRef(kind) {
+  if (!ref.on) return;
+  ref.kind = kind;
+  refMenu.hidden = true;
+  document.body.classList.add('reffing');
+  if (kind === 'note') { if (!state.notesOpen) setNotesOpen(true); }
+  else { if (!state.sideOpen) setSideOpen(true); $('find').focus(); }
+  paintRefs();
 }
 function endRefs() {
   if (!ref.on) return;
   ref.on = false;
+  ref.kind = '';
+  refMenu.hidden = true;
   watchItems();
   document.body.classList.remove('reffing');
   for (const b of document.querySelectorAll('.refBtn')) b.remove();
@@ -6528,12 +6586,16 @@ input.addEventListener('input', () => {
 });
 // A note's text is shown as typed, except that a reference in it is a link.
 function noteText(text) {
-  const box = el('div', 'text'), re = /\[([^\]\n]+)\]\(([^)\s]+)\)/g;
+  const box = el('div', 'text'), re = new RegExp(NOTE_LINK.source, 'g');
   let at = 0;
   for (let m; (m = re.exec(text));) {
-    const a = el('a', 'ref', m[1]);
-    a.href = '#';
-    a.onclick = (e) => { e.preventDefault(); e.stopPropagation(); openRef(m[2], e.metaKey || e.ctrlKey || e.altKey); };
+    const web = m[3] || (/^https?:/i.test(m[2]) ? m[2] : '');
+    const a = el('a', 'ref', m[3] || m[1]);
+    if (web) { a.href = web; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.onclick = (e) => e.stopPropagation(); }
+    else {
+      a.href = '#';
+      a.onclick = (e) => { e.preventDefault(); e.stopPropagation(); openRef(m[2], e.metaKey || e.ctrlKey || e.altKey); };
+    }
     box.append(text.slice(at, m.index), a);
     at = re.lastIndex;
   }
@@ -6743,22 +6805,189 @@ function flash(node) {
 
 const byTime = (a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0);
 
-// "export as image": the highlights and notes of the open document as one PNG. The legend (the colours in use, in the
-// order they first appear) is on top; below, oldest first, each passage in italics on its colour at the left and what was
-// written about it in bold at the right. Not the whole document: the passages are the preview. Drawn straight onto a canvas,
-// so nothing is loaded and nothing leaves the device.
-function exportNotes(mine) {
-  const doc = activeDoc();
-  const who = prompt('Name of the annotator, shown on the image:', store.get('annotator') || '');
-  if (who === null) return;
-  store.set('annotator', who.trim());
-  const d = docOf(doc), title = d ? titleOf(d) : doc;
+// "export": the highlights and notes of the open document, as one PNG or as one HTML page (chosen from the list over the
+// notes). The legend (the colours in use, in the order they first appear) is on top; below, oldest first, each passage in
+// italics on its colour at the left and what was written about it in bold at the right. Not the whole document: the
+// passages are the preview. A link to another note in the note's text is not shown as [label](path) but as the number
+// that note has here ("→ 3"), and the two are joined by a bracket in the left margin. A link to a picture or video shows
+// a small preview of it under the note. Drawn on a canvas / written as one file, so nothing leaves the device.
+// A written link, [label](target) (the target may hold one level of brackets), or a bare web address.
+// Groups: 1 label, 2 target, 3 bare address.
+const NOTE_LINK = /\[([^\]\n]+)\]\(((?:[^()\s]|\([^()\s]*\))+)\)|(https?:\/\/[^\s<>()[\]]+[^\s<>()[\].,;:!?'"])/g;
+// A picture or a frame of a video, scaled to fit inside w x h, as a canvas; null if it cannot be read.
+async function previewOf(path, w, h) {
+  try {
+    const src = await mediaSrc(path);
+    let pic, sw, sh;
+    if (!src) return null;
+    if (isImage(path)) { pic = new Image(); pic.src = src; await pic.decode(); sw = pic.naturalWidth; sh = pic.naturalHeight; }
+    else if (isVideo(path)) {
+      pic = document.createElement('video');
+      pic.muted = true; pic.preload = 'auto'; pic.src = src;
+      await new Promise((ok, no) => { pic.onloadeddata = ok; pic.onerror = no; setTimeout(no, 6000); });
+      pic.currentTime = Math.min(1, (pic.duration || 0) / 10);
+      await new Promise((ok) => { pic.onseeked = ok; setTimeout(ok, 3000); });
+      sw = pic.videoWidth; sh = pic.videoHeight;
+    } else return null;
+    if (!sw || !sh) return null;
+    const k = Math.min(w / sw, h / sh, 1), c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(sw * k)); c.height = Math.max(1, Math.round(sh * k));
+    c.getContext('2d').drawImage(pic, 0, 0, c.width, c.height);
+    return c;
+  } catch { return null; }
+}
+// What each exported row says: numbers for links to other notes, previews for links to media.
+async function exportRows(mine) {
   const ids = new Set(mine.map((n) => n.id));
   const tops = mine.filter((n) => !n.replyTo || !ids.has(n.replyTo)).sort(byTime);
   const replies = (top) => mine.filter((n) => n !== top && n.replyTo === top.id && n.text).sort(byTime);
-
-  const S = 2, W = 1400, M = 48, GAP = 40, LW = 640, RX = M + LW + GAP, RW = W - M - RX;
+  const numOf = new Map();
+  tops.forEach((n, i) => { numOf.set(n.id, i + 1); for (const r of replies(n)) numOf.set(r.id, i + 1); });
+  const rows = [];
+  for (const [i, n] of tops.entries()) {
+    const media = [], refs = new Set();
+    // A note's text as parts: { t } words, { ref } the number of another note here.
+    const partsOf = (text) => {
+      const out = [];
+      let at = 0;
+      for (const m of text.matchAll(NOTE_LINK)) {
+        out.push({ t: text.slice(at, m.index) });
+        at = m.index + m[0].length;
+        const web = m[3] || (/^https?:/i.test(m[2]) ? m[2] : '');
+        if (web) { out.push({ t: m[3] || m[1], href: web }); continue; }
+        const [file, hash = ''] = m[2].split('#'), id = hash.startsWith('note:') ? hash.slice(5) : '';
+        let p = file;
+        try { p = decodeURIComponent(file); } catch { /* as it is */ }
+        if (id && numOf.has(id)) { out.push({ ref: numOf.get(id) }); if (numOf.get(id) !== i + 1) refs.add(numOf.get(id)); }
+        else { out.push({ t: m[1] }); if (!id && isMedia(p) && docOf(p) && !media.includes(p)) media.push(p); }
+      }
+      out.push({ t: text.slice(at) });
+      return out;
+    };
+    const said = [n, ...replies(n)].filter((x) => x.text).map((x, k) => ({ lead: k ? '↳ ' : '', parts: partsOf(x.text) }));
+    const plain = said.map((s) => s.lead + s.parts.map((p) => (p.ref ? '→ ' + p.ref : p.t)).join(''));
+    const previews = [];
+    for (const p of media.slice(0, 3)) previews.push({ path: p, name: p.split('/').pop(), canvas: await previewOf(p, 180, 110) });
+    rows.push({ n, i, t: typeOf(n.type), said, plain, refs: [...refs], previews });
+  }
+  return rows;
+}
+// Brackets in the margin: each pair of rows that refer to one another gets a lane, the shortest nearest the text.
+function bracketLanes(rows, mid) {
+  const edges = [];
+  for (const r of rows) for (const to of r.refs) { const a = Math.min(r.i, to - 1), b = Math.max(r.i, to - 1); if (!edges.some((e) => e.a === a && e.b === b)) edges.push({ a, b }); }
+  edges.sort((p, q) => p.b - p.a - (q.b - q.a));
+  const lanes = [];
+  for (const e of edges) {
+    let k = 0;
+    while (lanes[k]?.some((o) => e.a <= o.b && o.a <= e.b)) k++;
+    (lanes[k] ||= []).push(e);
+    e.lane = k;
+  }
+  return edges.map((e) => ({ ...e, y1: mid(e.a), y2: mid(e.b) }));
+}
+async function exportNotes(mine, format = 'png') {
+  const doc = activeDoc();
+  const who = prompt('Name of the annotator, shown on the export:', store.get('annotator') || '');
+  if (who === null) return;
+  store.set('annotator', who.trim());
+  const d = docOf(doc), title = d ? titleOf(d) : doc;
+  const rows = await exportRows(mine);
+  const legend = [];
+  for (const r of rows) if (r.t && !legend.includes(r.t)) legend.push(r.t);
+  const byline = [who.trim() && 'Annotated by ' + who.trim(), new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' }),
+    `${rows.length} ${rows.length === 1 ? 'passage' : 'passages'}`].filter(Boolean).join('  ·  ');
+  const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50);
+  const fname = [slug(title) || 'notes', slug(who), 'annotations'].filter(Boolean).join('-');
+  const save = (blob, ext) => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = fname + '.' + ext;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  };
+  const clipQuote = (q) => { const t = q.replace(/\s+/g, ' ').trim(); return t.length > 420 ? t.slice(0, 420) + '…' : t; };
   const SERIF = 'Georgia, "Times New Roman", serif', SANS = 'system-ui, "Segoe UI", Arial, sans-serif';
+
+  if (format === 'html' || format === 'pdf') {
+    const esc = (s) => String(s).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+    const body = rows.map((r) => {
+      const said = r.said.map((s) => '<p>' + esc(s.lead) + s.parts.map((p) => (p.ref ? `<a class="to" href="#n${p.ref}" data-to="${p.ref}">→ ${p.ref}</a>` : p.href ? `<a href="${esc(p.href)}" target="_blank" rel="noopener">${esc(p.t)}</a>` : esc(p.t))).join('') + '</p>').join('');
+      const pv = r.previews.map((p) => `<figure>${p.canvas ? `<img alt="" src="${p.canvas.toDataURL('image/jpeg', .85)}">` : ''}<figcaption>${esc(p.name)}</figcaption></figure>`).join('');
+      return `<section class="row" id="n${r.i + 1}" data-n="${r.i + 1}"><b class="num">${r.i + 1}</b><div class="q">${r.n.headingText ? `<small>${esc(r.n.headingText)}</small>` : ''}${r.n.quote ? `<i style="background:${esc(r.t.color)}">${esc(clipQuote(r.n.quote))}</i>` : ''}</div><div class="said">${said}${pv ? `<div class="pv">${pv}</div>` : ''}</div></section>`;
+    }).join('\n');
+    const script = [
+      'function drawBrackets() {',
+      "  var svg = document.getElementById('brackets'), edges = [], lanes = [], out = '';",
+      "  document.querySelectorAll('.to').forEach(function (a) {",
+      "    var from = +a.closest('.row').dataset.n, to = +a.dataset.to;",
+      '    if (from === to) return;',
+      '    var lo = Math.min(from, to), hi = Math.max(from, to);',
+      '    if (!edges.some(function (e) { return e.lo === lo && e.hi === hi; })) edges.push({ lo: lo, hi: hi });',
+      '  });',
+      '  edges.sort(function (p, q) { return (p.hi - p.lo) - (q.hi - q.lo); });',
+      '  var w = svg.getBoundingClientRect().width;',
+      '  edges.forEach(function (e) {',
+      '    var k = 0;',
+      '    while (lanes[k] && lanes[k].some(function (o) { return e.lo <= o.hi && o.lo <= e.hi; })) k++;',
+      '    (lanes[k] = lanes[k] || []).push(e);',
+      "    var x = w - 14 - Math.min(k, 7) * 9, y1 = document.getElementById('n' + e.lo).offsetTop + 22, y2 = document.getElementById('n' + e.hi).offsetTop + 22;",
+      "    out += '<path d=\"M' + (w - 6) + ' ' + y1 + 'H' + x + 'V' + y2 + 'H' + (w - 6) + '\" fill=\"none\" stroke=\"#8c2f1b\" stroke-width=\"1.5\"/>';",
+      '  });',
+      '  svg.innerHTML = out;',
+      '}',
+      "window.addEventListener('load', drawBrackets);",
+      "window.addEventListener('resize', drawBrackets);",
+      "if (window.matchMedia) matchMedia('print').addEventListener('change', drawBrackets);",
+      "window.addEventListener('beforeprint', drawBrackets);",
+    ].join('\n');
+    const html = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(title)} — annotations</title>
+<style>
+body { margin: 0; background: #fffdf8; color: #1d1b17; font: 16px/1.5 ${SANS}; }
+header, main { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+h1 { margin: 40px 0 4px; font: 600 30px ${SERIF}; }
+.by { margin: 0 0 12px; color: #6b6558; font-size: 15px; }
+.legend span { display: inline-block; margin-right: 18px; font-size: 14px; }
+.legend i { display: inline-block; width: 22px; height: 16px; margin-right: 8px; vertical-align: -3px; border: 1px solid rgba(0,0,0,.25); }
+main { position: relative; padding-left: 96px; margin-top: 24px; }
+.row { display: grid; grid-template-columns: 28px 1fr 1fr; gap: 0 24px; padding: 14px 0; border-top: 1px solid #e6e0d2; }
+.num { color: #9a927f; font-size: 12px; padding-top: 4px; }
+.q small { display: block; color: #8a8272; font-size: 12px; margin-bottom: 4px; }
+.q i { font: italic 17px/1.55 ${SERIF}; padding: 1px 3px; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.said p { margin: 0 0 .7em; font-weight: 700; white-space: pre-wrap; }
+.said a { color: #8c2f1b; }
+.to { color: #8c2f1b; text-decoration: none; border-bottom: 1px solid currentColor; }
+.pv { display: flex; flex-wrap: wrap; gap: 8px; }
+.pv figure { margin: 0; } .pv img { display: block; max-width: 180px; max-height: 110px; border: 1px solid #cfc8b8; }
+.pv figcaption { font-size: 11px; color: #8a8272; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#brackets { position: absolute; left: 0; top: 0; width: 96px; height: 100%; pointer-events: none; overflow: visible; }
+@media print { @page { margin: 14mm; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } .row { break-inside: avoid; } }
+@media (max-width: 720px) { main { padding-left: 64px; } #brackets { width: 64px; } .row { grid-template-columns: 24px 1fr; } .said { grid-column: 2; } }
+</style></head><body>
+<header><h1>${esc(title)}</h1><p class="by">${esc(byline)}</p><div class="legend">${legend.map((t) => `<span><i style="background:${esc(t.color)}"></i>${esc(t.name)}</span>`).join('')}</div></header>
+<main id="rows"><svg id="brackets" aria-hidden="true"></svg>
+${body}
+</main>
+<script>
+${script}
+<\/script>
+</body></html>
+`;
+    if (format === 'html') return save(new Blob([html], { type: 'text/html' }), 'html');
+    // PDF: the same page, printed from a frame no one sees; the print dialog's "Save as PDF" makes the file, links kept.
+    const frame = document.createElement('iframe');
+    frame.setAttribute('aria-hidden', 'true');
+    frame.style.cssText = 'position:fixed;left:-9999px;top:0;width:1100px;height:800px;border:0';
+    frame.onload = () => {
+      setTimeout(() => { frame.contentWindow.focus(); frame.contentWindow.print(); setTimeout(() => frame.remove(), 60000); }, 300);
+    };
+    frame.srcdoc = html;
+    document.body.append(frame);
+    return;
+  }
+
+  const S = 2, W = 1400, M = 72, GAP = 40, LW = 640, RX = M + LW + GAP, RW = W - M - RX;
   const c = document.createElement('canvas'), g = c.getContext('2d');
   const wrap = (text, font, width) => {
     g.font = font;
@@ -6779,44 +7008,40 @@ function exportNotes(mine) {
     }
     return lines;
   };
-  const clipQuote = (q) => { const t = q.replace(/\s+/g, ' ').trim(); return t.length > 420 ? t.slice(0, 420) + '…' : t; };
-
-  const legend = [];
-  for (const n of tops) { const t = typeOf(n.type); if (t && !legend.includes(t)) legend.push(t); }
   // Measure first, then draw.
-  const FQ = `italic 17px ${SERIF}`, FN = `bold 16px ${SANS}`, LHQ = 26, LHN = 23;
-  const rows = tops.map((n, i) => {
-    const t = typeOf(n.type);
-    const said = [n, ...replies(n)].filter((x) => x.text).map((x, k) => (k ? '↳ ' : '') + x.text);
-    const qLines = n.quote ? wrap(clipQuote(n.quote), FQ, LW - 36) : [];
-    const nLines = said.flatMap((x, k) => [...wrap(x, FN, RW - 36), ...(k < said.length - 1 ? [''] : [])]);
-    const place = n.headingText ? wrap(n.headingText, `12px ${SANS}`, LW - 36)[0] : '';
-    const h = Math.max(qLines.length * LHQ + (place ? 22 : 0), nLines.length * LHN, 24) + 28;
-    return { n, i, t, qLines, nLines, place, h };
-  });
-  const head = 150 + (legend.length ? 0 : -30);
-  const H = head + rows.reduce((a, r) => a + r.h, 0) + 60;
+  const FQ = `italic 17px ${SERIF}`, FN = `bold 16px ${SANS}`, LHQ = 26, LHN = 23, PH = 110 + 18;
+  const top = 150 + (legend.length ? 0 : -30);
+  let at = top;
+  for (const r of rows) {
+    r.qLines = r.n.quote ? wrap(clipQuote(r.n.quote), FQ, LW - 36) : [];
+    r.nLines = r.plain.flatMap((x, k) => [...wrap(x, FN, RW - 36), ...(k < r.plain.length - 1 ? [''] : [])]);
+    r.place = r.n.headingText ? wrap(r.n.headingText, `12px ${SANS}`, LW - 36)[0] : '';
+    r.pv = r.previews.length ? PH + 8 : 0;
+    r.h = Math.max(r.qLines.length * LHQ + (r.place ? 22 : 0), r.nLines.length * LHN + r.pv, 24) + 28;
+    r.y = at;
+    at += r.h;
+  }
+  const H = at + 60;
   c.width = W * S; c.height = H * S;
   g.scale(S, S);
   g.fillStyle = '#fffdf8'; g.fillRect(0, 0, W, H);
   g.textBaseline = 'alphabetic';
   g.fillStyle = '#1d1b17'; g.font = `600 30px ${SERIF}`;
-  g.fillText(wrap(title, g.font, W - 2 * M)[0], M, M + 24);
+  g.fillText(wrap(title, g.font, W - 2 * M)[0], M, 72);
   g.fillStyle = '#6b6558'; g.font = `15px ${SANS}`;
-  g.fillText([who.trim() && 'Annotated by ' + who.trim(), new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' }),
-    `${tops.length} ${tops.length === 1 ? 'passage' : 'passages'}`].filter(Boolean).join('  ·  '), M, M + 52);
+  g.fillText(byline, M, 100);
   let x = M;
   g.font = `14px ${SANS}`;
   for (const t of legend) {
-    g.fillStyle = t.color; g.fillRect(x, M + 70, 22, 16);
-    g.strokeStyle = 'rgba(0,0,0,.25)'; g.strokeRect(x + .5, M + 70.5, 21, 15);
-    g.fillStyle = '#1d1b17'; g.fillText(t.name, x + 30, M + 83);
+    g.fillStyle = t.color; g.fillRect(x, 118, 22, 16);
+    g.strokeStyle = 'rgba(0,0,0,.25)'; g.strokeRect(x + .5, 118.5, 21, 15);
+    g.fillStyle = '#1d1b17'; g.fillText(t.name, x + 30, 131);
     x += 30 + g.measureText(t.name).width + 28;
   }
   g.strokeStyle = '#cfc8b8'; g.lineWidth = 1;
-  let y = head;
-  g.beginPath(); g.moveTo(M, y - 8.5); g.lineTo(W - M, y - 8.5); g.stroke();
+  g.beginPath(); g.moveTo(M, top - 8.5); g.lineTo(W - M, top - 8.5); g.stroke();
   for (const r of rows) {
+    const y = r.y;
     let ly = y + 14;
     g.fillStyle = '#9a927f'; g.font = `600 12px ${SANS}`;
     g.fillText(String(r.i + 1), M, ly + 14);
@@ -6830,19 +7055,30 @@ function exportNotes(mine) {
     if (r.nLines.length) g.fillText(String(r.i + 1), RX, y + 28);
     g.fillStyle = '#1d1b17'; g.font = FN;
     r.nLines.forEach((line, k) => g.fillText(line, RX + 28, y + 28 + k * LHN));
-    y += r.h;
-    g.strokeStyle = '#e6e0d2'; g.beginPath(); g.moveTo(M, y - .5); g.lineTo(W - M, y - .5); g.stroke();
+    // Previews of linked pictures and videos, under the note.
+    let px = RX + 28;
+    const py = y + 28 + Math.max(r.nLines.length, 1) * LHN - 8;
+    for (const p of r.previews) {
+      const w = p.canvas ? p.canvas.width : 120;
+      if (p.canvas) { g.drawImage(p.canvas, px, py, p.canvas.width, p.canvas.height); g.strokeStyle = '#cfc8b8'; g.strokeRect(px + .5, py + .5, p.canvas.width - 1, p.canvas.height - 1); }
+      else { g.fillStyle = '#efe9da'; g.fillRect(px, py, w, 60); g.fillStyle = '#6b6558'; g.font = `600 22px ${SANS}`; g.fillText('▶', px + 8, py + 36); }
+      g.fillStyle = '#8a8272'; g.font = `11px ${SANS}`;
+      let name = p.name;
+      while (name.length > 3 && g.measureText(name).width > Math.max(w, 120)) name = name.slice(0, -2);
+      g.fillText(name === p.name ? name : name + '…', px, py + (p.canvas ? p.canvas.height : 60) + 13);
+      px += Math.max(w, 120) + 8;
+    }
+    g.strokeStyle = '#e6e0d2'; g.beginPath(); g.moveTo(M, y + r.h - .5); g.lineTo(W - M, y + r.h - .5); g.stroke();
   }
-  const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50);
-  c.toBlob((blob) => {
-    if (!blob) return;
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = [slug(title) || 'notes', slug(who) , 'annotations'].filter(Boolean).join('-') + '.png';
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-  }, 'image/png');
+  // Brackets in the left margin: notes that refer to one another, joined at their numbers.
+  g.strokeStyle = '#8c2f1b'; g.lineWidth = 1.5;
+  for (const e of bracketLanes(rows, (i) => rows[i].y + 24)) {
+    const bx = M - 16 - Math.min(e.lane, 5) * 9;
+    g.beginPath(); g.moveTo(M - 8, e.y1); g.lineTo(bx, e.y1); g.lineTo(bx, e.y2); g.lineTo(M - 8, e.y2); g.stroke();
+  }
+  c.toBlob((blob) => { if (blob) save(blob, 'png'); }, 'image/png');
 }
+
 
 function renderNotes(rehighlight = true) {
   const doc = activeDoc(), mine = doc && gateOf(doc) ? [] : notes.filter((n) => n.doc === doc);
@@ -6855,9 +7091,11 @@ function renderNotes(rehighlight = true) {
   }
   notesEl.append(renderTypes(), el('h4', '', 'Highlights and notes on this document'));
   if (mine.length) {
-    const out = el('button', 'exportNotes', 'export as image');
-    out.title = 'Save the highlights and notes of this document as a picture, oldest first, with the colour legend on top';
-    out.onclick = () => exportNotes(mine);
+    const out = el('select', 'exportNotes');
+    out.title = 'Save the highlights and notes of this document, oldest first, with the colour legend on top';
+    out.setAttribute('aria-label', 'Export the highlights and notes');
+    for (const [v, t] of [['', 'export…'], ['png', 'as image (PNG)'], ['html', 'as web page (HTML)'], ['pdf', 'as PDF (print dialog)']]) out.append(new Option(t, v));
+    out.onchange = () => { const f = out.value; out.value = ''; if (f) exportNotes(mine, f); };
     notesEl.append(out);
   }
   if (!mine.length) notesEl.append(el('p', 'empty', 'None yet. Select text to highlight it, or type below.'));
@@ -6903,13 +7141,17 @@ function renderNotes(rehighlight = true) {
         attach.onclick = async () => { await noteOp({ kind: 'set', id: n.id, fields: { quote: pendingQuote, ...(await pendingPlace()) } }); pendingQuote = ''; dropPendingMg(); renderContext(); loadNotes(); };
         meta.append(attach);
       }
+      const edit = el('button', '', 'edit');
+      edit.title = n.quote ? 'Change what is written on this highlight' : 'Change this note';
+      edit.onclick = () => editNote(n.id);
+      if (n.id === editingNote) div.classList.add('replying');
       const answer = el('button', '', 'reply');
       answer.title = 'Write a reply to this, shown under it';
       answer.onclick = () => replyToNote(n.id);
       if (n.id === replyTo) div.classList.add('replying');
       const del = el('button', '', 'delete');
       del.onclick = async () => { if (del.textContent === 'delete') return (del.textContent = 'really delete?'); await noteOp({ kind: 'del', id: n.id }); loadNotes(); };
-      meta.append(answer, del);
+      meta.append(edit, answer, del);
       div.append(meta);
 
       if (n.reply) {
