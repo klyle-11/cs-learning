@@ -6741,6 +6741,109 @@ function flash(node) {
   setTimeout(() => node.classList.remove('flash'), 1200);
 }
 
+const byTime = (a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0);
+
+// "export as image": the highlights and notes of the open document as one PNG. The legend (the colours in use, in the
+// order they first appear) is on top; below, oldest first, each passage in italics on its colour at the left and what was
+// written about it in bold at the right. Not the whole document: the passages are the preview. Drawn straight onto a canvas,
+// so nothing is loaded and nothing leaves the device.
+function exportNotes(mine) {
+  const doc = activeDoc();
+  const who = prompt('Name of the annotator, shown on the image:', store.get('annotator') || '');
+  if (who === null) return;
+  store.set('annotator', who.trim());
+  const d = docOf(doc), title = d ? titleOf(d) : doc;
+  const ids = new Set(mine.map((n) => n.id));
+  const tops = mine.filter((n) => !n.replyTo || !ids.has(n.replyTo)).sort(byTime);
+  const replies = (top) => mine.filter((n) => n !== top && n.replyTo === top.id && n.text).sort(byTime);
+
+  const S = 2, W = 1400, M = 48, GAP = 40, LW = 640, RX = M + LW + GAP, RW = W - M - RX;
+  const SERIF = 'Georgia, "Times New Roman", serif', SANS = 'system-ui, "Segoe UI", Arial, sans-serif';
+  const c = document.createElement('canvas'), g = c.getContext('2d');
+  const wrap = (text, font, width) => {
+    g.font = font;
+    const lines = [];
+    for (const para of String(text).split('\n')) {
+      let line = '';
+      for (let word of para.split(/\s+/).filter(Boolean)) {
+        while (g.measureText(word).width > width) {   // a word wider than the column: break it
+          let k = word.length;
+          while (k > 1 && g.measureText(word.slice(0, k)).width > width) k--;
+          if (line) { lines.push(line); line = ''; }
+          lines.push(word.slice(0, k)); word = word.slice(k);
+        }
+        const t = line ? line + ' ' + word : word;
+        if (line && g.measureText(t).width > width) { lines.push(line); line = word; } else line = t;
+      }
+      lines.push(line);
+    }
+    return lines;
+  };
+  const clipQuote = (q) => { const t = q.replace(/\s+/g, ' ').trim(); return t.length > 420 ? t.slice(0, 420) + '…' : t; };
+
+  const legend = [];
+  for (const n of tops) { const t = typeOf(n.type); if (t && !legend.includes(t)) legend.push(t); }
+  // Measure first, then draw.
+  const FQ = `italic 17px ${SERIF}`, FN = `bold 16px ${SANS}`, LHQ = 26, LHN = 23;
+  const rows = tops.map((n, i) => {
+    const t = typeOf(n.type);
+    const said = [n, ...replies(n)].filter((x) => x.text).map((x, k) => (k ? '↳ ' : '') + x.text);
+    const qLines = n.quote ? wrap(clipQuote(n.quote), FQ, LW - 36) : [];
+    const nLines = said.flatMap((x, k) => [...wrap(x, FN, RW - 36), ...(k < said.length - 1 ? [''] : [])]);
+    const place = n.headingText ? wrap(n.headingText, `12px ${SANS}`, LW - 36)[0] : '';
+    const h = Math.max(qLines.length * LHQ + (place ? 22 : 0), nLines.length * LHN, 24) + 28;
+    return { n, i, t, qLines, nLines, place, h };
+  });
+  const head = 150 + (legend.length ? 0 : -30);
+  const H = head + rows.reduce((a, r) => a + r.h, 0) + 60;
+  c.width = W * S; c.height = H * S;
+  g.scale(S, S);
+  g.fillStyle = '#fffdf8'; g.fillRect(0, 0, W, H);
+  g.textBaseline = 'alphabetic';
+  g.fillStyle = '#1d1b17'; g.font = `600 30px ${SERIF}`;
+  g.fillText(wrap(title, g.font, W - 2 * M)[0], M, M + 24);
+  g.fillStyle = '#6b6558'; g.font = `15px ${SANS}`;
+  g.fillText([who.trim() && 'Annotated by ' + who.trim(), new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' }),
+    `${tops.length} ${tops.length === 1 ? 'passage' : 'passages'}`].filter(Boolean).join('  ·  '), M, M + 52);
+  let x = M;
+  g.font = `14px ${SANS}`;
+  for (const t of legend) {
+    g.fillStyle = t.color; g.fillRect(x, M + 70, 22, 16);
+    g.strokeStyle = 'rgba(0,0,0,.25)'; g.strokeRect(x + .5, M + 70.5, 21, 15);
+    g.fillStyle = '#1d1b17'; g.fillText(t.name, x + 30, M + 83);
+    x += 30 + g.measureText(t.name).width + 28;
+  }
+  g.strokeStyle = '#cfc8b8'; g.lineWidth = 1;
+  let y = head;
+  g.beginPath(); g.moveTo(M, y - 8.5); g.lineTo(W - M, y - 8.5); g.stroke();
+  for (const r of rows) {
+    let ly = y + 14;
+    g.fillStyle = '#9a927f'; g.font = `600 12px ${SANS}`;
+    g.fillText(String(r.i + 1), M, ly + 14);
+    if (r.place) { g.fillStyle = '#8a8272'; g.font = `12px ${SANS}`; g.fillText(r.place, M + 28, ly + 8); ly += 22; }
+    g.font = FQ;
+    for (const line of r.qLines) {
+      g.fillStyle = r.t.color; g.fillRect(M + 26, ly, g.measureText(line).width + 8, LHQ - 2);
+      g.fillStyle = '#1d1b17'; g.fillText(line, M + 30, ly + 19); ly += LHQ;
+    }
+    g.fillStyle = '#9a927f'; g.font = `600 12px ${SANS}`;
+    if (r.nLines.length) g.fillText(String(r.i + 1), RX, y + 28);
+    g.fillStyle = '#1d1b17'; g.font = FN;
+    r.nLines.forEach((line, k) => g.fillText(line, RX + 28, y + 28 + k * LHN));
+    y += r.h;
+    g.strokeStyle = '#e6e0d2'; g.beginPath(); g.moveTo(M, y - .5); g.lineTo(W - M, y - .5); g.stroke();
+  }
+  const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50);
+  c.toBlob((blob) => {
+    if (!blob) return;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = [slug(title) || 'notes', slug(who) , 'annotations'].filter(Boolean).join('-') + '.png';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  }, 'image/png');
+}
+
 function renderNotes(rehighlight = true) {
   const doc = activeDoc(), mine = doc && gateOf(doc) ? [] : notes.filter((n) => n.doc === doc);
   $('mNotes').textContent = 'Notes' + (mine.length ? ` (${mine.length})` : '');
@@ -6751,6 +6854,12 @@ function renderNotes(rehighlight = true) {
     notesEl.append(flip);
   }
   notesEl.append(renderTypes(), el('h4', '', 'Highlights and notes on this document'));
+  if (mine.length) {
+    const out = el('button', 'exportNotes', 'export as image');
+    out.title = 'Save the highlights and notes of this document as a picture, oldest first, with the colour legend on top';
+    out.onclick = () => exportNotes(mine);
+    notesEl.append(out);
+  }
   if (!mine.length) notesEl.append(el('p', 'empty', 'None yet. Select text to highlight it, or type below.'));
   // Replies are shown under the note they answer, in its thread, oldest first; a reply to a reply goes in the same
   // thread. A reply whose note was removed stands on its own, and says so.
@@ -6759,7 +6868,8 @@ function renderNotes(rehighlight = true) {
   const threads = new Map();
   for (const n of mine) { const r = rootOf(n); if (r !== n) { if (!threads.has(r.id)) threads.set(r.id, []); threads.get(r.id).push(n); } }
   for (const list of threads.values()) list.sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
-  for (const top of mine) {
+  // Newest first here; the exported image (exportNotes) runs oldest to newest.
+  for (const top of [...mine].sort(byTime).reverse()) {
     if (rootOf(top) !== top) continue;
     for (const n of [top, ...(threads.get(top.id) || [])]) {
       const div = el('div', 'note' + (n === top ? '' : ' replyNote'));
